@@ -1,0 +1,31 @@
+﻿# User-specific files (backend)
+backend/*.suo
+backend/*.user
+backend/*.userosscache
+backend/*.sln.docstates
+# Build results
+backend/[Dd]ebug/
+backend/[Rr]elease/
+backend/x64/
+backend/x86/
+backend/build/
+backend/bin/
+backend/obj/
+# VS folders
+backend/.vs/
+backend/.vscode/
+# Logs
+backend/*.log
+
+# Node (frontend)
+frontend/.env.local
+frontend/.env
+frontend/.env.development.local
+frontend/.env.production.local
+frontend/node_modules
+frontend/dist
+frontend/build
+
+# General
+.DS_Store
+.env
