@@ -1,15 +1,16 @@
 ﻿
+using Dapper;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Generic;
 using System.Data;
 using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
 using System.Security.Claims;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Dapper;
-using Microsoft.AspNetCore.Identity;
-using Microsoft.Extensions.Options;
 
 namespace EXPOAPI.Services
 {
@@ -174,23 +175,49 @@ namespace EXPOAPI.Services
             return row == null ? null : ToDict(row);
         }
 
+        private static DynamicParameters BuildDp(string action, Dictionary<string, object?> parameters)
+        {
+            var dp = new DynamicParameters();
+            dp.Add("@Action", (action ?? "").ToUpperInvariant());
+
+            foreach (var kv in parameters)
+                dp.Add("@" + kv.Key, UnwrapJson(kv.Value));
+
+            return dp;
+        }
         // =========================================================
         // Core: Execute IUD (scan multiple result sets; return first row found)
         // =========================================================
         private async Task<Dictionary<string, object?>> ExecuteUserIudAsync(
-            string action,
-            Dictionary<string, object?> parameters,
-            CancellationToken ct)
+    string action,
+    Dictionary<string, object?> parameters,
+    CancellationToken ct)
         {
             using var cn = _db.CreateMain();
+            var act = (action ?? "").ToUpperInvariant();
+            var dp = BuildDp(act, parameters);
 
-            var dp = new DynamicParameters();
-            dp.Add("Action", (action ?? "").ToUpperInvariant());
+            // INSERT: SP kamu melakukan SELECT SCOPE_IDENTITY() AS NewID_User;
+            if (act == "INSERT")
+            {
+                var row = await cn.QueryFirstOrDefaultAsync<dynamic>(
+                    new CommandDefinition(
+                        SP_USER_IUD,
+                        dp,
+                        commandType: CommandType.StoredProcedure,
+                        cancellationToken: ct
+                    )
+                );
 
-            foreach (var kv in parameters)
-                dp.Add(kv.Key, kv.Value);
+                // kalau row null, tetap return status
+                if (row is null)
+                    return new Dictionary<string, object?> { ["success"] = false, ["message"] = "No result returned from INSERT." };
 
-            using var grid = await cn.QueryMultipleAsync(
+                return ToDict(row);
+            }
+
+            // UPDATE / DELETE: SP tidak SELECT, jadi pakai ExecuteAsync untuk dapat rowcount
+            var affected = await cn.ExecuteAsync(
                 new CommandDefinition(
                     SP_USER_IUD,
                     dp,
@@ -199,14 +226,41 @@ namespace EXPOAPI.Services
                 )
             );
 
-            while (!grid.IsConsumed)
+            return new Dictionary<string, object?>
             {
-                var rows = (await grid.ReadAsync<dynamic>()).ToList();
-                if (rows.Count > 0)
-                    return ToDict(rows[0]);
+                ["success"] = affected > 0,
+                ["action"] = act,
+                ["affectedRows"] = affected,
+                ["ID_User"] = parameters.TryGetValue("ID_User", out var id) ? UnwrapJson(id) : null
+            };
+        }
+
+
+
+
+        private static object? UnwrapJson(object? value)
+        {
+            if (value is null) return null;
+
+            if (value is JsonElement je)
+            {
+                return je.ValueKind switch
+                {
+                    JsonValueKind.String => je.GetString(),
+                    JsonValueKind.Number => je.TryGetInt64(out var l) ? l
+                                         : je.TryGetDecimal(out var d) ? d
+                                         : je.GetDouble(),
+                    JsonValueKind.True => true,
+                    JsonValueKind.False => false,
+                    JsonValueKind.Null => null,
+                    JsonValueKind.Undefined => null,
+                    // Object/Array tidak bisa langsung jadi parameter SQL: pakai raw json
+                    JsonValueKind.Object or JsonValueKind.Array => je.GetRawText(),
+                    _ => je.ToString()
+                };
             }
 
-            return new Dictionary<string, object?>();
+            return value;
         }
 
         // =========================================================

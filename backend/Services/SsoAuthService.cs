@@ -126,7 +126,13 @@ namespace EXPOAPI.Services
 
         private static SSOServiceSoapClient CreateClient()
         {
-            return new SSOServiceSoapClient(SSOServiceSoapClient.EndpointConfiguration.SSOServiceSoap);
+            //return new SSOServiceSoapClient(SSOServiceSoapClient.EndpointConfiguration.SSOServiceSoap);
+            var binding = new System.ServiceModel.BasicHttpBinding(System.ServiceModel.BasicHttpSecurityMode.Transport);
+            var address = new System.ServiceModel.EndpointAddress(
+                "https://app-saptaindra.msappproxy.net/SSO_TEST/SSOService.asmx"
+            );
+
+            return new SSOServiceSoapClient(binding, address);
         }
 
         /// <summary>
