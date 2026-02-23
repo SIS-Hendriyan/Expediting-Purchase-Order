@@ -39,7 +39,7 @@ namespace EXPOAPI.Controllers
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> Summary([FromQuery] string? status, CancellationToken ct)
+        public async Task<IActionResult> Summary([FromQuery] string? status,int? Attraction, CancellationToken ct)
         {
             var spParams = new Dictionary<string, object?>();
 
@@ -55,6 +55,16 @@ namespace EXPOAPI.Controllers
                 }
 
                 spParams["Status"] = mapped;
+            }
+
+            if (Attraction.HasValue)
+            {
+                if (Attraction.Value != 1 && Attraction.Value != 2)
+                {
+                    return BadRequestResponse("invalid attention value. Allowed values: 1 (Need Update), 2 (Overdue)");
+                }
+
+                spParams["Attention"] = Attraction.Value; // ✅ matches SP param name
             }
 
             try

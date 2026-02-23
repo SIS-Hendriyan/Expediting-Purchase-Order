@@ -18,16 +18,51 @@ namespace EXPOAPI.Services
         private const string SP_PO_MONTHLY_COMPLETION_DELAY = "[exp].[PURCHASE_ORDER_MONTHLY_COMPLETION_DELAY_SP]";
         private const string SP_PO_MASTERFILTER = "[exp].[PO_DASHBOARD_MASTERFILTER_SP]";
 
+        // Tambahkan keys baru
         private static readonly string[] SummaryKeys =
         {
-        "TotalPO",
-        "POSubmitted",
-        "POWorkInProgress",
-        "POOnDelivery",
-        "POPartiallyReceived",
-        "POFullyReceived",
-        "TotalFiltered"
-    };
+    "TotalPO",
+    "POSubmitted",
+    "POWorkInProgress",
+    "POOnDelivery",
+    "POPartiallyReceived",
+    "POFullyReceived",
+
+    // ✅ NEW overall
+    "PONeedUpdate",
+    "POOverdue",
+
+    // existing output
+    "TotalFiltered",
+    "PageSize",
+    "FilterStatus",
+
+    // ✅ NEW filtered
+    "PONeedUpdateFiltered",
+    "POOverdueFiltered"
+};
+
+        private static Dictionary<string, object?> DefaultSummary() => new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["TotalPO"] = 0,
+            ["POSubmitted"] = 0,
+            ["POWorkInProgress"] = 0,
+            ["POOnDelivery"] = 0,
+            ["POPartiallyReceived"] = 0,
+            ["POFullyReceived"] = 0,
+
+            // ✅ NEW overall
+            ["PONeedUpdate"] = 0,
+            ["POOverdue"] = 0,
+
+            ["TotalFiltered"] = 0,
+            ["PageSize"] = 0,
+            ["FilterStatus"] = null,
+
+            // ✅ NEW filtered
+            ["PONeedUpdateFiltered"] = 0,
+            ["POOverdueFiltered"] = 0
+        };
 
         public PurchaseOrderService(IDbConnectionFactory db)
         {
@@ -38,13 +73,12 @@ namespace EXPOAPI.Services
         // exp.Purchase_Order_SP -> multi result sets: summary + items
         // ------------------------------------------------------------
         public async Task<Dictionary<string, object?>> GetPurchaseOrderSummaryAsync(
-            Dictionary<string, object?>? parameters = null,
-            CancellationToken ct = default)
+     Dictionary<string, object?>? parameters = null,
+     CancellationToken ct = default)
         {
             parameters ??= new Dictionary<string, object?>();
 
             using var cn = _db.CreateMain();
-
             var dp = ToDynamicParamsRemovingNull(parameters);
 
             using var grid = await cn.QueryMultipleAsync(new CommandDefinition(
@@ -57,25 +91,30 @@ namespace EXPOAPI.Services
             var summary = DefaultSummary();
             var items = new List<Dictionary<string, object?>>();
 
-            // Scan all result sets like Python
             while (!grid.IsConsumed)
             {
                 var rows = (await grid.ReadAsync<dynamic>()).ToList();
                 if (rows.Count == 0) continue;
 
-                // detect summary by column "TotalPO" (case-insensitive)
                 var firstDict = ToDict(rows[0]);
+
+                // Resultset summary dikenali dari "TotalPO"
                 if (HasKey(firstDict, "TotalPO"))
                 {
-                    // build base summary with canonical keys; keep extras
                     var merged = DefaultSummary();
 
                     foreach (var k in SummaryKeys)
                     {
-                        merged[k] = TryGetValueCaseInsensitive(firstDict, k) ?? 0;
+                        var v = TryGetValueCaseInsensitive(firstDict, k);
+
+                        // untuk key numeric, default 0 kalau null / gagal convert
+                        if (!k.Equals("FilterStatus", StringComparison.OrdinalIgnoreCase))
+                            merged[k] = ToLongOrZero(v);
+                        else
+                            merged[k] = v; // status bisa string/null
                     }
 
-                    // extras: columns not in SummaryKeys
+                    // extras: kolom lain dari SP yang belum masuk SummaryKeys
                     foreach (var kv in firstDict)
                     {
                         if (!SummaryKeys.Any(x => x.Equals(kv.Key, StringComparison.OrdinalIgnoreCase)))
@@ -86,7 +125,7 @@ namespace EXPOAPI.Services
                 }
                 else
                 {
-                    // items set
+                    // items set (sekarang sudah ada col "attention" dari SP)
                     items.AddRange(rows.Select(ToDict));
                 }
             }
@@ -96,6 +135,32 @@ namespace EXPOAPI.Services
                 ["summary"] = summary,
                 ["items"] = items
             };
+        }
+
+        // Helper: convert numeric values safely
+        private static long ToLongOrZero(object? v)
+        {
+            if (v is null) return 0;
+
+            try
+            {
+                return v switch
+                {
+                    long l => l,
+                    int i => i,
+                    short s => s,
+                    byte b => b,
+                    decimal d => (long)d,
+                    double db => (long)db,
+                    float f => (long)f,
+                    string str when long.TryParse(str, out var n) => n,
+                    _ => Convert.ToInt64(v)
+                };
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         // ------------------------------------------------------------
@@ -375,12 +440,12 @@ namespace EXPOAPI.Services
         // =========================
         // Helpers
         // =========================
-        private static Dictionary<string, object?> DefaultSummary()
-        {
-            var d = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            foreach (var k in SummaryKeys) d[k] = 0;
-            return d;
-        }
+        //private static Dictionary<string, object?> DefaultSummary()
+        //{
+        //    var d = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        //    foreach (var k in SummaryKeys) d[k] = 0;
+        //    return d;
+        //}
 
         private static bool HasKey(Dictionary<string, object?> dict, string key)
             => dict.Keys.Any(k => k.Equals(key, StringComparison.OrdinalIgnoreCase));

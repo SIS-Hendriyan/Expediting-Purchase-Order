@@ -57,7 +57,6 @@ export default function Login({ onLogin }: LoginProps) {
     const timeout = setTimeout(() => controller.abort(), 15_000);
 
     try {
-      console.log(API.LOGIN())
       const res = await fetch(API.LOGIN(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -75,7 +74,6 @@ export default function Login({ onLogin }: LoginProps) {
       if (!json || typeof json !== 'object') {
         throw new Error('Invalid server response');
       }
-      console.log(json);
       // --- Success Handling ---
       if (json.ResponseCode === 200) {
         // Vendor step-1 marker
@@ -93,7 +91,6 @@ export default function Login({ onLogin }: LoginProps) {
         if (json.Data && json.Data.internal && json.Data.token) {
           const internal = json.Data.internal;
           const token = json.Data.token;
-          console.log(token);
           // persist session
           saveAuthSession({
             kind: 'INTERNAL',
