@@ -1,4 +1,9 @@
-﻿using System;
+﻿using ClosedXML.Excel; // IDbConnectionFactory
+using Dapper;
+using EXPOAPI.Services;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Data.SqlClient;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Globalization;
@@ -6,11 +11,6 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Dapper;
-using Microsoft.AspNetCore.Http;
-
-using EXPOAPI.Services;
-using ClosedXML.Excel; // IDbConnectionFactory
 
 namespace EXPOAPI.Services;
 
@@ -211,6 +211,9 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
             // dropna(how="all") like pandas
             if (allNull) continue;
 
+            for (int i = 0; i < values.Length; i++)
+                values[i] ??= DBNull.Value;
+
             dt.Rows.Add(values);
         }
 
@@ -221,11 +224,17 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
     {
         var dt = new DataTable();
 
-        // Column names MUST match SQL UDT column names.
-        // Here we assume UDT column names are exactly like Excel headers (same as Python).
+        var dateCols = new HashSet<string>(spec.DateColumns, StringComparer.OrdinalIgnoreCase);
+        var numCols = new HashSet<string>(spec.NumericColumns, StringComparer.OrdinalIgnoreCase);
+
         foreach (var col in spec.Columns)
         {
-            dt.Columns.Add(col, typeof(object));
+            Type t =
+                dateCols.Contains(col) ? typeof(DateTime) :
+                numCols.Contains(col) ? typeof(decimal) :
+                                         typeof(string);
+
+            dt.Columns.Add(col, t);
         }
 
         return dt;
@@ -233,16 +242,17 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
 
     private static object? GetCellRawValue(IXLCell cell)
     {
-        if (cell == null) return null;
-        if (cell.IsEmpty()) return null;
+        if (cell == null || cell.IsEmpty()) return null;
 
-        // ClosedXML already knows types
-        return cell.Value switch
+        return cell.DataType switch
         {
-            _ => cell.Value
+            XLDataType.DateTime => cell.GetDateTime(),
+            XLDataType.Number => cell.GetDouble(),
+            XLDataType.Boolean => cell.GetBoolean(),
+            XLDataType.Text => cell.GetString(),
+            _ => cell.GetString()
         };
     }
-
     // =========================
     // Clean value (mirror Python _clean_value)
     // =========================
@@ -330,23 +340,52 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
     // =========================
     private async Task ExecuteImportAsync(DataTable me2n, DataTable me5a, DataTable zmm, CancellationToken ct)
     {
-        using var cn = _db.CreateMain();
+        try
+        {
+            using var cn = _db.CreateMain();
 
-        var p = new DynamicParameters();
+            var p = new DynamicParameters();
+            p.Add("@ME2N", me2n.AsTableValuedParameter(UDT_ME2N));
+            p.Add("@ME5A", me5a.AsTableValuedParameter(UDT_ME5A));
+            p.Add("@ZMM013R", zmm.AsTableValuedParameter(UDT_ZMM));
 
-        // Dapper TVP:
-        // NOTE: requires Microsoft.Data.SqlClient
-        p.Add("@ME2N", me2n.AsTableValuedParameter(UDT_ME2N));
-        p.Add("@ME5A", me5a.AsTableValuedParameter(UDT_ME5A));
-        p.Add("@ZMM013R", zmm.AsTableValuedParameter(UDT_ZMM));
-
-        await cn.ExecuteAsync(
-            new CommandDefinition(
+            await cn.ExecuteAsync(new CommandDefinition(
                 SP_PURCHASE_ORDER_TRANSACTION_LOAD,
                 p,
                 commandType: CommandType.StoredProcedure,
                 cancellationToken: ct
-            )
-        );
+            ));
+        }
+        catch (SqlException ex)
+        {
+            var inputInfo =
+                $"ME2N rows={me2n?.Rows.Count ?? 0}, cols={me2n?.Columns.Count ?? 0}; " +
+                $"ME5A rows={me5a?.Rows.Count ?? 0}, cols={me5a?.Columns.Count ?? 0}; " +
+                $"ZMM rows={zmm?.Rows.Count ?? 0}, cols={zmm?.Columns.Count ?? 0}";
+
+            throw new Exception(
+                $"Import failed (SQL). SP={SP_PURCHASE_ORDER_TRANSACTION_LOAD}. " +
+                $"UDTs=[{UDT_ME2N},{UDT_ME5A},{UDT_ZMM}]. {inputInfo}. " +
+                $"SQL#{ex.Number} State={ex.State} Proc={ex.Procedure} Line={ex.LineNumber}. " +
+                $"Message={ex.Message}",
+                ex
+            );
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            var inputInfo =
+                $"ME2N rows={me2n?.Rows.Count ?? 0}, cols={me2n?.Columns.Count ?? 0}; " +
+                $"ME5A rows={me5a?.Rows.Count ?? 0}, cols={me5a?.Columns.Count ?? 0}; " +
+                $"ZMM rows={zmm?.Rows.Count ?? 0}, cols={zmm?.Columns.Count ?? 0}";
+
+            throw new Exception(
+                $"Import failed. SP={SP_PURCHASE_ORDER_TRANSACTION_LOAD}. {inputInfo}. Message={ex.Message}",
+                ex
+            );
+        }
     }
 }

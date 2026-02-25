@@ -17,6 +17,7 @@ export const API = {
     DETAILVENDOR: (id: number | string) => `${CONFIG.apiBaseUrl}/api/vendor/${id}`, // GET
     ACCESSVENDOR: (id: number | string) => `${CONFIG.apiBaseUrl}/api/vendor/${id}/access`, // POST
     IMPORT_PO: () => `${CONFIG.apiBaseUrl}/api/purchase-order/import`,
+    DETAILPO: (poid: number | string) => `${CONFIG.apiBaseUrl}/api/purchase-order/${poid}/detail`,
 
     // SSO helper - backend should expose an endpoint that calls the SOAP SSO service
     SSO_GETUSER: (nrp: string) => `${CONFIG.apiBaseUrl}/api/sso/get-user?nrp=${encodeURIComponent(nrp)}`,

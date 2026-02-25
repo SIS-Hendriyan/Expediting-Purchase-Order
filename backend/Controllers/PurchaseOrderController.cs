@@ -78,6 +78,31 @@ namespace EXPOAPI.Controllers
             }
         }
 
+        // GET /api/purchase-order/{poid}/detail
+        [HttpGet("{poid}/detail")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> Detail([FromRoute] string poid, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(poid))
+                return BadRequestResponse("POID is required");
+
+            try
+            {
+                var (statusFlow, reEtaRequests) = await _po.GetPurchaseOrderDetailAsync(poid, ct);
+                return OkResponse("purchase order detail retrieved", new
+                {
+                    StatusFlow = statusFlow,
+                    ReEtaRequests = reEtaRequests
+                });
+            }
+            catch (Exception ex)
+            {
+                return ServerErrorResponse($"failed to fetch purchase order detail: {ex.Message}");
+            }
+        }
+
         // POST /api/purchase-order/import
         [HttpPost("import")]
         [Consumes("multipart/form-data")]

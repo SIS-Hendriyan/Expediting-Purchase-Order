@@ -50,7 +50,13 @@ type AttentionFilter = 'updates' | 'overdue' | null;
 type AttentionRaw = number | 'Need Update' | 'Overdue' | null | undefined;
 type AttentionNorm = 0 | 1 | 2;
 
+// ✅ NEW: key type for detail
+type OrderKey = string | number;
+
 export interface PurchaseOrderItem {
+  // ✅ NEW: from /purchaseorder/summary
+  id?: OrderKey | null;
+
   purchaseRequisition: string;
   itemOfRequisition: string;
   purchasingDocument: string;
@@ -72,7 +78,7 @@ export interface PurchaseOrderItem {
   remarks: string | null;
   reEtaDate: string | null;  // dd-MMM-yyyy from SP
   status: string;            // backend raw
-  attention?: AttentionRaw;
+  attention?: AttentionRaw;  // backend: 1/2 or "Need Update"/"Overdue"
 }
 
 interface PurchaseOrderSummary {
@@ -83,6 +89,7 @@ interface PurchaseOrderSummary {
   POPartiallyReceived: number;
   POFullyReceived: number;
 
+  // optional counts from backend
   PONeedUpdate?: number;
   POOverdue?: number;
   PONeedUpdateFiltered?: number;
@@ -134,8 +141,18 @@ const ATTENTION_UI_TO_BACKEND: Record<Exclude<AttentionFilter, null>, 1 | 2> = {
 };
 
 const ALLOWED_EXCEL_EXTENSIONS = ['.xlsx', '.xls'];
-
 const toArray = (v: any): any[] => (Array.isArray(v) ? v : v ? [v] : []);
+
+// ✅ normalize item.id (karena kadang backend kirim ID / Id)
+const normalizeItemId = (it: any): OrderKey | null => {
+  const v = it?.id ?? it?.ID ?? it?.Id ?? null;
+  if (v === null || v === undefined || v === '') return null;
+  return v as OrderKey;
+};
+
+// ✅ key for detail: prefer id, fallback purchasingDocument
+const getOrderKey = (o: PurchaseOrderItem): OrderKey =>
+  (o.id !== null && o.id !== undefined && o.id !== '' ? o.id : o.purchasingDocument);
 
 function unwrapPOPayload(json: AnyObj): { summary: PurchaseOrderSummary | null; items: PurchaseOrderItem[] } {
   const lvl1 = (json?.data ?? json?.Data ?? json?.payload ?? json?.result ?? json) as AnyObj;
@@ -148,7 +165,11 @@ function unwrapPOPayload(json: AnyObj): { summary: PurchaseOrderSummary | null; 
     lvl2?.list ?? lvl2?.List ?? [];
 
   const items = (Array.isArray(itemsRaw) ? itemsRaw : toArray(itemsRaw)) as PurchaseOrderItem[];
-  return { summary, items };
+
+  // ✅ ensure id normalized
+  const normalizedItems = items.map((x: any) => ({ ...x, id: normalizeItemId(x) })) as PurchaseOrderItem[];
+
+  return { summary, items: normalizedItems };
 }
 
 const eqCI = (a?: string | null, b?: string | null) =>
@@ -339,9 +360,9 @@ const isExcelFile = (file: File): boolean => {
 // ================== Component ==================
 export function PurchaseOrder({ user }: PurchaseOrderProps) {
   // View state
-  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [selectedOrderId, setSelectedOrderId] = useState<OrderKey | null>(null);
 
-  // Tabs + special attention filter
+  // Tabs + special attention filter (affects LIST only)
   const [activeTab, setActiveTab] = useState<StatusTab>('all');
   const [specialFilter, setSpecialFilter] = useState<AttentionFilter>(null);
 
@@ -351,16 +372,19 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
 
-  const [filterStatus, setFilterStatus] = useState(''); // display text
+  const [filterStatus, setFilterStatus] = useState('');
   const [filterStorage, setFilterStorage] = useState('');
   const [filterPlant, setFilterPlant] = useState('');
   const [filterGroup, setFilterGroup] = useState('');
   const [filterSupplier, setFilterSupplier] = useState('');
   const [filterDocType, setFilterDocType] = useState('');
 
-  // Data
+  // Data (LIST)
   const [orders, setOrders] = useState<PurchaseOrderItem[]>([]);
   const [summary, setSummary] = useState<PurchaseOrderSummary | null>(null);
+
+  // ✅ Data (CARDS / GLOBAL COUNTS) - NEVER affected by specialFilter
+  const [cardSummary, setCardSummary] = useState<PurchaseOrderSummary | null>(null);
 
   // Network
   const [loading, setLoading] = useState(false);
@@ -391,25 +415,48 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     if (isInternalSession(s)) console.debug('[PO] INTERNAL session:', s.role, s.id);
   }, []);
 
-  // ----- URL builder (single source of truth) -----
-  const buildSummaryUrl = useCallback((tab: StatusTab, attention: 1 | 2 | null) => {
+  // ----- URL builders -----
+  const buildListUrl = useCallback((tab: StatusTab, attention: 1 | 2 | null) => {
     const url = new URL(API.SUMMARYPO());
-
     const statusParam =
       tab === 'all' ? null : STATUS_TAB_TO_PARAM[tab as Exclude<StatusTab, 'all'>];
 
     if (statusParam) url.searchParams.set('status', statusParam);
 
     if (attention === 1 || attention === 2) {
-      // compatibility: backend might expect attention OR attraction
       url.searchParams.set('attention', String(attention));
       url.searchParams.set('attraction', String(attention));
     }
 
-    return { url, statusParam };
+    return url;
   }, []);
 
-  // ----- Fetch orders -----
+  // ✅ Cards ALWAYS use global endpoint (no status, no attention)
+  const buildCardsUrl = useCallback(() => new URL(API.SUMMARYPO()), []);
+
+  // ----- Fetch: CARDS (GLOBAL COUNTS) -----
+  const fetchCardSummary = useCallback(async () => {
+    try {
+      const url = buildCardsUrl();
+      const res = await fetch(url.toString(), {
+        method: 'GET',
+        headers: buildAuthHeaders(),
+      });
+
+      if (!res.ok) {
+        console.error('[PO] cardSummary HTTP error', res.status);
+        return;
+      }
+
+      const json = await res.json();
+      const unwrapped = unwrapPOPayload(json);
+      setCardSummary(unwrapped.summary ?? null);
+    } catch (e) {
+      console.error('[PO] cardSummary fetch failed', e);
+    }
+  }, [buildCardsUrl]);
+
+  // ----- Fetch: LIST (TAB + specialFilter) -----
   const fetchPurchaseOrders = useCallback(async (tab: StatusTab, attention: 1 | 2 | null) => {
     setLoading(true);
     setLoadError(null);
@@ -417,12 +464,11 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 60_000);
 
-    const { url, statusParam } = buildSummaryUrl(tab, attention);
+    const url = buildListUrl(tab, attention);
 
-    console.debug('[PO] request:', {
+    console.debug('[PO] list request:', {
       url: url.toString(),
       tab,
-      statusParam,
       attention,
       headers: { hasAuth: !!getAuthToken() },
     });
@@ -451,13 +497,8 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       setSummary(unwrapped.summary ?? null);
       setOrders(Array.isArray(unwrapped.items) ? unwrapped.items : []);
       setCurrentPage(1);
-
-      console.debug('[PO] loaded:', {
-        rows: Array.isArray(unwrapped.items) ? unwrapped.items.length : 0,
-        hasSummary: !!unwrapped.summary,
-      });
     } catch (err: any) {
-      console.error('[PO] fetch failed:', err);
+      console.error('[PO] list fetch failed:', err);
       const isAbort = err?.name === 'AbortError';
       setLoadError(isAbort ? 'Request timeout. Please try again.' : 'Failed to load purchase orders');
       setSummary(null);
@@ -467,12 +508,18 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       clearTimeout(timeout);
       setLoading(false);
     }
-  }, [buildSummaryUrl]);
+  }, [buildListUrl]);
 
-  // Fetch on tab change (attention handled by cards)
+  // ✅ Fetch card summary once on mount (and you can also re-run after upload)
+  useEffect(() => { fetchCardSummary(); }, [fetchCardSummary]);
+
+  // ✅ Fetch list on tab OR specialFilter change
   useEffect(() => {
-    fetchPurchaseOrders(activeTab, null);
-  }, [activeTab, fetchPurchaseOrders]);
+    const att: 1 | 2 | null =
+      specialFilter ? ATTENTION_UI_TO_BACKEND[specialFilter] : null;
+
+    fetchPurchaseOrders(activeTab, att);
+  }, [activeTab, specialFilter, fetchPurchaseOrders]);
 
   // ----- Scoped for vendor -----
   const scopedOrders = useMemo(() => {
@@ -495,7 +542,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     };
   }, [scopedOrders]);
 
-  // ----- Search + Filters -----
+  // ----- Search + Filters (client-side) -----
   const filteredOrders = useMemo(() => {
     let list = scopedOrders;
 
@@ -536,18 +583,18 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     filterGroup, filterSupplier, filterDocType
   ]);
 
-  // ----- Counts (prefer summary) -----
+  // ✅ Card counts ALWAYS from cardSummary (global). This fixes "Overdue becomes 0" problem.
   const needUpdateCount = useMemo(() => {
-    const s = summary?.PONeedUpdateFiltered ?? summary?.PONeedUpdate;
-    if (typeof s === 'number') return s;
-    return filteredOrders.filter(o => normalizeAttention(o.attention) === 1).length;
-  }, [summary, filteredOrders]);
+    const v = cardSummary?.PONeedUpdate;
+    if (typeof v === 'number') return v;
+    return orders.filter(o => normalizeAttention(o.attention) === 1).length;
+  }, [cardSummary, orders]);
 
   const overdueCount = useMemo(() => {
-    const s = summary?.POOverdueFiltered ?? summary?.POOverdue;
-    if (typeof s === 'number') return s;
-    return filteredOrders.filter(o => normalizeAttention(o.attention) === 2).length;
-  }, [summary, filteredOrders]);
+    const v = cardSummary?.POOverdue;
+    if (typeof v === 'number') return v;
+    return orders.filter(o => normalizeAttention(o.attention) === 2).length;
+  }, [cardSummary, orders]);
 
   // ----- Pagination -----
   const { pageOrders, totalOrders, totalPages, startIndex, endIndex } = useMemo(() => {
@@ -629,6 +676,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     setCurrentPage(1);
   }, []);
 
+  // ========== Upload handlers ==========
   const processFile = useCallback((file: File | null, input?: HTMLInputElement | null) => {
     if (!file) {
       setUploadFile(null);
@@ -698,7 +746,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       await res.json();
       toast.success('Purchase order data imported successfully');
 
-      fetchPurchaseOrders(activeTab, null);
+      // refresh cards + list
+      await fetchCardSummary();
+      const att: 1 | 2 | null = specialFilter ? ATTENTION_UI_TO_BACKEND[specialFilter] : null;
+      await fetchPurchaseOrders(activeTab, att);
 
       setIsUploadDialogOpen(false);
       setUploadFile(null);
@@ -708,7 +759,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     } finally {
       setUploading(false);
     }
-  }, [uploadFile, fetchPurchaseOrders, activeTab]);
+  }, [uploadFile, fetchPurchaseOrders, fetchCardSummary, activeTab, specialFilter]);
 
   const handleDownloadTemplate = useCallback(() => {
     try {
@@ -856,13 +907,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
           <TableBody>
             {pageOrders.map((o, idx) => {
               const display = mapBackendStatusToDisplay(o.status);
+              const key = getOrderKey(o);
 
               return (
-                <TableRow key={`${o.purchasingDocument}-${idx}`}>
+                <TableRow key={`${key}-${idx}`}>
                   {columns.filter(c => c.visible).map(c => (
-                    <TableCell key={c.key}>
-                      {c.render(o)}
-                    </TableCell>
+                    <TableCell key={c.key}>{c.render(o)}</TableCell>
                   ))}
 
                   <TableCell className="sticky right-[100px] bg-white shadow-[-2px_0_4px_rgba(0,0,0,0.05)] z-10">
@@ -875,7 +925,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setSelectedOrderId(o.purchasingDocument)}
+                      onClick={() => {
+                        console.debug('[PO] view detail click', { id: o.id, purchasingDocument: o.purchasingDocument, key });
+                        setSelectedOrderId(key); // ✅ use id
+                      }}
                       style={{ borderColor: '#014357', color: '#014357' }}
                       className="hover:bg-gray-50 min-w-[80px]"
                     >
@@ -890,7 +943,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         </Table>
       </div>
 
-      {/* Pagination */}
       {totalOrders > 0 && (
         <div className="flex items-center justify-between px-4 py-4 border-t gap-4">
           <div className="flex items-center gap-2">
@@ -950,15 +1002,25 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         </div>
       )}
     </Card>
-  ), [columns, pageOrders, totalOrders, totalPages, currentPage, startIndex, endIndex, itemsPerPage, handleItemsPerPageChange]);
+  ), [
+    columns,
+    pageOrders,
+    totalOrders,
+    totalPages,
+    currentPage,
+    startIndex,
+    endIndex,
+    itemsPerPage,
+    handleItemsPerPageChange,
+  ]);
 
-  // ======== IMPORTANT: No early return (fix hooks issue) ========
+  // ========== Detail vs List ==========
   return (
     <div className="p-4 sm:p-6 lg:p-8 h-full overflow-x-hidden">
-      {selectedOrderId ? (
+      {selectedOrderId !== null ? (
         <PurchaseOrderDetail
           user={user}
-          orderId={selectedOrderId}
+          orderId={selectedOrderId} // ✅ now can be number/string
           onBack={() => setSelectedOrderId(null)}
         />
       ) : (
@@ -1006,7 +1068,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             )}
           </div>
 
-          {/* Attention Cards */}
+          {/* Attention Cards (GLOBAL COUNTS) */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <Card
               className={[
@@ -1017,23 +1079,17 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
               onClick={() => {
                 setCurrentPage(1);
                 setActiveTab('all');
-
-                setSpecialFilter(prev => {
-                  const next = prev === 'updates' ? null : 'updates';
-                  const att: 1 | 2 | null = next ? ATTENTION_UI_TO_BACKEND[next] : null;
-                  fetchPurchaseOrders('all', att);
-                  return next;
-                });
+                setSpecialFilter(prev => (prev === 'updates' ? null : 'updates'));
               }}
             >
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-white shadow-sm">
-                    <Clock className="h-4 w-4" style={{ color: '#ED832D' }} />
+                         <div className="flex items-center gap-3">
+                           <div className="p-2 rounded-lg bg-white shadow-lg">
+                             <Clock className="h-4 w-4" style={{ color: '#ED832D' }} />
                   </div>
-                  <div className="text-gray-800 text-sm font-bold">PO Need Updates</div>
+                <div className="text-gray-900 text-sm" style={{ fontWeight: 600 }}>PO Need Updates</div>
                 </div>
-                <div className="text-2xl font-bold" style={{ color: '#ED832D' }}>
+                <div className="text-2xl" style={{ color: '#ED832D', fontWeight: 800 }}>
                   {needUpdateCount}
                 </div>
               </div>
@@ -1048,13 +1104,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
               onClick={() => {
                 setCurrentPage(1);
                 setActiveTab('all');
-
-                setSpecialFilter(prev => {
-                  const next = prev === 'overdue' ? null : 'overdue';
-                  const att: 1 | 2 | null = next ? ATTENTION_UI_TO_BACKEND[next] : null;
-                  fetchPurchaseOrders('all', att);
-                  return next;
-                });
+                setSpecialFilter(prev => (prev === 'overdue' ? null : 'overdue'));
               }}
             >
               <div className="flex items-center justify-between">
@@ -1062,16 +1112,16 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   <div className="p-2 rounded-lg bg-white shadow-sm">
                     <AlertTriangle className="h-4 w-4" style={{ color: '#DC2626' }} />
                   </div>
-                  <div className="text-gray-800 text-sm font-bold">Overdue</div>
+                   <div className="text-gray-900 text-sm" style={{ fontWeight: 600 }}>Overdue</div>
                 </div>
-                <div className="text-2xl font-bold" style={{ color: '#DC2626' }}>
+                <div className="text-2xl font-bold" style={{ color: '#DC2626',fontWeight:800 }}>
                   {overdueCount}
                 </div>
               </div>
             </Card>
           </div>
 
-          {/* Stats */}
+          {/* Stats (LIST SUMMARY - can change by tab/filter) */}
           <div className="flex gap-3 mb-6">
             <Card className="flex-1 p-4">
               <div className="flex items-center gap-2 mb-2">
@@ -1163,7 +1213,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       const display = mapBackendStatusToDisplay(o.status);
 
                       return (
-                        <TableRow key={idx}>
+                        <TableRow key={`${getOrderKey(o)}-${idx}`}>
                           <TableCell className="font-medium">{o.purchasingDocument}</TableCell>
                           <TableCell>{o.shortText}</TableCell>
                           <TableCell>{o.reEtaDate || '-'}</TableCell>
