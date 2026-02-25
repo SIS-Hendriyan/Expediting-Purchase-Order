@@ -978,7 +978,8 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
       </Collapsible>
 
       {/* KPI Cards - Conditional Layout Based on Role */}
-      {user.role === 'vendor' ? (
+      {user.role === 'vendor' ? 
+      (
         <>
           {/* Vendor View - Row 1 */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 mb-3 sm:mb-4">
@@ -1073,7 +1074,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                 <div className="p-3 rounded-lg" style={{ backgroundColor: 'rgba(212, 24, 61, 0.1)' }}>
                   <AlertTriangle className="h-6 w-6 text-red-600" />
                 </div>
-                <div className="flex items-center gap-1 text-red-600 text-sm">
+                <div className="flex items-center gap-1 text-red-600 text-sm mr-6">
                   <TrendingUp className="h-4 w-4" />
                   8%
                 </div>
@@ -1255,7 +1256,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                 <div className="p-3 rounded-lg" style={{ backgroundColor: 'rgba(212, 24, 61, 0.1)' }}>
                   <AlertTriangle className="h-6 w-6 text-red-600" />
                 </div>
-                <div className="flex items-center gap-1 text-red-600 text-sm">
+               <div className="flex items-center gap-1 text-red-600 text-sm mr-2">
                   <TrendingUp className="h-4 w-4" />
                   8%
                 </div>
