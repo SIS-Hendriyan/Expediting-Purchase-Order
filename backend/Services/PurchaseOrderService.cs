@@ -437,6 +437,32 @@ namespace EXPOAPI.Services
             }
         }
 
+        // ------------------------------------------------------------
+        // exp.PurchaseOrderDetail_SP -> 2 result sets: statusFlow + reEtaRequests
+        // ------------------------------------------------------------
+        public async Task<(List<Dictionary<string, object?>> StatusFlow, List<Dictionary<string, object?>> ReEtaRequests)>
+            GetPurchaseOrderDetailAsync(string poid, CancellationToken ct = default)
+        {
+            using var conn = _db.CreateMain();
+            var result = await conn.QueryMultipleAsync(
+                "exp.PurchaseOrderDetail_SP",
+                new { POID = poid },
+                commandType: CommandType.StoredProcedure
+            );
+
+            var statusFlow = (await result.ReadAsync())
+                .Select(row => (IDictionary<string, object?>)row)
+                .Select(dict => dict.ToDictionary(kv => kv.Key, kv => kv.Value))
+                .ToList();
+
+            var reEtaRequests = (await result.ReadAsync())
+                .Select(row => (IDictionary<string, object?>)row)
+                .Select(dict => dict.ToDictionary(kv => kv.Key, kv => kv.Value))
+                .ToList();
+
+            return (statusFlow, reEtaRequests);
+        }
+
         // =========================
         // Helpers
         // =========================
