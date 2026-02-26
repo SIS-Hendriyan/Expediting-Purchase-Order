@@ -284,7 +284,7 @@ export default function App() {
                   }
                 >
                   <BarChart3 className="h-5 w-5 flex-shrink-0" />
-                  {!sidebarCollapsed && <span>Analytical Dashboard</span>}
+                  {!sidebarCollapsed && <span  className="text-left">Analytical Dashboard</span>}
                 </button>
               </TooltipTrigger>
               {sidebarCollapsed && (
@@ -330,7 +330,7 @@ export default function App() {
                         }`}
                       >
                         <Users className="h-5 w-5 flex-shrink-0" />
-                        {!sidebarCollapsed && <span>User Management</span>}
+                        {!sidebarCollapsed && <span  className="text-left">User Management</span>}
                       </div>
                       {!sidebarCollapsed && (
                         <ChevronDown
@@ -350,7 +350,7 @@ export default function App() {
 
                 {userManagementExpanded && !sidebarCollapsed && (
                   // <div className="ml-4 mt-1 space-y-1">
-                  <div className="text-left flex-1">
+                  <div className="text-left flex-1 ml-4 mt-1 space-y-1">
                     <button
                       onClick={() => navigate('/vendor-management')}
                       className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-colors ${
@@ -405,7 +405,7 @@ export default function App() {
                   }
                 >
                   <Package className="h-5 w-5 flex-shrink-0" />
-                  {!sidebarCollapsed && <span>Purchase Order</span>}
+                  {!sidebarCollapsed && <span className="text-left">Purchase Order</span>}
                 </button>
               </TooltipTrigger>
               {sidebarCollapsed && (
@@ -437,7 +437,7 @@ export default function App() {
                   >
                     <Calendar className="h-5 w-5 flex-shrink-0" />
                     {!sidebarCollapsed && (
-                      <span>Reschedule ETA Request</span>
+                      <span className="text-left">Reschedule ETA Request</span>
                     )}
                   </button>
                 </TooltipTrigger>
