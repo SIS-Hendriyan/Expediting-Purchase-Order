@@ -18,6 +18,18 @@ export const API = {
     ACCESSVENDOR: (id: number | string) => `${CONFIG.apiBaseUrl}/api/vendor/${id}/access`, // POST
     IMPORT_PO: () => `${CONFIG.apiBaseUrl}/api/purchase-order/import`,
     DETAILPO: (poid: number | string) => `${CONFIG.apiBaseUrl}/api/purchase-order/${poid}/detail`,
+    // Re-ETA
+REETA_LIST: () => `${CONFIG.apiBaseUrl}/api/re-eta/requests`,
+REETA_DETAIL: (id: number | string) => `${CONFIG.apiBaseUrl}/api/re-eta/requests/${id}`,
+REETA_CREATE: () => `${CONFIG.apiBaseUrl}/api/re-eta/requests`,
+REETA_APPROVE: (id: number | string) => `${CONFIG.apiBaseUrl}/api/re-eta/requests/${id}/approve`,
+REETA_REJECT: (id: number | string) => `${CONFIG.apiBaseUrl}/api/re-eta/requests/${id}/reject`,
+REETA_VENDOR_RESPONSE: (id: number | string) => `${CONFIG.apiBaseUrl}/api/re-eta/requests/${id}/vendor-response`,
+REETA_LOGS: (id: number | string) => `${CONFIG.apiBaseUrl}/api/re-eta/requests/${id}/logs`,
+REETA_DOC: (docId: number | string) => `${CONFIG.apiBaseUrl}/api/re-eta/documents/${docId}`,
+
+// PO items eligible (buat Create Request dropdown)
+PO_ITEMS: () => `${CONFIG.apiBaseUrl}/api/purchase-order/items`,
 
     // SSO helper - backend should expose an endpoint that calls the SOAP SSO service
     SSO_GETUSER: (nrp: string) => `${CONFIG.apiBaseUrl}/api/sso/get-user?nrp=${encodeURIComponent(nrp)}`,

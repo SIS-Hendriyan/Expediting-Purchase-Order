@@ -65,7 +65,7 @@ const parseErrorResponse = async (res: Response): Promise<string> => {
 };
 
 const DEPARTMENTS = ['Procurement', 'Finance', 'Operations', 'Logistics', 'HR', 'IT', 'Legal'];
-const JOBSITES = ['ADMO Mining', 'ADMO Hauling', 'SERA', 'MACO Mining', 'MACO Hauling','JAHO','ADMO PHW'];
+const JOBSITES = ['ADMO Mining', 'ADMO Hauling', 'SERA', 'MACO Mining', 'MACO Hauling','JAHO'];
 
 export function InternalUserManagement() {
   // ====== list & filter state ======
