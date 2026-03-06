@@ -874,12 +874,12 @@ function getDocButtonTheme(status?: RequestStatus) {
             Reschedule ETA Requests
           </h1>
           <p className="text-gray-600">
-            {/* {user.role === "vendor"
-              ? "Manage your reschedule requests"
-              : "Review and process vendor reschedule requests"} */}
-              {user.role === "admin"
+            {user.role === "vendor"
               ? "Manage your reschedule requests"
               : "Review and process vendor reschedule requests"}
+              {/* {user.role === "admin"
+              ? "Manage your reschedule requests"
+              : "Review and process vendor reschedule requests"} */}
           </p>
         </div>
 
@@ -1076,8 +1076,8 @@ function getDocButtonTheme(status?: RequestStatus) {
                       style={{ width: "140px", minWidth: "140px" }}
                     >
                       <div className="flex gap-2">
-                        {/* {user.role === "vendor" ? ( */}
-                             {user.role === "admin" ? (
+                        {user.role === "vendor" ? (
+                            //  {user.role === "admin" ? (
                           <>
                             <Button
                               variant="outline"
@@ -1761,8 +1761,8 @@ function getDocButtonTheme(status?: RequestStatus) {
       </Dialog>
 
       {/* Vendor Response Upload Dialog */}
-      {/* {user.role === "vendor" && ( */}
-         {user.role === "admin" && (
+      {user.role === "vendor" && (
+         {/* {user.role === "admin" && ( */}
         <Dialog open={vendorResponseDialog.open} onOpenChange={(open) => !open && handleCloseVendorResponseDialog()}>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
