@@ -883,7 +883,7 @@ function getDocButtonTheme(status?: RequestStatus) {
           </p>
         </div>
 
-        {user.role === "admin" && (
+        {user.role === "vendor" && (
           <Button
             style={{ backgroundColor: "#014357" }}
             className="text-white hover:opacity-90"
@@ -1077,7 +1077,6 @@ function getDocButtonTheme(status?: RequestStatus) {
                     >
                       <div className="flex gap-2">
                         {user.role === "vendor" ? (
-                            //  {user.role === "admin" ? (
                           <>
                             <Button
                               variant="outline"
@@ -1762,7 +1761,6 @@ function getDocButtonTheme(status?: RequestStatus) {
 
       {/* Vendor Response Upload Dialog */}
       {user.role === "vendor" && (
-         {/* {user.role === "admin" && ( */}
         <Dialog open={vendorResponseDialog.open} onOpenChange={(open) => !open && handleCloseVendorResponseDialog()}>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
