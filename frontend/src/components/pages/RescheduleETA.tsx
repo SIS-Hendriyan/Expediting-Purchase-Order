@@ -525,6 +525,14 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
     setRescheduleReason("");
   };
 
+const getDocButtonColor = (s?: RequestStatus) => {
+  // default kalau status undefined
+  if (s === "APPROVED") return { color: "#6AA75D", hoverClass: "hover:bg-green-50" };
+  if (s === "REJECTED") return { color: "#d4183d", hoverClass: "hover:bg-red-50" };
+  // fallback (misal pending/awaiting)
+  return { color: "#014357", hoverClass: "hover:bg-slate-50" };
+};
+
   const uniquePONumbers = useMemo(
     () => Array.from(new Set(poItems.map((x) => x["Purchasing Document"]))),
     [poItems]
@@ -745,6 +753,38 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
     toast.success("File uploaded successfully");
   };
 
+function getDocButtonTheme(status?: RequestStatus) {
+  if (status === "APPROVED") {
+    return {
+      color: "#6AA75D",
+      hoverClass: "hover:bg-green-50",
+      softBg: "rgba(106,167,93,0.12)",
+    };
+  }
+
+  if (status === "REJECTED") {
+    return {
+      color: "#d4183d",
+      hoverClass: "hover:bg-red-50",
+      softBg: "rgba(212,24,61,0.10)",
+    };
+  }
+
+  if (status === "AWAITING_VENDOR_DOC") {
+    return {
+      color: "rgb(255, 165, 0)",
+      hoverClass: "hover:bg-orange-50",
+      softBg: "rgba(255,165,0,0.12)",
+    };
+  }
+
+  return {
+    color: "#014357",
+    hoverClass: "hover:bg-slate-50",
+    softBg: "rgba(1,67,87,0.08)",
+  };
+}
+
   const handleSubmitVendorResponse = async () => {
     if (!vendorResponseFile) return toast.error("Please upload a supporting document");
     const req = vendorResponseDialog.request;
@@ -837,10 +877,11 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
             {user.role === "vendor"
               ? "Manage your reschedule requests"
               : "Review and process vendor reschedule requests"}
+             
           </p>
         </div>
 
-        {user.role === "admin" && (
+        {user.role === "vendor" && (
           <Button
             style={{ backgroundColor: "#014357" }}
             className="text-white hover:opacity-90"
@@ -1511,13 +1552,22 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                       <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Vendor</p>
                       <p className="text-sm">{detailsDialog.request["Vendor Name"] || "-"}</p>
                     </div>
+
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Item Description</p>
+                      <p className="text-sm">{detailsDialog.request.ShortText || "-"}</p>
+                    </div>
+                    <div className="invisible">
+                        <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Item Description</p>
+                        <p className="text-sm">{detailsDialog.request.ShortText || "-"}</p>
+                    </div>
                     <div>
                       <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Request Date</p>
                       <p className="text-sm">{formatDate(detailsDialog.request.CREATED_AT)}</p>
                     </div>
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Created By</p>
-                      <p className="text-sm">{detailsDialog.request.CREATED_BY || "-"}</p>
+                      <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">ETD</p>
+                      <p className="text-sm">{formatDate(detailsDialog.request.ETD) || "-"}</p>
                     </div>
                   </div>
                 </div>
@@ -1539,10 +1589,10 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                     <div className="rounded-lg p-4 border" style={{ backgroundColor: "#FFF4E6", borderColor: "#ED832D" }}>
                       <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">Requested ETA</p>
                       <p className="text-xl mb-1" style={{ color: "#ED832D" }}>
-                        {formatDate(detailsDialog.request.ResultETA)}
+                        {formatDate(detailsDialog.request.RequestETADate)}
                       </p>
                       <p className="text-sm" style={{ color: "#ED832D" }}>
-                        +{Number(detailsDialog.request["Proposed ETA"] ?? 0)} days
+                        +{detailsDialog.request.ResultProposeEtaDesc}
                       </p>
                     </div>
                   </div>
@@ -1590,33 +1640,51 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                         </p>
                       </div>
 
-                      {detailsDialog.request["Feedback Doc ID"] ? (
-                        <div>
-                          <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">Admin&apos;s Record of Event</p>
-                          <div className="flex items-center justify-between p-4 rounded-lg border-2" style={{ backgroundColor: "#FFE6EB", borderColor: "#d4183d" }}>
-                            <div className="flex items-center gap-3">
-                              <div className="p-2 rounded" style={{ backgroundColor: "#d4183d" }}>
-                                <FileText className="h-6 w-6 text-white" />
-                              </div>
-                              <div>
-                                <p className="text-sm" style={{ color: "#014357" }}>Doc #{detailsDialog.request["Feedback Doc ID"]}</p>
-                                <p className="text-xs text-gray-600">PDF Document</p>
-                              </div>
-                            </div>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleDownloadDoc(detailsDialog.request?.["Feedback Doc ID"], "record_of_event.pdf")}
-                              style={{ borderColor: "#d4183d", color: "#d4183d" }}
-                              className="hover:bg-red-50"
-                              disabled={loading}
-                            >
-                              <Download className="h-4 w-4 mr-2" />
-                              Download
-                            </Button>
-                          </div>
-                        </div>
-                      ) : null}
+                      {detailsDialog.request?.["Feedback Doc ID"] && (() => {
+  const status = detailsDialog.request?.["Reschedule Status"];
+  const theme = getDocButtonTheme(status);
+
+  return (
+    <div>
+      <Label className="mb-2 block">Admin&apos;s Record of Event</Label>
+
+      <div
+        className="flex items-center justify-between p-4 rounded-lg border-2"
+        style={{ backgroundColor: theme.softBg, borderColor: theme.color }}
+      >
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded" style={{ backgroundColor: theme.color }}>
+            <FileText className="h-6 w-6 text-white" />
+          </div>
+
+          <div>
+            <p className="text-sm" style={{ color: "#014357" }}>
+              Doc # {detailsDialog.request?.FeedbackFileName}
+            </p>
+            <p className="text-xs text-gray-600">PDF Document</p>
+          </div>
+        </div>
+
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() =>
+            handleDownloadDoc(
+              detailsDialog.request?.["Feedback Doc ID"],
+              "record_of_event.pdf"
+            )
+          }
+          style={{ borderColor: theme.color, color: theme.color }}
+          className={theme.hoverClass}
+          disabled={loading}
+        >
+          <Download className="h-4 w-4 mr-2" />
+          Download
+        </Button>
+      </div>
+    </div>
+  );
+})()}
 
                       {detailsDialog.request["VendorResp Doc ID"] ? (
                         <div>
