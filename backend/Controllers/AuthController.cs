@@ -1,12 +1,4 @@
-﻿// ============================================================
-// FILE: AuthController.cs
-// Routes:
-//   POST /api/auth/login
-//   POST /api/auth/verify-otp
-//   POST /api/auth/register/vendor
-// ============================================================
-
-using EXPOAPI.Models;              // VendorLoginResult, etc.
+﻿using EXPOAPI.Models;              // VendorLoginResult, etc.
 using EXPOAPI.Services;            // AuthService, IVendorOtpEmailSender
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;

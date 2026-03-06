@@ -1,0 +1,328 @@
+﻿using System;
+using System.Threading;
+using System.Threading.Tasks;
+using EXPOAPI.Models;
+using EXPOAPI.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+
+namespace EXPOAPI.Controllers
+{
+    [ApiController]
+    [Route("api/re-eta")]
+    [Authorize]
+    public sealed class ReEtaRequestController : ControllerBase
+    {
+        private readonly IReEtaRequestService _reEta;
+        private readonly IReEtaRequestLogService _log;
+
+        public ReEtaRequestController(IReEtaRequestService reEta, IReEtaRequestLogService log)
+        {
+            _reEta = reEta ?? throw new ArgumentNullException(nameof(reEta));
+            _log = log ?? throw new ArgumentNullException(nameof(log));
+        }
+
+        // =========================================================
+        // GET /api/re-eta/requests
+        // -> return { summary, meta, items }
+        // =========================================================
+        [HttpGet("requests")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> GetPaged(
+            [FromQuery] string? q,
+            [FromQuery] string? status,
+            [FromQuery] string? poNumber,
+            [FromQuery] string? vendorCode,
+            [FromQuery] DateTime? from,
+            [FromQuery] DateTime? to,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20,
+            CancellationToken ct = default)
+        {
+            try
+            {
+                var data = await _reEta.GetPagedAsync(q, status, poNumber, vendorCode, from, to, page, pageSize, ct);
+                return Ok(ApiResponse.Ok("re-eta requests retrieved", data, 200));
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError,
+                    ApiResponse.Fail($"failed to fetch re-eta requests: {ex.Message}", 500, null));
+            }
+        }
+
+        // =========================================================
+        // GET /api/re-eta/requests/{id}
+        // id is STRING (NVARCHAR) e.g. POREETANUMBER or request key
+        // =========================================================
+        [HttpGet("requests/{id}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> GetDetail([FromRoute] long id, CancellationToken ct = default)
+        {
+            if (id <= 0)
+                return BadRequest(ApiResponse.Fail("invalid id", 400, null));
+
+            try
+            {
+                var data = await _reEta.GetDetailAsync(id, ct);
+                return Ok(ApiResponse.Ok("re-eta request detail retrieved", data, 200));
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError,
+                    ApiResponse.Fail($"failed to fetch re-eta request detail: {ex.Message}", 500, null));
+            }
+        }
+
+        // =========================================================
+        // GET /api/re-eta/requests/{id}/logs
+        // id MUST MATCH request identifier type (string)
+        // =========================================================
+        [HttpGet("requests/{id}/logs")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> GetLogs([FromRoute] long id, CancellationToken ct = default)
+        {
+            if (id <= 0)
+                return BadRequest(ApiResponse.Fail("invalid id", 400, null));
+
+            try
+            {
+                // NOTE: make service accept string id
+                var logs = await _log.ListByRequestIdAsync(id, ct);
+                return Ok(ApiResponse.Ok("re-eta request logs retrieved", logs, 200));
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError,
+                    ApiResponse.Fail($"failed to fetch re-eta request logs: {ex.Message}", 500, null));
+            }
+        }
+
+        // =========================================================
+        // POST /api/re-eta/requests
+        // vendor create request (JSON base64)
+        // =========================================================
+        [HttpPost("requests")]
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> Create([FromBody] ReEtaCreateRequestDto dto, CancellationToken ct = default)
+        {
+            if (dto == null)
+                return BadRequest(ApiResponse.Fail("request body cannot be null", 400, null));
+
+            if (string.IsNullOrWhiteSpace(dto.IdPoItem))
+                return BadRequest(ApiResponse.Fail("IdPoItem is required", 400, null));
+
+            if (dto.ProposedEtaDays == null || dto.ProposedEtaDays < 0)
+                return BadRequest(ApiResponse.Fail("ProposedEtaDays must be >= 0", 400, null));
+
+            if (string.IsNullOrWhiteSpace(dto.Reason))
+                return BadRequest(ApiResponse.Fail("Reason is required", 400, null));
+
+            // optional: if evidenceBase64 present, ensure filename
+            if (!string.IsNullOrWhiteSpace(dto.EvidenceBase64) && string.IsNullOrWhiteSpace(dto.EvidenceFileName))
+                dto.EvidenceFileName = "evidence.pdf";
+
+            try
+            {
+                var createdBy = User?.FindFirst("nrp")?.Value ?? "SYSTEM";
+
+                var result = await _reEta.CreateAsync(
+                    dto.IdPoItem,
+                    dto.PoNumber,
+                    dto.PoItemNo,
+                    dto.VendorCode,
+                    dto.VendorName,
+                    dto.CurrentEta,
+                    dto.ProposedEtaDays,
+                    dto.Reason,
+                    dto.EvidenceFileName,
+                    dto.EvidenceContentType,
+                    dto.EvidenceSize,
+                    dto.EvidenceBase64,
+                    createdBy,
+                    ct
+                );
+
+                return StatusCode(StatusCodes.Status201Created,
+                    ApiResponse.Ok("re-eta request created", result, 201));
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError,
+                    ApiResponse.Fail($"failed to create re-eta request: {ex.Message}", 500, null));
+            }
+        }
+
+        // =========================================================
+        // POST /api/re-eta/requests/{id}/approve
+        // admin approve (attachment optional)
+        // =========================================================
+        [HttpPost("requests/{id}/approve")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> Approve([FromRoute] string id, [FromBody] ReEtaDecisionRequestDto dto, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                return BadRequest(ApiResponse.Fail("invalid id", 400, null));
+
+            if (dto == null)
+                return BadRequest(ApiResponse.Fail("request body cannot be null", 400, null));
+
+            if (string.IsNullOrWhiteSpace(dto.Feedback))
+                return BadRequest(ApiResponse.Fail("Feedback is required", 400, null));
+
+            if (!string.IsNullOrWhiteSpace(dto.Base64) && string.IsNullOrWhiteSpace(dto.FileName))
+                dto.FileName = "feedback.pdf";
+
+            try
+            {
+                var by = User?.FindFirst("nrp")?.Value ?? "SYSTEM";
+
+                var result = await _reEta.ApproveAsync(
+                    id,
+                    dto.Feedback,
+                    dto.FileName,
+                    dto.ContentType,
+                    dto.FileSize,
+                    dto.Base64,
+                    by,
+                    ct
+                );
+
+                return Ok(ApiResponse.Ok("re-eta request approved", result, 200));
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError,
+                    ApiResponse.Fail($"failed to approve re-eta request: {ex.Message}", 500, null));
+            }
+        }
+
+        // =========================================================
+        // POST /api/re-eta/requests/{id}/reject
+        // admin reject (attachment REQUIRED)
+        // =========================================================
+        [HttpPost("requests/{id}/reject")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> Reject([FromRoute] string id, [FromBody] ReEtaDecisionRequestDto dto, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                return BadRequest(ApiResponse.Fail("invalid id", 400, null));
+
+            if (dto == null)
+                return BadRequest(ApiResponse.Fail("request body cannot be null", 400, null));
+
+            if (string.IsNullOrWhiteSpace(dto.Feedback))
+                return BadRequest(ApiResponse.Fail("Feedback is required", 400, null));
+
+            if (string.IsNullOrWhiteSpace(dto.Base64))
+                return BadRequest(ApiResponse.Fail("Attachment (Base64) is required for reject", 400, null));
+
+            if (string.IsNullOrWhiteSpace(dto.FileName))
+                dto.FileName = "record_of_event.pdf";
+
+            try
+            {
+                var by = User?.FindFirst("nrp")?.Value ?? "SYSTEM";
+
+                var result = await _reEta.RejectAsync(
+                    id,
+                    dto.Feedback,
+                    dto.FileName!,
+                    dto.ContentType,
+                    dto.FileSize,
+                    dto.Base64!,
+                    by,
+                    ct
+                );
+
+                return Ok(ApiResponse.Ok("re-eta request rejected", result, 200));
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError,
+                    ApiResponse.Fail($"failed to reject re-eta request: {ex.Message}", 500, null));
+            }
+        }
+
+        // =========================================================
+        // POST /api/re-eta/requests/{id}/vendor-response
+        // vendor upload response (attachment required)
+        // =========================================================
+        [HttpPost("requests/{id}/vendor-response")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> VendorResponse([FromRoute] string id, [FromBody] ReEtaVendorResponseDto dto, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                return BadRequest(ApiResponse.Fail("invalid id", 400, null));
+
+            if (dto == null)
+                return BadRequest(ApiResponse.Fail("request body cannot be null", 400, null));
+
+            if (string.IsNullOrWhiteSpace(dto.Base64))
+                return BadRequest(ApiResponse.Fail("Base64 is required", 400, null));
+
+            if (string.IsNullOrWhiteSpace(dto.FileName))
+                dto.FileName = "vendor_response.pdf";
+
+            try
+            {
+                var by = User?.FindFirst("nrp")?.Value ?? "SYSTEM";
+
+                var result = await _reEta.UploadVendorResponseAsync(
+                    id,
+                    dto.FileName,
+                    dto.ContentType,
+                    dto.FileSize,
+                    dto.Base64,
+                    by,
+                    ct
+                );
+
+                return Ok(ApiResponse.Ok("vendor response uploaded", result, 200));
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError,
+                    ApiResponse.Fail($"failed to upload vendor response: {ex.Message}", 500, null));
+            }
+        }
+
+        // =========================================================
+        // GET /api/re-eta/documents/{docId}
+        // =========================================================
+        [HttpGet("documents/{docId:long}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> GetDocument([FromRoute] long docId, CancellationToken ct = default)
+        {
+            if (docId <= 0)
+                return BadRequest(ApiResponse.Fail("invalid docId", 400, null));
+
+            try
+            {
+                var doc = await _reEta.GetDocumentAsync(docId, ct);
+                return Ok(ApiResponse.Ok("document retrieved", doc, 200));
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError,
+                    ApiResponse.Fail($"failed to fetch document: {ex.Message}", 500, null));
+            }
+        }
+    }
+}
