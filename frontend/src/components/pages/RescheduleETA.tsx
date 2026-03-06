@@ -877,9 +877,7 @@ function getDocButtonTheme(status?: RequestStatus) {
             {user.role === "vendor"
               ? "Manage your reschedule requests"
               : "Review and process vendor reschedule requests"}
-              {/* {user.role === "admin"
-              ? "Manage your reschedule requests"
-              : "Review and process vendor reschedule requests"} */}
+             
           </p>
         </div>
 

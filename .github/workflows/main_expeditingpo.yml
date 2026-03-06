@@ -1,0 +1,35 @@
+name: Build and Deploy Frontend to Azure Web App
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm install
+
+      - name: Build project
+        working-directory: frontend
+        run: npm run build
+
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: expeditingpo
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_1C6335623C26458CA1E1C100B97B9CE1 }}
+          package: frontend/dist
