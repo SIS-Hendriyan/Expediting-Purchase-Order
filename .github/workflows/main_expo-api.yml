@@ -1,0 +1,36 @@
+name: Deploy EXPO API to Azure
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore backend/EXPOAPI.csproj
+
+      - name: Build
+        run: dotnet build backend/EXPOAPI.csproj --configuration Release --no-restore
+
+      - name: Publish
+        run: dotnet publish backend/EXPOAPI.csproj -c Release -o publish
+
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: expo-api
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_6E30B4E0A545481DB363F593659C0698 }}
+          package: publish

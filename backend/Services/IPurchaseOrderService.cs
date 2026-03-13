@@ -53,6 +53,17 @@
             string docType = "All",
             CancellationToken ct = default
         );
+        Task<Dictionary<string, object?>> GetPurchaseOrderItemsAsync(
+           string? poNumber = null,
+           string? status = null,
+           string? attention = null,
+           string? vendor = null,
+           string? q = null,
+           int page = 1,
+           int pageSize = 50,
+           bool eligibleOnly = true,
+           CancellationToken ct = default);
+    
 
         Task<Dictionary<string, object?>> GetPoDashboardMasterfiltersAsync(CancellationToken ct = default);
 

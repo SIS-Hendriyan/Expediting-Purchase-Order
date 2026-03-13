@@ -103,6 +103,30 @@ namespace EXPOAPI.Controllers
             }
         }
 
+        // GET /api/purchase-order/items
+        [HttpGet("items")]
+        public async Task<IActionResult> Items(
+            [FromQuery] string? poNumber,
+            [FromQuery] string? status,
+            [FromQuery] string? attention,
+            [FromQuery] string? vendor,
+            [FromQuery] string? q,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 50,
+            [FromQuery] bool eligibleOnly = true,
+            CancellationToken ct = default)
+        {
+            try
+            {
+                var data = await _po.GetPurchaseOrderItemsAsync(poNumber, status, attention, vendor, q, page, pageSize, eligibleOnly, ct);
+                return Ok(ApiResponse.Ok("purchase order items retrieved", data, 200));
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, ApiResponse.Fail($"failed to fetch purchase order items: {ex.Message}", 500, null));
+            }
+        }
+
         // POST /api/purchase-order/import
         [HttpPost("import")]
         [Consumes("multipart/form-data")]

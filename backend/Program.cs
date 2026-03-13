@@ -86,6 +86,8 @@ builder.Services.AddScoped<IInternalUserService, InternalUserService>();
 builder.Services.AddScoped<IPurchaseOrderService, PurchaseOrderService>();
 builder.Services.AddScoped<IVendorService, VendorService>();
 builder.Services.AddScoped<ISsoAuthService, SsoAuthService>();
+builder.Services.AddScoped<IReEtaRequestService, ReEtaRequestService>();
+builder.Services.AddScoped<IReEtaRequestLogService, ReEtaRequestLogService>();
 builder.Services.Configure<SsoSettings>(builder.Configuration.GetSection("SSO"));
 builder.Services.AddScoped<IPurchaseOrderImportService, PurchaseOrderImportService>();
 

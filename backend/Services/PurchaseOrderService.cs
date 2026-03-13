@@ -1,143 +1,561 @@
 ﻿using Dapper;
 using Microsoft.Data.SqlClient;
+using System;
+using System.Collections.Generic;
 using System.Data;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace EXPOAPI.Services
 {
-
-    public class PurchaseOrderService : IPurchaseOrderService
+    public sealed class PurchaseOrderService : IPurchaseOrderService
     {
         private readonly IDbConnectionFactory _db;
 
         private const string SP_PURCHASE_ORDER = "[exp].[Purchase_Order_SP]";
         private const string SP_PO_DASHBOARD_SUMMARY = "[exp].[PO_DASHBOARD_SUMMARY_SP]";
         private const string SP_PO_VENDOR_SCORECARD = "[exp].[PO_VENDOR_SCORECARD_SP]";
-
         private const string SP_PO_TREND = "[exp].[PURCHASE_ORDER_TREND_SP]";
         private const string SP_PO_STATUS_DIST = "[exp].[PURCHASE_ORDER_STATUS_DISTRIBUTION_SP]";
         private const string SP_PO_MONTHLY_COMPLETION_DELAY = "[exp].[PURCHASE_ORDER_MONTHLY_COMPLETION_DELAY_SP]";
         private const string SP_PO_MASTERFILTER = "[exp].[PO_DASHBOARD_MASTERFILTER_SP]";
+        private const string SP_PO_DETAIL = "[exp].[PurchaseOrderDetail_SP]";
 
-        // Tambahkan keys baru
+        // ✅ NEW SP for eligible items
+        private const string SP_PO_ITEMS_ELIGIBLE_REETA = "[exp].[PO_ITEM_ELIGIBLE_FOR_REETA_SP]";
+
+        // status mapping sama seperti Python
+        private static readonly Dictionary<string, string> StatusMap = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["submitted"] = "Submitted",
+            ["workInProgress"] = "Work In Progress",
+            ["onDelivery"] = "On Delivery",
+            ["partiallyReceived"] = "Partially Received",
+            ["fullyReceived"] = "Fully Received",
+        };
+
         private static readonly string[] SummaryKeys =
         {
-    "TotalPO",
-    "POSubmitted",
-    "POWorkInProgress",
-    "POOnDelivery",
-    "POPartiallyReceived",
-    "POFullyReceived",
+            "TotalPO",
+            "POSubmitted",
+            "POWorkInProgress",
+            "POOnDelivery",
+            "POPartiallyReceived",
+            "POFullyReceived",
 
-    // ✅ NEW overall
-    "PONeedUpdate",
-    "POOverdue",
+            "PONeedUpdate",
+            "POOverdue",
 
-    // existing output
-    "TotalFiltered",
-    "PageSize",
-    "FilterStatus",
+            "TotalFiltered",
+            "PageSize",
+            "FilterStatus",
 
-    // ✅ NEW filtered
-    "PONeedUpdateFiltered",
-    "POOverdueFiltered"
-};
+            "PONeedUpdateFiltered",
+            "POOverdueFiltered"
+        };
 
         private static Dictionary<string, object?> DefaultSummary() => new(StringComparer.OrdinalIgnoreCase)
         {
-            ["TotalPO"] = 0,
-            ["POSubmitted"] = 0,
-            ["POWorkInProgress"] = 0,
-            ["POOnDelivery"] = 0,
-            ["POPartiallyReceived"] = 0,
-            ["POFullyReceived"] = 0,
+            ["TotalPO"] = 0L,
+            ["POSubmitted"] = 0L,
+            ["POWorkInProgress"] = 0L,
+            ["POOnDelivery"] = 0L,
+            ["POPartiallyReceived"] = 0L,
+            ["POFullyReceived"] = 0L,
 
-            // ✅ NEW overall
-            ["PONeedUpdate"] = 0,
-            ["POOverdue"] = 0,
+            ["PONeedUpdate"] = 0L,
+            ["POOverdue"] = 0L,
 
-            ["TotalFiltered"] = 0,
-            ["PageSize"] = 0,
+            ["TotalFiltered"] = 0L,
+            ["PageSize"] = 0L,
             ["FilterStatus"] = null,
 
-            // ✅ NEW filtered
-            ["PONeedUpdateFiltered"] = 0,
-            ["POOverdueFiltered"] = 0
+            ["PONeedUpdateFiltered"] = 0L,
+            ["POOverdueFiltered"] = 0L
         };
 
         public PurchaseOrderService(IDbConnectionFactory db)
         {
-            _db = db;
+            _db = db ?? throw new ArgumentNullException(nameof(db));
         }
 
         // ------------------------------------------------------------
-        // exp.Purchase_Order_SP -> multi result sets: summary + items
+        // Summary + items (Purchase_Order_SP)
         // ------------------------------------------------------------
         public async Task<Dictionary<string, object?>> GetPurchaseOrderSummaryAsync(
-     Dictionary<string, object?>? parameters = null,
-     CancellationToken ct = default)
+            Dictionary<string, object?>? parameters = null,
+            CancellationToken ct = default)
         {
             parameters ??= new Dictionary<string, object?>();
 
             using var cn = _db.CreateMain();
             var dp = ToDynamicParamsRemovingNull(parameters);
 
-            using var grid = await cn.QueryMultipleAsync(new CommandDefinition(
-                SP_PURCHASE_ORDER,
-                dp,
-                commandType: CommandType.StoredProcedure,
-                cancellationToken: ct
-            ));
-
-            var summary = DefaultSummary();
-            var items = new List<Dictionary<string, object?>>();
-
-            while (!grid.IsConsumed)
+            try
             {
-                var rows = (await grid.ReadAsync<dynamic>()).ToList();
-                if (rows.Count == 0) continue;
+                using var grid = await cn.QueryMultipleAsync(new CommandDefinition(
+                    SP_PURCHASE_ORDER,
+                    dp,
+                    commandType: CommandType.StoredProcedure,
+                    cancellationToken: ct
+                ));
 
-                var firstDict = ToDict(rows[0]);
+                var summary = DefaultSummary();
+                var items = new List<Dictionary<string, object?>>();
 
-                // Resultset summary dikenali dari "TotalPO"
-                if (HasKey(firstDict, "TotalPO"))
+                while (!grid.IsConsumed)
                 {
-                    var merged = DefaultSummary();
+                    var rows = (await grid.ReadAsync<dynamic>()).ToList();
+                    if (rows.Count == 0) continue;
 
-                    foreach (var k in SummaryKeys)
+                    var first = ToDict(rows[0]);
+
+                    // Resultset summary dikenali dari "TotalPO"
+                    if (HasKey(first, "TotalPO"))
                     {
-                        var v = TryGetValueCaseInsensitive(firstDict, k);
-
-                        // untuk key numeric, default 0 kalau null / gagal convert
-                        if (!k.Equals("FilterStatus", StringComparison.OrdinalIgnoreCase))
-                            merged[k] = ToLongOrZero(v);
-                        else
-                            merged[k] = v; // status bisa string/null
+                        summary = MergeSummary(first);
                     }
-
-                    // extras: kolom lain dari SP yang belum masuk SummaryKeys
-                    foreach (var kv in firstDict)
+                    else
                     {
-                        if (!SummaryKeys.Any(x => x.Equals(kv.Key, StringComparison.OrdinalIgnoreCase)))
-                            merged[kv.Key] = kv.Value;
+                        items.AddRange(rows.Select(ToDict));
                     }
-
-                    summary = merged;
                 }
-                else
+
+                return new Dictionary<string, object?>
                 {
-                    // items set (sekarang sudah ada col "attention" dari SP)
-                    items.AddRange(rows.Select(ToDict));
-                }
+                    ["summary"] = summary,
+                    ["items"] = items
+                };
             }
-
-            return new Dictionary<string, object?>
+            catch (OperationCanceledException) { throw; }
+            catch (SqlException ex)
             {
-                ["summary"] = summary,
-                ["items"] = items
-            };
+                throw new InvalidOperationException($"DB error executing {SP_PURCHASE_ORDER}: {ex.Message}", ex);
+            }
         }
 
-        // Helper: convert numeric values safely
+        // ------------------------------------------------------------
+        // PurchaseOrderDetail_SP -> 2 result sets: statusFlow + reEtaRequests
+        // ------------------------------------------------------------
+        public async Task<(List<Dictionary<string, object?>> StatusFlow, List<Dictionary<string, object?>> ReEtaRequests)>
+            GetPurchaseOrderDetailAsync(string poid, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(poid))
+                return (new List<Dictionary<string, object?>>(), new List<Dictionary<string, object?>>());
+
+            using var cn = _db.CreateMain();
+
+            try
+            {
+                using var grid = await cn.QueryMultipleAsync(new CommandDefinition(
+                    SP_PO_DETAIL,
+                    new { POID = poid.Trim() },
+                    commandType: CommandType.StoredProcedure,
+                    cancellationToken: ct
+                ));
+
+                var statusFlow = (await grid.ReadAsync<dynamic>()).Select(ToDict).ToList();
+                var reEtaRequests = (await grid.ReadAsync<dynamic>()).Select(ToDict).ToList();
+
+                return (statusFlow, reEtaRequests);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (SqlException ex)
+            {
+                throw new InvalidOperationException($"DB error executing {SP_PO_DETAIL}: {ex.Message}", ex);
+            }
+        }
+
+        // ------------------------------------------------------------
+        // PO_DASHBOARD_SUMMARY_SP -> single row
+        // ------------------------------------------------------------
+        public async Task<Dictionary<string, object?>> GetPoDashboardSummaryAsync(
+            DateTime? startDate = null,
+            DateTime? endDate = null,
+            string? plant = null,
+            string? group = null,
+            string? vendor = null,
+            string docType = "All",
+            CancellationToken ct = default)
+        {
+            using var cn = _db.CreateMain();
+
+            var dp = new DynamicParameters();
+            AddDate(dp, "StartDate", startDate);
+            AddDate(dp, "EndDate", endDate);
+            AddString(dp, "Plant", plant);
+            AddString(dp, "Group", group);
+            AddString(dp, "Vendor", vendor);
+            dp.Add("DocType", string.IsNullOrWhiteSpace(docType) ? "All" : docType);
+
+            try
+            {
+                var row = (await cn.QueryAsync<dynamic>(new CommandDefinition(
+                    SP_PO_DASHBOARD_SUMMARY,
+                    dp,
+                    commandType: CommandType.StoredProcedure,
+                    cancellationToken: ct
+                ))).FirstOrDefault();
+
+                return row == null ? new Dictionary<string, object?>() : ToDict(row);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (SqlException ex)
+            {
+                throw new InvalidOperationException($"DB error executing {SP_PO_DASHBOARD_SUMMARY}: {ex.Message}", ex);
+            }
+        }
+
+        // ------------------------------------------------------------
+        // PO_VENDOR_SCORECARD_SP -> 2 result sets: items + aggregates
+        // ------------------------------------------------------------
+        public async Task<Dictionary<string, object?>> GetPoVendorScorecardAsync(
+            DateTime? startDate = null,
+            DateTime? endDate = null,
+            string? plant = null,
+            string? group = null,
+            string docType = "All",
+            string? vendor = null,
+            CancellationToken ct = default)
+        {
+            using var cn = _db.CreateMain();
+
+            var dp = new DynamicParameters();
+            AddDate(dp, "StartDate", startDate);
+            AddDate(dp, "EndDate", endDate);
+            AddString(dp, "Plant", plant);
+            AddString(dp, "Group", group);
+            dp.Add("DocType", string.IsNullOrWhiteSpace(docType) ? "All" : docType);
+            AddString(dp, "Vendor", vendor);
+
+            try
+            {
+                using var grid = await cn.QueryMultipleAsync(new CommandDefinition(
+                    SP_PO_VENDOR_SCORECARD,
+                    dp,
+                    commandType: CommandType.StoredProcedure,
+                    cancellationToken: ct
+                ));
+
+                var items = (await grid.ReadAsync<dynamic>()).Select(ToDict).ToList();
+                var vendorAgg = (await grid.ReadAsync<dynamic>()).Select(ToDict).ToList();
+
+                return new Dictionary<string, object?>
+                {
+                    ["items"] = items,
+                    ["vendor_aggregates"] = vendorAgg
+                };
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (SqlException ex)
+            {
+                throw new InvalidOperationException($"DB error executing {SP_PO_VENDOR_SCORECARD}: {ex.Message}", ex);
+            }
+        }
+
+        // ------------------------------------------------------------
+        // List SP helpers (Trend / StatusDist / MonthlyCompletionDelay)
+        // ------------------------------------------------------------
+        public Task<List<Dictionary<string, object?>>> GetPoTrendAsync(
+            DateTime? startDate = null,
+            DateTime? endDate = null,
+            string? plant = null,
+            string? purchasingGroup = null,
+            string? vendor = null,
+            string docType = "All",
+            CancellationToken ct = default)
+            => QueryListSpAsync(
+                SP_PO_TREND,
+                dp =>
+                {
+                    AddDate(dp, "StartDate", startDate);
+                    AddDate(dp, "EndDate", endDate);
+                    AddString(dp, "Plant", plant);
+                    AddString(dp, "PurchasingGroup", purchasingGroup);
+                    AddString(dp, "Vendor", vendor);
+                    dp.Add("DocType", string.IsNullOrWhiteSpace(docType) ? "All" : docType);
+                },
+                ct);
+
+        public Task<List<Dictionary<string, object?>>> GetPoStatusDistributionAsync(
+            DateTime? startDate = null,
+            DateTime? endDate = null,
+            string? plant = null,
+            string? purchasingGroup = null,
+            string? vendor = null,
+            string docType = "All",
+            CancellationToken ct = default)
+            => QueryListSpAsync(
+                SP_PO_STATUS_DIST,
+                dp =>
+                {
+                    AddDate(dp, "StartDate", startDate);
+                    AddDate(dp, "EndDate", endDate);
+                    AddString(dp, "Plant", plant);
+                    AddString(dp, "PurchasingGroup", purchasingGroup);
+                    AddString(dp, "Vendor", vendor);
+                    dp.Add("DocType", string.IsNullOrWhiteSpace(docType) ? "All" : docType);
+                },
+                ct);
+
+        public Task<List<Dictionary<string, object?>>> GetPoMonthlyCompletionDelayAsync(
+            DateTime? startDate = null,
+            DateTime? endDate = null,
+            string? plant = null,
+            string? group = null,
+            string? vendor = null,
+            string docType = "All",
+            CancellationToken ct = default)
+            => QueryListSpAsync(
+                SP_PO_MONTHLY_COMPLETION_DELAY,
+                dp =>
+                {
+                    AddDate(dp, "StartDate", startDate);
+                    AddDate(dp, "EndDate", endDate);
+                    AddString(dp, "Plant", plant);
+                    AddString(dp, "Group", group);
+                    AddString(dp, "Vendor", vendor);
+                    dp.Add("DocType", string.IsNullOrWhiteSpace(docType) ? "All" : docType);
+                },
+                ct);
+
+        // ------------------------------------------------------------
+        // PO_DASHBOARD_MASTERFILTER_SP -> 2 result sets: plants + suppliers
+        // ------------------------------------------------------------
+        public async Task<Dictionary<string, object?>> GetPoDashboardMasterfiltersAsync(CancellationToken ct = default)
+        {
+            using var cn = _db.CreateMain();
+
+            try
+            {
+                using var grid = await cn.QueryMultipleAsync(new CommandDefinition(
+                    SP_PO_MASTERFILTER,
+                    commandType: CommandType.StoredProcedure,
+                    cancellationToken: ct
+                ));
+
+                var plantsRows = (await grid.ReadAsync<dynamic>()).Select(ToDict).ToList();
+                var suppliersRows = !grid.IsConsumed
+                    ? (await grid.ReadAsync<dynamic>()).Select(ToDict).ToList()
+                    : new List<Dictionary<string, object?>>();
+
+                var plants = plantsRows
+                    .Select(d => d.Values.FirstOrDefault()?.ToString())
+                    .Where(v => !string.IsNullOrWhiteSpace(v))
+                    .Cast<string>()
+                    .ToList();
+
+                var supplierSet = new HashSet<(string name, string raw)>();
+
+                foreach (var d in suppliersRows)
+                {
+                    // ambil 2 kolom pertama dari SP (name, raw) — sesuai logic kamu sebelumnya
+                    var vals = d.Values.Select(v => v?.ToString() ?? "").ToList();
+                    var name = vals.Count > 0 ? vals[0] : "";
+                    var raw = vals.Count > 1 ? vals[1] : "";
+
+                    if (!string.IsNullOrWhiteSpace(name))
+                        supplierSet.Add((name, raw));
+                }
+
+                var suppliers = supplierSet
+                    .OrderBy(x => x.name, StringComparer.OrdinalIgnoreCase)
+                    .Select(x => new Dictionary<string, object?>
+                    {
+                        ["name"] = x.name,
+                        ["raw"] = x.raw
+                    })
+                    .ToList();
+
+                return new Dictionary<string, object?>
+                {
+                    ["plants"] = plants,
+                    ["suppliers"] = suppliers
+                };
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (SqlException ex)
+            {
+                throw new InvalidOperationException($"DB error executing {SP_PO_MASTERFILTER}: {ex.Message}", ex);
+            }
+        }
+
+        // ------------------------------------------------------------
+        // ✅ NEW: Eligible PO items for Re-ETA (meta + items)
+        // SP should return:
+        //   set#1 meta: TotalRows, Page, PageSize
+        //   set#2 items: rows
+        // ------------------------------------------------------------
+        public async Task<Dictionary<string, object?>> GetPurchaseOrderItemsAsync(
+            string? poNumber = null,
+            string? status = null,
+            string? attention = null,
+            string? vendor = null,
+            string? q = null,
+            int page = 1,
+            int pageSize = 50,
+            bool eligibleOnly = true,
+            CancellationToken ct = default)
+        {
+            if (page <= 0) page = 1;
+            if (pageSize <= 0) pageSize = 50;
+            if (pageSize > 200) pageSize = 200;
+
+            var dp = new DynamicParameters();
+
+            AddString(dp, "PONumber", poNumber);
+
+            // allow FE send "onDelivery" OR "On Delivery"
+            if (!string.IsNullOrWhiteSpace(status))
+            {
+                var key = status.Trim();
+                dp.Add("Status", StatusMap.TryGetValue(key, out var mapped) ? mapped : key);
+            }
+
+            AddString(dp, "Attention", attention);
+            AddString(dp, "Vendor", vendor);
+            AddString(dp, "Search", q);
+
+            dp.Add("EligibleOnly", eligibleOnly ? 1 : 0);
+            dp.Add("Page", page);
+            dp.Add("PageSize", pageSize);
+
+            using var cn = _db.CreateMain();
+
+            try
+            {
+                using var grid = await cn.QueryMultipleAsync(new CommandDefinition(
+                    SP_PO_ITEMS_ELIGIBLE_REETA,
+                    dp,
+                    commandType: CommandType.StoredProcedure,
+                    cancellationToken: ct
+                ));
+
+                // meta
+                var metaRow = (await grid.ReadAsync<dynamic>()).FirstOrDefault();
+                var meta = metaRow != null ? ToDict(metaRow) : new Dictionary<string, object?>();
+
+                // normalize fallback
+                meta.TryAdd("Page", page);
+                meta.TryAdd("PageSize", pageSize);
+                if (!meta.ContainsKey("TotalRows")) meta["TotalRows"] = 0L;
+
+                // items
+                var items = (await grid.ReadAsync<dynamic>()).Select(ToDict).ToList();
+
+                // fallback total if SP doesn't provide
+                if (ToLongOrZero(meta["TotalRows"]) == 0 && items.Count > 0)
+                    meta["TotalRows"] = items.Count;
+
+                return new Dictionary<string, object?>
+                {
+                    ["meta"] = meta,
+                    ["items"] = items
+                };
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (SqlException ex)
+            {
+                throw new InvalidOperationException($"DB error executing {SP_PO_ITEMS_ELIGIBLE_REETA}: {ex.Message}", ex);
+            }
+        }
+
+        // =========================================================
+        // Internal helpers
+        // =========================================================
+        private async Task<List<Dictionary<string, object?>>> QueryListSpAsync(
+            string spName,
+            Action<DynamicParameters> buildParams,
+            CancellationToken ct)
+        {
+            using var cn = _db.CreateMain();
+
+            var dp = new DynamicParameters();
+            buildParams(dp);
+
+            try
+            {
+                var rows = (await cn.QueryAsync<dynamic>(new CommandDefinition(
+                    spName,
+                    dp,
+                    commandType: CommandType.StoredProcedure,
+                    cancellationToken: ct
+                ))).ToList();
+
+                return rows.Select(ToDict).ToList();
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (SqlException ex)
+            {
+                throw new InvalidOperationException($"DB error executing {spName}: {ex.Message}", ex);
+            }
+        }
+
+        private static Dictionary<string, object?> MergeSummary(Dictionary<string, object?> firstRow)
+        {
+            var merged = DefaultSummary();
+
+            foreach (var k in SummaryKeys)
+            {
+                var v = TryGetValueCaseInsensitive(firstRow, k);
+
+                if (!k.Equals("FilterStatus", StringComparison.OrdinalIgnoreCase))
+                    merged[k] = ToLongOrZero(v);
+                else
+                    merged[k] = v;
+            }
+
+            // extras: kolom lain dari SP yang belum masuk SummaryKeys
+            foreach (var kv in firstRow)
+            {
+                if (!SummaryKeys.Any(x => x.Equals(kv.Key, StringComparison.OrdinalIgnoreCase)))
+                    merged[kv.Key] = kv.Value;
+            }
+
+            return merged;
+        }
+
+        private static void AddDate(DynamicParameters dp, string name, DateTime? value)
+        {
+            if (value != null) dp.Add(name, value.Value.Date);
+        }
+
+        private static void AddString(DynamicParameters dp, string name, string? value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+                dp.Add(name, value.Trim());
+        }
+
+        private static bool HasKey(Dictionary<string, object?> dict, string key)
+            => dict.Keys.Any(k => k.Equals(key, StringComparison.OrdinalIgnoreCase));
+
+        private static object? TryGetValueCaseInsensitive(Dictionary<string, object?> dict, string key)
+        {
+            foreach (var kv in dict)
+                if (kv.Key.Equals(key, StringComparison.OrdinalIgnoreCase))
+                    return kv.Value;
+
+            return null;
+        }
+
+        private static DynamicParameters ToDynamicParamsRemovingNull(Dictionary<string, object?> dict)
+        {
+            var dp = new DynamicParameters();
+            foreach (var kv in dict)
+                if (kv.Value != null)
+                    dp.Add(kv.Key, kv.Value);
+
+            return dp;
+        }
+
+        private static Dictionary<string, object?> ToDict(dynamic row)
+        {
+            // DapperRow implements IDictionary<string, object>
+            var dict = (IDictionary<string, object>)row;
+            return dict.ToDictionary(k => k.Key, v => (object?)v.Value);
+        }
+
         private static long ToLongOrZero(object? v)
         {
             if (v is null) return 0;
@@ -161,346 +579,6 @@ namespace EXPOAPI.Services
             {
                 return 0;
             }
-        }
-
-        // ------------------------------------------------------------
-        // exp.PO_DASHBOARD_SUMMARY_SP -> single row
-        // ------------------------------------------------------------
-        public async Task<Dictionary<string, object?>> GetPoDashboardSummaryAsync(
-            DateTime? startDate = null,
-            DateTime? endDate = null,
-            string? plant = null,
-            string? group = null,
-            string? vendor = null,
-            string docType = "All",
-            CancellationToken ct = default)
-        {
-            using var cn = _db.CreateMain();
-
-            var dp = new DynamicParameters();
-            if (startDate != null) dp.Add("StartDate", startDate.Value.Date);
-            if (endDate != null) dp.Add("EndDate", endDate.Value.Date);
-            if (!string.IsNullOrWhiteSpace(plant)) dp.Add("Plant", plant);
-            if (!string.IsNullOrWhiteSpace(group)) dp.Add("Group", group);
-            if (!string.IsNullOrWhiteSpace(vendor)) dp.Add("Vendor", vendor);
-            dp.Add("DocType", docType ?? "All");
-
-            using var grid = await cn.QueryMultipleAsync(new CommandDefinition(
-                SP_PO_DASHBOARD_SUMMARY,
-                dp,
-                commandType: CommandType.StoredProcedure,
-                cancellationToken: ct
-            ));
-
-            var row = (await grid.ReadAsync<dynamic>()).FirstOrDefault();
-            return row == null ? new Dictionary<string, object?>() : ToDict(row);
-        }
-
-        // ------------------------------------------------------------
-        // exp.PO_VENDOR_SCORECARD_SP -> 2 result sets: items + aggregates
-        // ------------------------------------------------------------
-        public async Task<Dictionary<string, object?>> GetPoVendorScorecardAsync(
-            DateTime? startDate = null,
-            DateTime? endDate = null,
-            string? plant = null,
-            string? group = null,
-            string docType = "All",
-            string? vendor = null,
-            CancellationToken ct = default)
-        {
-            using var cn = _db.CreateMain();
-
-            var dp = new DynamicParameters();
-            if (startDate != null) dp.Add("StartDate", startDate.Value.Date);
-            if (endDate != null) dp.Add("EndDate", endDate.Value.Date);
-            if (!string.IsNullOrWhiteSpace(plant)) dp.Add("Plant", plant);
-            if (!string.IsNullOrWhiteSpace(group)) dp.Add("Group", group);
-            dp.Add("DocType", docType ?? "All");
-            if (!string.IsNullOrWhiteSpace(vendor)) dp.Add("Vendor", vendor);
-
-            using var grid = await cn.QueryMultipleAsync(new CommandDefinition(
-                SP_PO_VENDOR_SCORECARD,
-                dp,
-                commandType: CommandType.StoredProcedure,
-                cancellationToken: ct
-            ));
-
-            var itemsRows = (await grid.ReadAsync<dynamic>()).ToList();
-            var vendorRows = (await grid.ReadAsync<dynamic>()).ToList();
-
-            var items = itemsRows.Select(ToDict).ToList();
-            var vendorAggregates = vendorRows.Select(ToDict).ToList();
-
-            return new Dictionary<string, object?>
-            {
-                ["items"] = items,
-                ["vendor_aggregates"] = vendorAggregates
-            };
-        }
-
-        // ------------------------------------------------------------
-        // exp.PURCHASE_ORDER_TREND_SP -> list rows
-        // ------------------------------------------------------------
-        public async Task<List<Dictionary<string, object?>>> GetPoTrendAsync(
-            DateTime? startDate = null,
-            DateTime? endDate = null,
-            string? plant = null,
-            string? purchasingGroup = null,
-            string? vendor = null,
-            string docType = "All",
-            CancellationToken ct = default)
-        {
-            using var cn = _db.CreateMain();
-
-            var dp = new DynamicParameters();
-            if (startDate != null) dp.Add("StartDate", startDate.Value.Date);
-            if (endDate != null) dp.Add("EndDate", endDate.Value.Date);
-            if (!string.IsNullOrWhiteSpace(plant)) dp.Add("Plant", plant);
-            if (!string.IsNullOrWhiteSpace(purchasingGroup)) dp.Add("PurchasingGroup", purchasingGroup);
-            if (!string.IsNullOrWhiteSpace(vendor)) dp.Add("Vendor", vendor);
-            dp.Add("DocType", docType ?? "All");
-
-            var rows = (await cn.QueryAsync<dynamic>(new CommandDefinition(
-                SP_PO_TREND,
-                dp,
-                commandType: CommandType.StoredProcedure,
-                cancellationToken: ct
-            ))).ToList();
-
-            return rows.Select(ToDict).ToList();
-        }
-
-        // ------------------------------------------------------------
-        // exp.PURCHASE_ORDER_STATUS_DISTRIBUTION_SP -> list rows
-        // ------------------------------------------------------------
-        public async Task<List<Dictionary<string, object?>>> GetPoStatusDistributionAsync(
-            DateTime? startDate = null,
-            DateTime? endDate = null,
-            string? plant = null,
-            string? purchasingGroup = null,
-            string? vendor = null,
-            string docType = "All",
-            CancellationToken ct = default)
-        {
-            using var cn = _db.CreateMain();
-
-            var dp = new DynamicParameters();
-            if (startDate != null) dp.Add("StartDate", startDate.Value.Date);
-            if (endDate != null) dp.Add("EndDate", endDate.Value.Date);
-            if (!string.IsNullOrWhiteSpace(plant)) dp.Add("Plant", plant);
-            if (!string.IsNullOrWhiteSpace(purchasingGroup)) dp.Add("PurchasingGroup", purchasingGroup);
-            if (!string.IsNullOrWhiteSpace(vendor)) dp.Add("Vendor", vendor);
-            dp.Add("DocType", docType ?? "All");
-
-            var rows = (await cn.QueryAsync<dynamic>(new CommandDefinition(
-                SP_PO_STATUS_DIST,
-                dp,
-                commandType: CommandType.StoredProcedure,
-                cancellationToken: ct
-            ))).ToList();
-
-            return rows.Select(ToDict).ToList();
-        }
-
-        // ------------------------------------------------------------
-        // exp.PURCHASE_ORDER_MONTHLY_COMPLETION_DELAY_SP -> list rows
-        // ------------------------------------------------------------
-        public async Task<List<Dictionary<string, object?>>> GetPoMonthlyCompletionDelayAsync(
-            DateTime? startDate = null,
-            DateTime? endDate = null,
-            string? plant = null,
-            string? group = null,
-            string? vendor = null,
-            string docType = "All",
-            CancellationToken ct = default)
-        {
-            using var cn = _db.CreateMain();
-
-            var dp = new DynamicParameters();
-            if (startDate != null) dp.Add("StartDate", startDate.Value.Date);
-            if (endDate != null) dp.Add("EndDate", endDate.Value.Date);
-            if (!string.IsNullOrWhiteSpace(plant)) dp.Add("Plant", plant);
-            if (!string.IsNullOrWhiteSpace(group)) dp.Add("Group", group);
-            if (!string.IsNullOrWhiteSpace(vendor)) dp.Add("Vendor", vendor);
-            dp.Add("DocType", docType ?? "All");
-
-            var rows = (await cn.QueryAsync<dynamic>(new CommandDefinition(
-                SP_PO_MONTHLY_COMPLETION_DELAY,
-                dp,
-                commandType: CommandType.StoredProcedure,
-                cancellationToken: ct
-            ))).ToList();
-
-            return rows.Select(ToDict).ToList();
-        }
-
-        // ------------------------------------------------------------
-        // exp.PO_DASHBOARD_MASTERFILTER_SP -> 2 result sets:
-        //   1) plants (single col)
-        //   2) suppliers (formatted_name, raw_name)
-        // ------------------------------------------------------------
-        public async Task<Dictionary<string, object?>> GetPoDashboardMasterfiltersAsync(CancellationToken ct = default)
-        {
-            using var cn = _db.CreateMain();
-
-            try
-            {
-                using var grid = await cn.QueryMultipleAsync(new CommandDefinition(
-                    SP_PO_MASTERFILTER,
-                    commandType: CommandType.StoredProcedure,
-                    cancellationToken: ct
-                ));
-
-                // Result set #1: plants
-                var plantsRows = (await grid.ReadAsync<dynamic>()).ToList();
-
-                // Result set #2: suppliers (guard kalau SP hanya return 1 set)
-                var suppliersRows = !grid.IsConsumed
-                    ? (await grid.ReadAsync<dynamic>()).ToList()
-                    : new List<dynamic>();
-
-                var plants = new List<string>();
-                foreach (var r in plantsRows)
-                {
-                    var d = ToDict(r);
-                    if (d.Count == 0) continue;
-
-                    string? v = null;
-                    using (var it = d.Values.GetEnumerator())
-                    {
-                        if (it.MoveNext())
-                            v = it.Current?.ToString();
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(v))
-                        plants.Add(v);
-                }
-
-
-                // suppliers unique: (name, raw), sort by name
-                var supplierSet = new HashSet<(string name, string raw)>();
-
-                foreach (var r in suppliersRows)
-                {
-                    var d = ToDict(r);
-                    if (d.Count == 0) continue;
-
-                    string name = "";
-                    string raw = "";
-
-                    using (var it = d.Values.GetEnumerator())
-                    {
-                        if (it.MoveNext())
-                            name = it.Current?.ToString() ?? "";
-
-                        if (it.MoveNext())
-                            raw = it.Current?.ToString() ?? "";
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(name))
-                        supplierSet.Add((name, raw));
-                }
-
-
-                var suppliers = supplierSet
-                    .OrderBy(x => x.name, StringComparer.OrdinalIgnoreCase)
-                    .Select(x => new Dictionary<string, object?>
-                    {
-                        ["name"] = x.name,
-                        ["raw"] = x.raw
-                    })
-                    .ToList();
-
-                return new Dictionary<string, object?>
-                {
-                    ["plants"] = plants,
-                    ["suppliers"] = suppliers
-                };
-            }
-            catch (OperationCanceledException)
-            {
-                // biar cancellation tetap benar (jangan dibungkus jadi exception lain)
-                throw;
-            }
-            catch (SqlException ex) // kalau kamu pakai Microsoft.Data.SqlClient / System.Data.SqlClient
-            {
-                //_logger.LogError(ex,
-                //    "SQL error calling {SP}. Number={Number}, State={State}, Line={Line}, Message={Message}",
-                //    SP_PO_MASTERFILTER, ex.Number, ex.State, ex.LineNumber, ex.Message);
-
-                throw new InvalidOperationException($"DB error executing {SP_PO_MASTERFILTER}: {ex.Message}", ex);
-            }
-            catch (Exception ex)
-            {
-                //_logger.LogError(ex, "Unhandled error calling {SP}", SP_PO_MASTERFILTER);
-                throw;
-            }
-        }
-
-        // ------------------------------------------------------------
-        // exp.PurchaseOrderDetail_SP -> 2 result sets: statusFlow + reEtaRequests
-        // ------------------------------------------------------------
-        public async Task<(List<Dictionary<string, object?>> StatusFlow, List<Dictionary<string, object?>> ReEtaRequests)>
-            GetPurchaseOrderDetailAsync(string poid, CancellationToken ct = default)
-        {
-            using var conn = _db.CreateMain();
-            var result = await conn.QueryMultipleAsync(
-                "exp.PurchaseOrderDetail_SP",
-                new { POID = poid },
-                commandType: CommandType.StoredProcedure
-            );
-
-            var statusFlow = (await result.ReadAsync())
-                .Select(row => (IDictionary<string, object?>)row)
-                .Select(dict => dict.ToDictionary(kv => kv.Key, kv => kv.Value))
-                .ToList();
-
-            var reEtaRequests = (await result.ReadAsync())
-                .Select(row => (IDictionary<string, object?>)row)
-                .Select(dict => dict.ToDictionary(kv => kv.Key, kv => kv.Value))
-                .ToList();
-
-            return (statusFlow, reEtaRequests);
-        }
-
-        // =========================
-        // Helpers
-        // =========================
-        //private static Dictionary<string, object?> DefaultSummary()
-        //{
-        //    var d = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        //    foreach (var k in SummaryKeys) d[k] = 0;
-        //    return d;
-        //}
-
-        private static bool HasKey(Dictionary<string, object?> dict, string key)
-            => dict.Keys.Any(k => k.Equals(key, StringComparison.OrdinalIgnoreCase));
-
-        private static object? TryGetValueCaseInsensitive(Dictionary<string, object?> dict, string key)
-        {
-            foreach (var kv in dict)
-            {
-                if (kv.Key.Equals(key, StringComparison.OrdinalIgnoreCase))
-                    return kv.Value;
-            }
-            return null;
-        }
-
-        private static DynamicParameters ToDynamicParamsRemovingNull(Dictionary<string, object?> dict)
-        {
-            var dp = new DynamicParameters();
-            foreach (var kv in dict)
-            {
-                if (kv.Value != null)
-                    dp.Add(kv.Key, kv.Value);
-            }
-            return dp;
-        }
-
-        private static Dictionary<string, object?> ToDict(dynamic row)
-        {
-            var dict = (IDictionary<string, object>)row;
-            return dict.ToDictionary(k => k.Key, v => (object?)v.Value);
         }
     }
 }
