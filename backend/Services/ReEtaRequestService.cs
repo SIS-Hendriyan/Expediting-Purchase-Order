@@ -136,10 +136,6 @@ namespace EXPOAPI.Services
 
             var dp = new DynamicParameters();
             dp.Add("ID_PO_Item", idPoItem);
-            dp.Add("PONumber", poNumber);
-            dp.Add("POItemNo", poItemNo);
-            dp.Add("VendorCode", vendorCode);
-            dp.Add("VendorName", vendorName);
             dp.Add("CurrentETA", currentEta?.Date);
             dp.Add("ProposedETADays", proposedEtaDays); // ✅ match SP
             dp.Add("Reason", reason);

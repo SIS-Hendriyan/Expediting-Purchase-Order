@@ -39,7 +39,7 @@ namespace EXPOAPI.Controllers
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> Summary([FromQuery] string? status,int? Attraction, CancellationToken ct)
+        public async Task<IActionResult> Summary([FromQuery] string? status,int? Attraction, [FromQuery] string? vendorName, CancellationToken ct)
         {
             var spParams = new Dictionary<string, object?>();
 
@@ -67,6 +67,11 @@ namespace EXPOAPI.Controllers
                 spParams["Attention"] = Attraction.Value; // ✅ matches SP param name
             }
 
+            if (!string.IsNullOrWhiteSpace(vendorName))
+            {
+                spParams["VendorName"] = vendorName.Trim();
+            }
+
             try
             {
                 var data = await _po.GetPurchaseOrderSummaryAsync(spParams, ct);
@@ -90,19 +95,24 @@ namespace EXPOAPI.Controllers
 
             try
             {
-                var (statusFlow, reEtaRequests) = await _po.GetPurchaseOrderDetailAsync(poid, ct);
+                var (statusFlow, reEtaRequests, poDetail) = await _po.GetPurchaseOrderDetailAsync(poid, ct);
+
                 return OkResponse("purchase order detail retrieved", new
                 {
                     StatusFlow = statusFlow,
-                    ReEtaRequests = reEtaRequests
+                    ReEtaRequests = reEtaRequests,
+                    PoDetail = poDetail
                 });
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
                 return ServerErrorResponse($"failed to fetch purchase order detail: {ex.Message}");
             }
         }
-
         // GET /api/purchase-order/items
         [HttpGet("items")]
         public async Task<IActionResult> Items(

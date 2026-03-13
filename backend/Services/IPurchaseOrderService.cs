@@ -67,7 +67,7 @@
 
         Task<Dictionary<string, object?>> GetPoDashboardMasterfiltersAsync(CancellationToken ct = default);
 
-        Task<(List<Dictionary<string, object?>> StatusFlow, List<Dictionary<string, object?>> ReEtaRequests)>
+        Task<(List<Dictionary<string, object?>> StatusFlow, List<Dictionary<string, object?>> ReEtaRequests, Dictionary<string, object?>? PoDetail)>
             GetPurchaseOrderDetailAsync(string poid, CancellationToken ct = default);
     }
 }
