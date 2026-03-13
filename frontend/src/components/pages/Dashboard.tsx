@@ -1,5 +1,6 @@
 // src/components/pages/Dashboard.tsx
 import { useState, useEffect } from 'react';
+import * as XLSX from 'xlsx';
 import { Card } from '../ui/card';
 import { getAccessToken } from '../../utils/authSession';
 import {
@@ -469,6 +470,166 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
       console.error('Failed to fetch monthly completion delay', err);
     }
   };
+
+  const escapeCsvValue = (value: unknown): string => {
+  if (value === null || value === undefined) return '""';
+  const str = String(value).replace(/"/g, '""');
+  return `"${str}"`;
+};
+
+const downloadCsvFile = (filename: string, rows: (string | number)[][]) => {
+  const csvContent = rows
+    .map((row) => row.map((cell) => escapeCsvValue(cell)).join(','))
+    .join('\n');
+
+  const blob = new Blob([csvContent], {
+    type: 'text/csv;charset=utf-8;',
+  });
+
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+};
+
+const downloadXlsLikeTsvFile = (filename: string, rows: (string | number)[][]) => {
+  const sanitizeCell = (value: string | number) => {
+    if (value === null || value === undefined) return '';
+    return String(value)
+      .replace(/\t/g, ' ')
+      .replace(/\r?\n/g, ' ');
+  };
+
+  const content = rows
+    .map((row) => row.map((cell) => sanitizeCell(cell)).join('\t'))
+    .join('\n');
+
+  const blob = new Blob([content], {
+    type: 'application/vnd.ms-excel;charset=utf-8;',
+  });
+
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+};
+
+const handleExportVendorScorecard = () => {
+  const today = new Date();
+  const fileDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(
+    today.getDate()
+  ).padStart(2, '0')}`;
+
+  if (user.role === 'vendor') {
+    const filteredRecords = vendorScorecardItems.filter((item) => {
+      if (!user.company) return true;
+      return item.vendorName === user.company || item.vendorCode === user.company;
+    });
+
+    const sortedRecords = [...filteredRecords].sort((a, b) =>
+      scorecardSortOrder === 'desc'
+        ? b.overallScore - a.overallScore
+        : a.overallScore - b.overallScore
+    );
+
+    const rows: (string | number)[][] = [
+      [
+        'Purchase Order',
+        'Item of Requisition',
+        'Vendor Code',
+        'Vendor Name',
+        'OTD (%)',
+        'Communication (%)',
+        'Re-ETA Accepted (%)',
+        'Re-ETA Rejected (%)',
+        'Excellence Point (%)',
+        'Overall Score (%)',
+      ],
+      ...sortedRecords.map((record) => [
+        record.poNumber,
+        record.itemOfRequisition,
+        record.vendorCode,
+        record.vendorName,
+        record.otd,
+        record.communication,
+        record.reETAAccepted,
+        record.reETARejected,
+        record.excellencePoint,
+        record.overallScore,
+      ]),
+    ];
+
+  downloadXlsLikeTsvFile(`vendor-scorecard-${fileDate}.xls`, rows);
+    return;
+  }
+
+  const sortedVendorAggregates = [...vendorScorecardAggregates].sort((a, b) =>
+    scorecardSortOrder === 'desc'
+      ? b.overallScore - a.overallScore
+      : a.overallScore - b.overallScore
+  );
+
+  const rows: (string | number)[][] = [
+    [
+      'Vendor Code',
+      'Vendor Name',
+      'OTD (%)',
+      'Communication (%)',
+      'Re-ETA Accepted (%)',
+      'Re-ETA Rejected (%)',
+      'Excellence Point (%)',
+      'Overall Score (%)',
+      'Items Count',
+      'Row Type',
+      'PO Number',
+      'Item of Requisition',
+    ],
+  ];
+
+  sortedVendorAggregates.forEach((vendorData) => {
+    rows.push([
+      vendorData.vendorCode,
+      vendorData.vendorName,
+      vendorData.otd,
+      vendorData.communication,
+      vendorData.reETAAccepted,
+      vendorData.reETARejected,
+      vendorData.excellencePoint,
+      vendorData.overallScore,
+      vendorData.itemsCount,
+      'SUMMARY',
+      '',
+      '',
+    ]);
+
+    vendorData.items.forEach((item) => {
+      rows.push([
+        item.vendorCode,
+        item.vendorName,
+        item.otd,
+        item.communication,
+        item.reETAAccepted,
+        item.reETARejected,
+        item.excellencePoint,
+        item.overallScore,
+        '',
+        'DETAIL',
+        item.poNumber,
+        item.itemOfRequisition,
+      ]);
+    });
+  });
+
+  downloadCsvFile(`vendor-scorecard-${fileDate}.csv`, rows);
+};
 
   // ========= API CALL: /api/dashboard/vendor/scorecard =========
   const fetchVendorScorecard = async (useDefault: boolean = false) => {
@@ -1069,63 +1230,81 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
             </Card>
 
             {/* Overdue Orders */}
-            <Card className="p-6 lg:col-span-1 relative">
-              <div className="flex items-start justify-between mb-2">
-                <div className="p-3 rounded-lg" style={{ backgroundColor: 'rgba(212, 24, 61, 0.1)' }}>
-                  <AlertTriangle className="h-6 w-6 text-red-600" />
-                </div>
-                <div className="flex items-center gap-1 text-red-600 text-sm mr-6">
-                  <TrendingUp className="h-4 w-4" />
-                  8%
-                </div>
-              </div>
-              <div className="text-gray-600 text-sm mb-0.5">Overdue Orders</div>
-              <div className="text-3xl text-red-600">{totalOverdue}</div>
-              <div className="text-xs text-gray-500 mt-0.5">
-                {`${totalLate} late + ${totalNotArrived} not arrived`}
-              </div>
-              <button
-                onClick={() => onPageChange('purchase-order')}
-                className="absolute bottom-4 right-4 p-1.5 rounded-full bg-red-50 text-red-600 transition-colors hover:bg-red-100"
-                aria-label="View orders"
+            <Card className="p-6 lg:col-span-1 relative min-h-[220px] flex flex-col">
+            <div className="flex items-start justify-between mb-2">
+              <div
+                className="p-3 rounded-lg"
+                style={{ backgroundColor: 'rgba(212, 24, 61, 0.1)' }}
               >
-                <ArrowRight className="h-4 w-4" />
-              </button>
-            </Card>
+                <AlertTriangle className="h-6 w-6 text-red-600" />
+              </div>
+              <div className="flex items-center gap-1 text-red-600 text-sm mr-2">
+                <TrendingUp className="h-4 w-4" />
+                8%
+              </div>
+            </div>
+
+            <div className="text-gray-600 text-sm mb-0.5">Overdue Orders</div>
+            <div className="text-3xl text-red-600">{totalOverdue}</div>
+           <div className="mt-0.5 flex items-center justify-between gap-2">
+            <div className="text-xs text-gray-500">
+              {`${totalLate} late + ${totalNotArrived} not arrived`}
+            </div>
+
+           <button
+  onClick={() => onPageChange('purchase-order?attraction=2')}
+  className="inline-flex !h-10 !w-10 items-center justify-center rounded-full p-1 bg-red-50 text-red-600 transition-colors hover:bg-red-100 shrink-0"
+  aria-label="View orders"
+>
+  <ArrowRight className="h-4 w-4" />
+</button>
+          </div>
+          </Card>
           </div>
 
           {/* Vendor View - Row 2 */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 mb-4 sm:mb-6">
             {/* POs Need Update (dummy logic) */}
-            <Card className="p-6 relative">
-              <div className="flex items-start justify-between mb-2">
-                <div className="p-3 rounded-lg" style={{ backgroundColor: 'rgba(237, 131, 45, 0.1)' }}>
-                  <AlertTriangle className="h-6 w-6" style={{ color: '#ED832D' }} />
-                </div>
-                <div className="flex items-center gap-1 text-gray-600 text-sm">
-                  <span>—</span>
-                </div>
-              </div>
-              <div className="text-gray-600 text-sm mb-0.5">POs Need Update</div>
-              <div className="text-3xl" style={{ color: '#ED832D' }}>
-                12
-              </div>
-              <div className="text-xs text-gray-500 mt-0.5">ETA D-2 or D-1</div>
-              <button
-                onClick={() => onPageChange('purchase-order')}
-                className="absolute bottom-4 right-4 p-1.5 rounded-full transition-colors"
-                style={{ backgroundColor: 'rgba(237, 131, 45, 0.1)', color: '#ED832D' }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'rgba(237, 131, 45, 0.2)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'rgba(237, 131, 45, 0.1)';
-                }}
-                aria-label="Update POs"
-              >
-                <ArrowRight className="h-4 w-4" />
-              </button>
-            </Card>
+          <Card className="p-6 min-h-[220px] flex flex-col">
+  <div className="flex items-start justify-between mb-2">
+    <div
+      className="p-3 rounded-lg"
+      style={{ backgroundColor: 'rgba(237, 131, 45, 0.1)' }}
+    >
+      <AlertTriangle className="h-6 w-6" style={{ color: '#ED832D' }} />
+    </div>
+    <div className="flex items-center gap-1 text-gray-600 text-sm">
+      <span>—</span>
+    </div>
+  </div>
+
+  <div className="text-gray-600 text-sm mb-0.5">POs Need Update</div>
+  <div className="text-3xl" style={{ color: '#ED832D' }}>
+    12
+  </div>
+
+  <div className="mt-0.5 flex items-center justify-between gap-2">
+    <div className="text-xs text-gray-500">ETA D-2 or D-1</div>
+
+   <button
+  onClick={() => onPageChange('purchase-order?attraction=1')}
+  className="inline-flex !h-10 !w-10 items-center justify-center rounded-full p-1 transition-colors shrink-0"
+  style={{
+    backgroundColor: 'rgba(237, 131, 45, 0.1)',
+    color: '#ED832D',
+  }}
+  onMouseEnter={(e) => {
+    e.currentTarget.style.backgroundColor = 'rgba(237, 131, 45, 0.2)';
+  }}
+  onMouseLeave={(e) => {
+    e.currentTarget.style.backgroundColor = 'rgba(237, 131, 45, 0.1)';
+  }}
+  aria-label="Update POs"
+>
+  <ArrowRight className="h-4 w-4" />
+</button>
+  </div>
+</Card>
 
             {/* Average Delay */}
             <Card className="p-6">
@@ -1251,28 +1430,35 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
             </Card>
 
             {/* Overdue Orders */}
-            <Card className="p-6 relative">
+            <Card className="p-6 lg:col-span-1 relative min-h-[220px] flex flex-col">
               <div className="flex items-start justify-between mb-2">
-                <div className="p-3 rounded-lg" style={{ backgroundColor: 'rgba(212, 24, 61, 0.1)' }}>
+                <div
+                  className="p-3 rounded-lg"
+                  style={{ backgroundColor: 'rgba(212, 24, 61, 0.1)' }}
+                >
                   <AlertTriangle className="h-6 w-6 text-red-600" />
                 </div>
-               <div className="flex items-center gap-1 text-red-600 text-sm mr-2">
+                <div className="flex items-center gap-1 text-red-600 text-sm mr-2">
                   <TrendingUp className="h-4 w-4" />
                   8%
                 </div>
               </div>
+
               <div className="text-gray-600 text-sm mb-0.5">Overdue Orders</div>
               <div className="text-3xl text-red-600">{totalOverdue}</div>
-              <div className="text-xs text-gray-500 mt-0.5">
-                {`${totalLate} late + ${totalNotArrived} not arrived`}
-              </div>
-              <button
-                onClick={() => onPageChange('purchase-order')}
-                className="absolute bottom-4 right-4 p-1.5 rounded-full bg-red-50 text-red-600 transition-colors hover:bg-red-100"
-                aria-label="View orders"
-              >
-                <ArrowRight className="h-4 w-4" />
-              </button>
+              <div className="mt-0.5 flex items-center justify-between gap-2">
+  <div className="text-xs text-gray-500">
+    {`${totalLate} late + ${totalNotArrived} not arrived`}
+  </div>
+
+ <button
+  onClick={() => onPageChange('purchase-order?attraction=2')}
+  className="inline-flex !h-10 !w-10 items-center justify-center rounded-full p-1 bg-red-50 text-red-600 transition-colors hover:bg-red-100 shrink-0"
+  aria-label="View orders"
+>
+  <ArrowRight className="h-4 w-4" />
+</button>
+</div>
             </Card>
 
             {/* Average Delay - Admin only */}
@@ -1590,9 +1776,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
               </div>
               {user.role === 'admin' && (
                 <Button
-                  onClick={() => {
-                    console.log('Exporting vendor scorecard to Excel...');
-                  }}
+                  onClick={handleExportVendorScorecard}
                   variant="outline"
                   className="transition-colors"
                   style={{

@@ -49,14 +49,10 @@ type AttentionFilter = 'updates' | 'overdue' | null;
 
 type AttentionRaw = number | 'Need Update' | 'Overdue' | null | undefined;
 type AttentionNorm = 0 | 1 | 2;
-
-// ✅ NEW: key type for detail
 type OrderKey = string | number;
 
 export interface PurchaseOrderItem {
-  // ✅ NEW: from /purchaseorder/summary
   id?: OrderKey | null;
-
   purchaseRequisition: string;
   itemOfRequisition: string;
   purchasingDocument: string;
@@ -76,9 +72,9 @@ export interface PurchaseOrderItem {
   changedOn: string | null;
   grCreatedDate: string | null;
   remarks: string | null;
-  reEtaDate: string | null;  // dd-MMM-yyyy from SP
-  status: string;            // backend raw
-  attention?: AttentionRaw;  // backend: 1/2 or "Need Update"/"Overdue"
+  reEtaDate: string | null;
+  status: string;
+  attention?: AttentionRaw;
 }
 
 interface PurchaseOrderSummary {
@@ -88,13 +84,10 @@ interface PurchaseOrderSummary {
   POOnDelivery: number;
   POPartiallyReceived: number;
   POFullyReceived: number;
-
-  // optional counts from backend
   PONeedUpdate?: number;
   POOverdue?: number;
   PONeedUpdateFiltered?: number;
   POOverdueFiltered?: number;
-
   TotalFiltered?: number;
   PageSize?: number;
   FilterStatus?: string | null;
@@ -143,14 +136,12 @@ const ATTENTION_UI_TO_BACKEND: Record<Exclude<AttentionFilter, null>, 1 | 2> = {
 const ALLOWED_EXCEL_EXTENSIONS = ['.xlsx', '.xls'];
 const toArray = (v: any): any[] => (Array.isArray(v) ? v : v ? [v] : []);
 
-// ✅ normalize item.id (karena kadang backend kirim ID / Id)
 const normalizeItemId = (it: any): OrderKey | null => {
   const v = it?.id ?? it?.ID ?? it?.Id ?? null;
   if (v === null || v === undefined || v === '') return null;
   return v as OrderKey;
 };
 
-// ✅ key for detail: prefer id, fallback purchasingDocument
 const getOrderKey = (o: PurchaseOrderItem): OrderKey =>
   (o.id !== null && o.id !== undefined && o.id !== '' ? o.id : o.purchasingDocument);
 
@@ -165,15 +156,10 @@ function unwrapPOPayload(json: AnyObj): { summary: PurchaseOrderSummary | null; 
     lvl2?.list ?? lvl2?.List ?? [];
 
   const items = (Array.isArray(itemsRaw) ? itemsRaw : toArray(itemsRaw)) as PurchaseOrderItem[];
-
-  // ✅ ensure id normalized
   const normalizedItems = items.map((x: any) => ({ ...x, id: normalizeItemId(x) })) as PurchaseOrderItem[];
 
   return { summary, items: normalizedItems };
 }
-
-const eqCI = (a?: string | null, b?: string | null) =>
-  (a ?? '').trim().toLowerCase() === (b ?? '').trim().toLowerCase();
 
 const normalizeAttention = (v: AttentionRaw): AttentionNorm => {
   if (v === 1 || v === 2) return v;
@@ -231,6 +217,33 @@ const statusColor = (displayStatus: string) => {
     case 'Fully Received': return '#6AA75D';
     default: return '#014357';
   }
+};
+
+// ---- Querystring helpers ----
+const getInitialAttentionFilterFromQuery = (): AttentionFilter => {
+  if (typeof window === 'undefined') return null;
+
+  const params = new URLSearchParams(window.location.search);
+  const attraction = params.get('attraction');
+
+  if (attraction === '1') return 'updates';
+  if (attraction === '2') return 'overdue';
+
+  return null;
+};
+
+const syncAttractionQuery = (value: 1 | 2 | null) => {
+  if (typeof window === 'undefined') return;
+
+  const url = new URL(window.location.href);
+
+  if (value === 1 || value === 2) {
+    url.searchParams.set('attraction', String(value));
+  } else {
+    url.searchParams.delete('attraction');
+  }
+
+  window.history.replaceState({}, '', url.toString());
 };
 
 // ---- Auth helpers ----
@@ -329,6 +342,7 @@ const columnLabel = (k: ColumnKey, role: User['role']) => {
 
 const attentionBadge = (raw: AttentionRaw) => {
   const att = normalizeAttention(raw);
+
   if (att === 2) {
     return (
       <Badge
@@ -339,6 +353,7 @@ const attentionBadge = (raw: AttentionRaw) => {
       </Badge>
     );
   }
+
   if (att === 1) {
     return (
       <Badge
@@ -349,6 +364,7 @@ const attentionBadge = (raw: AttentionRaw) => {
       </Badge>
     );
   }
+
   return <span className="text-gray-400">-</span>;
 };
 
@@ -359,14 +375,11 @@ const isExcelFile = (file: File): boolean => {
 
 // ================== Component ==================
 export function PurchaseOrder({ user }: PurchaseOrderProps) {
-  // View state
   const [selectedOrderId, setSelectedOrderId] = useState<OrderKey | null>(null);
 
-  // Tabs + special attention filter (affects LIST only)
   const [activeTab, setActiveTab] = useState<StatusTab>('all');
-  const [specialFilter, setSpecialFilter] = useState<AttentionFilter>(null);
+  const [specialFilter, setSpecialFilter] = useState<AttentionFilter>(() => getInitialAttentionFilterFromQuery());
 
-  // UI / filters / pagination
   const [searchQuery, setSearchQuery] = useState('');
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -379,62 +392,124 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const [filterSupplier, setFilterSupplier] = useState('');
   const [filterDocType, setFilterDocType] = useState('');
 
-  // Data (LIST)
   const [orders, setOrders] = useState<PurchaseOrderItem[]>([]);
   const [summary, setSummary] = useState<PurchaseOrderSummary | null>(null);
-
-  // ✅ Data (CARDS / GLOBAL COUNTS) - NEVER affected by specialFilter
   const [cardSummary, setCardSummary] = useState<PurchaseOrderSummary | null>(null);
 
-  // Network
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Update dialog
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
   const [orderToUpdate, setOrderToUpdate] = useState<PurchaseOrderItem | null>(null);
   const [updateRemarks, setUpdateRemarks] = useState('');
 
-  // Upload PO dialog
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Column visibility
+  const [submittingUpdate, setSubmittingUpdate] = useState(false);
+
   const [visibleColumns, setVisibleColumns] = useState<ColumnVis>(() => initialColumnsForRole(user.role));
+
+  const vendorName = useMemo(() => {
+    const s = getAuthSession();
+    return isVendorSession(s) ? s.vendorName : '';
+  }, [user.role]);
+
   const toggleColumn = useCallback((column: ColumnKey) => {
     setVisibleColumns(prev => ({ ...prev, [column]: !prev[column] }));
   }, []);
 
-  // Session debug (optional)
+  const currentAttentionParam: 1 | 2 | null = useMemo(() => {
+    return specialFilter ? ATTENTION_UI_TO_BACKEND[specialFilter] : null;
+  }, [specialFilter]);
+
+  const submitPoStatusUpdate = useCallback(
+    async (payload: Record<string, unknown>) => {
+      const res = await fetch(API.POSTATUS_UPSERT(), {
+        method: 'POST',
+        headers: buildAuthHeaders(),
+        body: JSON.stringify(payload),
+      });
+
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
+
+      if (!res.ok) {
+        throw new Error(
+          data?.message ||
+          data?.Message ||
+          data?.title ||
+          'Failed to update PO status'
+        );
+      }
+
+      return data;
+    },
+    [],
+  );
+
   useEffect(() => {
     const s = getAuthSession();
-    if (isVendorSession(s)) console.debug('[PO] VENDOR session:', s.vendorName, s.id);
-    if (isInternalSession(s)) console.debug('[PO] INTERNAL session:', s.role, s.id);
-  }, []);
 
-  // ----- URL builders -----
+    if (isVendorSession(s)) {
+      console.log('[PO] VENDOR session:', {
+        id: s.id,
+        vendorName: s.vendorName,
+        email: s.email,
+      });
+    }
+
+    if (isInternalSession(s)) {
+      console.log('[PO] INTERNAL session:', {
+        id: s.id,
+        role: s.role,
+        email: s.email,
+      });
+    }
+
+    console.log('[PO] user.role =', user.role);
+    console.log('[PO] vendorName =', vendorName);
+    console.log('[PO] specialFilter from query =', specialFilter);
+  }, [user.role, vendorName, specialFilter]);
+
   const buildListUrl = useCallback((tab: StatusTab, attention: 1 | 2 | null) => {
     const url = new URL(API.SUMMARYPO());
     const statusParam =
       tab === 'all' ? null : STATUS_TAB_TO_PARAM[tab as Exclude<StatusTab, 'all'>];
 
-    if (statusParam) url.searchParams.set('status', statusParam);
+    if (statusParam) {
+      url.searchParams.set('status', statusParam);
+    }
 
     if (attention === 1 || attention === 2) {
       url.searchParams.set('attention', String(attention));
       url.searchParams.set('attraction', String(attention));
     }
 
+    if (user.role === 'vendor' && vendorName) {
+      url.searchParams.set('vendorName', vendorName);
+    }
+
     return url;
-  }, []);
+  }, [user.role, vendorName]);
 
-  // ✅ Cards ALWAYS use global endpoint (no status, no attention)
-  const buildCardsUrl = useCallback(() => new URL(API.SUMMARYPO()), []);
+  const buildCardsUrl = useCallback(() => {
+    const url = new URL(API.SUMMARYPO());
 
-  // ----- Fetch: CARDS (GLOBAL COUNTS) -----
+    if (user.role === 'vendor' && vendorName) {
+      url.searchParams.set('vendorName', vendorName);
+    }
+
+    return url;
+  }, [user.role, vendorName]);
+
   const fetchCardSummary = useCallback(async () => {
     try {
       const url = buildCardsUrl();
@@ -456,7 +531,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     }
   }, [buildCardsUrl]);
 
-  // ----- Fetch: LIST (TAB + specialFilter) -----
   const fetchPurchaseOrders = useCallback(async (tab: StatusTab, attention: 1 | 2 | null) => {
     setLoading(true);
     setLoadError(null);
@@ -466,10 +540,11 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
     const url = buildListUrl(tab, attention);
 
-    console.debug('[PO] list request:', {
+    console.log('[PO] list request:', {
       url: url.toString(),
       tab,
       attention,
+      vendorName,
       headers: { hasAuth: !!getAuthToken() },
     });
 
@@ -484,8 +559,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         let body: any = undefined;
         try {
           const text = await res.text();
-          body = (() => { try { return JSON.parse(text); } catch { return text; } })();
-        } catch { /* ignore */ }
+          body = (() => {
+            try { return JSON.parse(text); } catch { return text; }
+          })();
+        } catch {}
 
         console.error('[PO] HTTP error', res.status, body);
         throw new Error(`HTTP ${res.status}`);
@@ -500,6 +577,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     } catch (err: any) {
       console.error('[PO] list fetch failed:', err);
       const isAbort = err?.name === 'AbortError';
+
       setLoadError(isAbort ? 'Request timeout. Please try again.' : 'Failed to load purchase orders');
       setSummary(null);
       setOrders([]);
@@ -508,27 +586,18 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       clearTimeout(timeout);
       setLoading(false);
     }
-  }, [buildListUrl]);
+  }, [buildListUrl, vendorName]);
 
-  // ✅ Fetch card summary once on mount (and you can also re-run after upload)
-  useEffect(() => { fetchCardSummary(); }, [fetchCardSummary]);
-
-  // ✅ Fetch list on tab OR specialFilter change
   useEffect(() => {
-    const att: 1 | 2 | null =
-      specialFilter ? ATTENTION_UI_TO_BACKEND[specialFilter] : null;
+    fetchCardSummary();
+  }, [fetchCardSummary]);
 
-    fetchPurchaseOrders(activeTab, att);
-  }, [activeTab, specialFilter, fetchPurchaseOrders]);
+  useEffect(() => {
+    fetchPurchaseOrders(activeTab, currentAttentionParam);
+  }, [activeTab, currentAttentionParam, fetchPurchaseOrders]);
 
-  // ----- Scoped for vendor -----
-  const scopedOrders = useMemo(() => {
-    if (user.role !== 'vendor') return orders;
-    if (!user.company) return orders;
-    return orders.filter(o => eqCI(o.nameOfSupplier, user.company));
-  }, [orders, user.role, user.company]);
+  const scopedOrders = useMemo(() => orders, [orders]);
 
-  // ----- Filter options -----
   const filterOptions = useMemo(() => {
     const uniq = (arr: (string | null | undefined)[]) =>
       Array.from(new Set(arr.filter(Boolean).map(v => String(v)))) as string[];
@@ -542,7 +611,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     };
   }, [scopedOrders]);
 
-  // ----- Search + Filters (client-side) -----
   const filteredOrders = useMemo(() => {
     let list = scopedOrders;
 
@@ -560,30 +628,40 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     if (filterStatus && filterStatus !== 'all') {
       list = list.filter(o => mapBackendStatusToDisplay(o.status) === filterStatus);
     }
+
     if (filterStorage && filterStorage !== 'all') {
       list = list.filter(o => (o.storageLocation ?? '') === filterStorage);
     }
+
     if (filterPlant && filterPlant !== 'all') {
       list = list.filter(o => (o.plant ?? '') === filterPlant);
     }
+
     if (filterGroup && filterGroup !== 'all') {
       list = list.filter(o => (o.purchasingGroup ?? '') === filterGroup);
     }
-    if (filterSupplier && filterSupplier !== 'all') {
+
+    if (user.role !== 'vendor' && filterSupplier && filterSupplier !== 'all') {
       list = list.filter(o => (o.nameOfSupplier ?? '') === filterSupplier);
     }
+
     if (filterDocType && filterDocType !== 'all') {
       list = list.filter(o => (o.purchasingDocType ?? '') === filterDocType);
     }
 
     return list;
   }, [
-    scopedOrders, searchQuery,
-    filterStatus, filterStorage, filterPlant,
-    filterGroup, filterSupplier, filterDocType
+    scopedOrders,
+    searchQuery,
+    filterStatus,
+    filterStorage,
+    filterPlant,
+    filterGroup,
+    filterSupplier,
+    filterDocType,
+    user.role,
   ]);
 
-  // ✅ Card counts ALWAYS from cardSummary (global). This fixes "Overdue becomes 0" problem.
   const needUpdateCount = useMemo(() => {
     const v = cardSummary?.PONeedUpdate;
     if (typeof v === 'number') return v;
@@ -596,12 +674,18 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     return orders.filter(o => normalizeAttention(o.attention) === 2).length;
   }, [cardSummary, orders]);
 
-  // ----- Pagination -----
-  const { pageOrders, totalOrders, totalPages, startIndex, endIndex } = useMemo(() => {
+  const {
+    pageOrders,
+    totalOrders,
+    totalPages,
+    startIndex,
+    endIndex,
+  } = useMemo(() => {
     const total = filteredOrders.length;
     const pages = Math.max(1, Math.ceil(total / itemsPerPage) || 1);
     const start = (currentPage - 1) * itemsPerPage;
     const end = start + itemsPerPage;
+
     return {
       pageOrders: filteredOrders.slice(start, end),
       totalOrders: total,
@@ -611,31 +695,65 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     };
   }, [filteredOrders, currentPage, itemsPerPage]);
 
-  // ----- Derived UI state -----
   const hasActiveFilters = useMemo(() => !!(
     (filterStatus && filterStatus !== 'all') ||
     (filterStorage && filterStorage !== 'all') ||
     (filterPlant && filterPlant !== 'all') ||
     (filterGroup && filterGroup !== 'all') ||
-    (filterSupplier && filterSupplier !== 'all') ||
+    (user.role !== 'vendor' && filterSupplier && filterSupplier !== 'all') ||
     (filterDocType && filterDocType !== 'all')
-  ), [filterStatus, filterStorage, filterPlant, filterGroup, filterSupplier, filterDocType]);
+  ), [
+    user.role,
+    filterStatus,
+    filterStorage,
+    filterPlant,
+    filterGroup,
+    filterSupplier,
+    filterDocType
+  ]);
 
   const activeFilterCount = useMemo(() => ([
     filterStatus && filterStatus !== 'all',
     filterStorage && filterStorage !== 'all',
     filterPlant && filterPlant !== 'all',
     filterGroup && filterGroup !== 'all',
-    filterSupplier && filterSupplier !== 'all',
+    user.role !== 'vendor' && filterSupplier && filterSupplier !== 'all',
     filterDocType && filterDocType !== 'all',
-  ].filter(Boolean).length), [filterStatus, filterStorage, filterPlant, filterGroup, filterSupplier, filterDocType]);
+  ].filter(Boolean).length), [
+    user.role,
+    filterStatus,
+    filterStorage,
+    filterPlant,
+    filterGroup,
+    filterSupplier,
+    filterDocType
+  ]);
 
   const ordersNeedingUpdate = useMemo(() => {
     if (user.role !== 'vendor') return [];
-    return filteredOrders.filter(o => normalizeAttention(o.attention) === 1);
+
+    return filteredOrders
+      .filter((o) => {
+        const displayStatus = mapBackendStatusToDisplay(o.status);
+        if (displayStatus !== 'On Delivery') return false;
+
+        const eta = parseDdMmmYyyy(o.reEtaDate);
+        if (!eta) return false;
+
+        const diffDays = diffDaysFromToday(eta);
+        return diffDays >= 0 && diffDays <= 2;
+      })
+      .sort((a, b) => {
+        const da = parseDdMmmYyyy(a.reEtaDate);
+        const db = parseDdMmmYyyy(b.reEtaDate);
+
+        const va = da ? diffDaysFromToday(da) : 9999;
+        const vb = db ? diffDaysFromToday(db) : 9999;
+
+        return va - vb;
+      });
   }, [filteredOrders, user.role]);
 
-  // ================== Handlers ==================
   const handleSearchChange = useCallback((v: string) => {
     setSearchQuery(v);
     setCurrentPage(1);
@@ -652,13 +770,60 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     setIsUpdateDialogOpen(true);
   }, []);
 
-  const handleSubmitUpdate = useCallback(() => {
-    if (!orderToUpdate) return;
-    toast.success(`Update submitted for PO ${orderToUpdate.purchasingDocument}`);
-    setIsUpdateDialogOpen(false);
-    setOrderToUpdate(null);
-    setUpdateRemarks('');
-  }, [orderToUpdate]);
+  const handleSubmitUpdate = useCallback(async () => {
+    try {
+      if (!orderToUpdate) {
+        toast.error('No purchase order selected');
+        return;
+      }
+
+      if (!updateRemarks.trim()) {
+        toast.error('Please enter update remarks');
+        return;
+      }
+
+      const idPoItem =
+        orderToUpdate.id !== null &&
+        orderToUpdate.id !== undefined &&
+        orderToUpdate.id !== ''
+          ? orderToUpdate.id
+          : orderToUpdate.purchasingDocument;
+
+      if (!idPoItem) {
+        toast.error('ID PO Item not found');
+        return;
+      }
+
+      setSubmittingUpdate(true);
+
+      await submitPoStatusUpdate({
+        IDPOItem: idPoItem,
+        DeliveryUpdate: updateRemarks.trim(),
+      });
+
+      toast.success(`Update submitted for PO ${orderToUpdate.purchasingDocument}`);
+
+      setIsUpdateDialogOpen(false);
+      setOrderToUpdate(null);
+      setUpdateRemarks('');
+
+      await fetchCardSummary();
+      await fetchPurchaseOrders(activeTab, currentAttentionParam);
+    } catch (err: any) {
+      console.error('[PO] submit delivery update failed', err);
+      toast.error(err?.message || 'Failed to submit update');
+    } finally {
+      setSubmittingUpdate(false);
+    }
+  }, [
+    orderToUpdate,
+    updateRemarks,
+    submitPoStatusUpdate,
+    fetchCardSummary,
+    fetchPurchaseOrders,
+    activeTab,
+    currentAttentionParam,
+  ]);
 
   const clearFilters = useCallback(() => {
     setFilterStatus('');
@@ -673,22 +838,35 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const handleTabChange = useCallback((v: string) => {
     setActiveTab(v as StatusTab);
     setSpecialFilter(null);
+    syncAttractionQuery(null);
     setCurrentPage(1);
   }, []);
 
-  // ========== Upload handlers ==========
+  const handleToggleAttentionCard = useCallback((type: Exclude<AttentionFilter, null>) => {
+    setCurrentPage(1);
+    setActiveTab('all');
+
+    setSpecialFilter(prev => {
+      const next: AttentionFilter = prev === type ? null : type;
+      syncAttractionQuery(next ? ATTENTION_UI_TO_BACKEND[next] : null);
+      return next;
+    });
+  }, []);
+
   const processFile = useCallback((file: File | null, input?: HTMLInputElement | null) => {
     if (!file) {
       setUploadFile(null);
       if (input) input.value = '';
       return;
     }
+
     if (!isExcelFile(file)) {
       toast.error('File must be an Excel file (.xlsx or .xls)');
       setUploadFile(null);
       if (input) input.value = '';
       return;
     }
+
     setUploadFile(file);
   }, []);
 
@@ -710,6 +888,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       toast.error('Please select an Excel file first');
       return;
     }
+
     if (!isExcelFile(uploadFile)) {
       toast.error('File must be an Excel file (.xlsx or .xls)');
       return;
@@ -733,23 +912,26 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
       if (!res.ok) {
         let msg = `Upload failed (HTTP ${res.status})`;
+
         try {
           const text = await res.text();
-          const json = (() => { try { return JSON.parse(text); } catch { return null; } })();
+          const json = (() => {
+            try { return JSON.parse(text); } catch { return null; }
+          })();
+
           if (json?.message || json?.Message || json?.error) {
             msg = json.message || json.Message || json.error;
           }
-        } catch { /* ignore */ }
+        } catch {}
+
         throw new Error(msg);
       }
 
       await res.json();
       toast.success('Purchase order data imported successfully');
 
-      // refresh cards + list
       await fetchCardSummary();
-      const att: 1 | 2 | null = specialFilter ? ATTENTION_UI_TO_BACKEND[specialFilter] : null;
-      await fetchPurchaseOrders(activeTab, att);
+      await fetchPurchaseOrders(activeTab, currentAttentionParam);
 
       setIsUploadDialogOpen(false);
       setUploadFile(null);
@@ -759,7 +941,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     } finally {
       setUploading(false);
     }
-  }, [uploadFile, fetchPurchaseOrders, fetchCardSummary, activeTab, specialFilter]);
+  }, [uploadFile, fetchPurchaseOrders, fetchCardSummary, activeTab, currentAttentionParam]);
 
   const handleDownloadTemplate = useCallback(() => {
     try {
@@ -787,6 +969,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       const dd = String(now.getDate()).padStart(2, '0');
       const mm = String(now.getMonth() + 1).padStart(2, '0');
       const yyyy = now.getFullYear();
+
       XLSX.writeFile(wb, `TemplatePO_${dd}-${mm}-${yyyy}.xlsx`);
       toast.success('Template downloaded');
     } catch (err) {
@@ -809,11 +992,13 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
       const escapeCell = (v: any) => {
         if (v === null || v === undefined) return '';
+
         if (typeof v === 'number' || typeof v === 'string') {
           const att = normalizeAttention(v as AttentionRaw);
           if (att === 1) return 'Need Update';
           if (att === 2) return 'Overdue';
         }
+
         const s = String(v);
         const escaped = s.replace(/"/g, '""');
         if (/[",\n]/.test(escaped)) return `"${escaped}"`;
@@ -837,6 +1022,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
+
       a.href = url;
       a.setAttribute('download', filename);
       document.body.appendChild(a);
@@ -851,7 +1037,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     }
   }, [filteredOrders, visibleColumns, user.role]);
 
-  // ================== Table columns ==================
   const columns = useMemo(() => {
     const mk = (key: ColumnKey, render?: (o: PurchaseOrderItem) => React.ReactNode) => ({
       key,
@@ -916,7 +1101,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   ))}
 
                   <TableCell className="sticky right-[100px] bg-white shadow-[-2px_0_4px_rgba(0,0,0,0.05)] z-10">
-                    <Badge className="min-w-[120px] justify-center" style={{ backgroundColor: statusColor(display), color: 'white' }}>
+                    <Badge
+                      className="min-w-[120px] justify-center"
+                      style={{ backgroundColor: statusColor(display), color: 'white' }}
+                    >
                       {display}
                     </Badge>
                   </TableCell>
@@ -926,8 +1114,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       variant="outline"
                       size="sm"
                       onClick={() => {
-                        console.debug('[PO] view detail click', { id: o.id, purchasingDocument: o.purchasingDocument, key });
-                        setSelectedOrderId(key); // ✅ use id
+                        console.log('[PO] view detail click', {
+                          id: o.id,
+                          purchasingDocument: o.purchasingDocument,
+                          key
+                        });
+                        setSelectedOrderId(key);
                       }}
                       style={{ borderColor: '#014357', color: '#014357' }}
                       className="hover:bg-gray-50 min-w-[80px]"
@@ -969,6 +1161,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
               {[...Array(totalPages)].map((_, i) => {
                 const page = i + 1;
+
                 if (page === 1 || page === totalPages || (page >= currentPage - 1 && page <= currentPage + 1)) {
                   return (
                     <PaginationItem key={page}>
@@ -981,9 +1174,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       </PaginationLink>
                     </PaginationItem>
                   );
-                } else if (page === currentPage - 2 || page === currentPage + 2) {
+                }
+
+                if (page === currentPage - 2 || page === currentPage + 2) {
                   return <PaginationEllipsis key={page} />;
                 }
+
                 return null;
               })}
 
@@ -1014,13 +1210,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     handleItemsPerPageChange,
   ]);
 
-  // ========== Detail vs List ==========
   return (
     <div className="p-4 sm:p-6 lg:p-8 h-full overflow-x-hidden">
       {selectedOrderId !== null ? (
         <PurchaseOrderDetail
           user={user}
-          orderId={selectedOrderId} // ✅ now can be number/string
+          orderId={selectedOrderId}
           onBack={() => setSelectedOrderId(null)}
         />
       ) : (
@@ -1033,7 +1228,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
           {loading && <div className="mb-4 text-sm text-gray-500">Loading purchase orders...</div>}
           {loadError && <div className="mb-4 text-sm text-red-600">{loadError}</div>}
 
-          {/* Actions Bar */}
           <div className="flex flex-col sm:flex-row gap-3 mb-4 items-start sm:items-center justify-between">
             <div className="relative flex-1 w-full sm:max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
@@ -1051,10 +1245,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   <FileSpreadsheet className="h-4 w-4 sm:mr-2" />
                   <span className="hidden sm:inline">Template</span>
                 </Button>
+
                 <Button variant="outline" className="flex-1 sm:flex-none" size="sm" onClick={handleDownloadPOData}>
                   <Download className="h-4 w-4 sm:mr-2" />
                   <span className="hidden sm:inline">Export</span>
                 </Button>
+
                 <Button
                   style={{ backgroundColor: '#014357' }}
                   className="text-white hover:opacity-90 flex-1 sm:flex-none"
@@ -1068,7 +1264,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             )}
           </div>
 
-          {/* Attention Cards (GLOBAL COUNTS) */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <Card
               className={[
@@ -1076,18 +1271,14 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                 specialFilter === 'updates' ? 'ring-2 ring-[#ED832D]' : ''
               ].join(' ')}
               style={{ backgroundColor: 'rgba(237, 131, 45, 0.1)' }}
-              onClick={() => {
-                setCurrentPage(1);
-                setActiveTab('all');
-                setSpecialFilter(prev => (prev === 'updates' ? null : 'updates'));
-              }}
+              onClick={() => handleToggleAttentionCard('updates')}
             >
               <div className="flex items-center justify-between">
-                         <div className="flex items-center gap-3">
-                           <div className="p-2 rounded-lg bg-white shadow-lg">
-                             <Clock className="h-4 w-4" style={{ color: '#ED832D' }} />
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-white shadow-lg">
+                    <Clock className="h-4 w-4" style={{ color: '#ED832D' }} />
                   </div>
-                <div className="text-gray-900 text-sm" style={{ fontWeight: 600 }}>PO Need Updates</div>
+                  <div className="text-gray-900 text-sm" style={{ fontWeight: 600 }}>PO Need Updates</div>
                 </div>
                 <div className="text-2xl" style={{ color: '#ED832D', fontWeight: 800 }}>
                   {needUpdateCount}
@@ -1101,34 +1292,29 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                 specialFilter === 'overdue' ? 'ring-2 ring-[#DC2626]' : ''
               ].join(' ')}
               style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)' }}
-              onClick={() => {
-                setCurrentPage(1);
-                setActiveTab('all');
-                setSpecialFilter(prev => (prev === 'overdue' ? null : 'overdue'));
-              }}
+              onClick={() => handleToggleAttentionCard('overdue')}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="p-2 rounded-lg bg-white shadow-sm">
                     <AlertTriangle className="h-4 w-4" style={{ color: '#DC2626' }} />
                   </div>
-                   <div className="text-gray-900 text-sm" style={{ fontWeight: 600 }}>Overdue</div>
+                  <div className="text-gray-900 text-sm" style={{ fontWeight: 600 }}>Overdue</div>
                 </div>
-                <div className="text-2xl font-bold" style={{ color: '#DC2626',fontWeight:800 }}>
+                <div className="text-2xl font-bold" style={{ color: '#DC2626', fontWeight: 800 }}>
                   {overdueCount}
                 </div>
               </div>
             </Card>
           </div>
 
-          {/* Stats (LIST SUMMARY - can change by tab/filter) */}
           <div className="flex gap-3 mb-6">
             <Card className="flex-1 p-4">
               <div className="flex items-center gap-2 mb-2">
                 <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(1, 67, 87, 0.1)' }}>
                   <Package className="h-4 w-4" style={{ color: '#014357' }} />
                 </div>
-                <div className="text-gray-600 text-sm">Total POs</div>
+                <div className="text-gray-600 text-sm">Total PO Items</div>
               </div>
               <div className="text-3xl" style={{ color: '#014357' }}>{summary?.TotalPO ?? 0}</div>
             </Card>
@@ -1184,16 +1370,17 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             </Card>
           </div>
 
-          {/* Orders Needing Update - Vendor Only */}
           {user.role === 'vendor' && ordersNeedingUpdate.length > 0 && (
             <Card className="mb-6 p-6" style={{ borderColor: '#ED832D', borderWidth: '2px' }}>
               <div className="flex items-center gap-2 mb-4">
                 <AlertCircle className="h-5 w-5" style={{ color: '#ED832D' }} />
                 <h2 style={{ color: '#014357' }}>Orders Needing Update</h2>
               </div>
+
               <p className="text-sm text-gray-600 mb-4">
                 These orders have an ETA date within 2 days. Please provide updates on their delivery status.
               </p>
+
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
@@ -1206,6 +1393,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       <TableHead>Action</TableHead>
                     </TableRow>
                   </TableHeader>
+
                   <TableBody>
                     {ordersNeedingUpdate.map((o, idx) => {
                       const d = parseDdMmmYyyy(o.reEtaDate);
@@ -1231,11 +1419,13 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                               </Badge>
                             )}
                           </TableCell>
+
                           <TableCell>
                             <Badge style={{ backgroundColor: statusColor(display), color: 'white' }}>
                               {display}
                             </Badge>
                           </TableCell>
+
                           <TableCell>
                             <Button variant="outline" size="sm" onClick={() => handleOpenUpdateDialog(o)}>
                               <Pencil className="h-4 w-4 mr-2" />
@@ -1251,7 +1441,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             </Card>
           )}
 
-          {/* Tabs */}
           <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
               <TabsList>
@@ -1264,7 +1453,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
               </TabsList>
 
               <div className="flex gap-2">
-                {/* Columns */}
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button variant="outline" size="sm">
@@ -1278,6 +1466,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         <h4 className="font-medium text-sm">Customize Table View</h4>
                         <p className="text-xs text-gray-500">Show or hide columns. Some cannot be hidden.</p>
                       </div>
+
                       <ScrollArea className="h-[320px]">
                         <div className="space-y-2 pr-4">
                           <div className="flex items-center space-x-2">
@@ -1318,7 +1507,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   </PopoverContent>
                 </Popover>
 
-                {/* Filters */}
                 <Dialog open={isFilterOpen} onOpenChange={setIsFilterOpen}>
                   <DialogTrigger asChild>
                     <Button variant="outline" size="sm" className="relative">
@@ -1335,6 +1523,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       )}
                     </Button>
                   </DialogTrigger>
+
                   <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle>Advanced Filters</DialogTitle>
@@ -1393,17 +1582,19 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         </Select>
                       </div>
 
-                      <div className="grid gap-2">
-                        <Label>Supplier</Label>
-                        <Select value={filterSupplier} onValueChange={(v) => { setFilterSupplier(v); setCurrentPage(1); }}>
-                          <SelectTrigger><SelectValue placeholder="All suppliers" /></SelectTrigger>
-                          <SelectContent>
-                            {filterOptions.supplier.map(opt => (
-                              <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                      {user.role !== 'vendor' && (
+                        <div className="grid gap-2">
+                          <Label>Supplier</Label>
+                          <Select value={filterSupplier} onValueChange={(v) => { setFilterSupplier(v); setCurrentPage(1); }}>
+                            <SelectTrigger><SelectValue placeholder="All suppliers" /></SelectTrigger>
+                            <SelectContent>
+                              {filterOptions.supplier.map(opt => (
+                                <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
 
                       <div className="grid gap-2">
                         <Label>Doc Type</Label>
@@ -1444,7 +1635,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             <TabsContent value="delivered">{renderTable()}</TabsContent>
           </Tabs>
 
-          {/* Update Dialog */}
           <Dialog open={isUpdateDialogOpen} onOpenChange={setIsUpdateDialogOpen}>
             <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden">
               <DialogHeader>
@@ -1453,7 +1643,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                 {orderToUpdate && (
                   <div className="flex items-center gap-2 pt-2">
                     <Badge
-                      style={{ backgroundColor: statusColor(mapBackendStatusToDisplay(orderToUpdate.status)), color: 'white' }}
+                      style={{
+                        backgroundColor: statusColor(mapBackendStatusToDisplay(orderToUpdate.status)),
+                        color: 'white'
+                      }}
                       className="px-4 py-1.5"
                     >
                       {mapBackendStatusToDisplay(orderToUpdate.status)}
@@ -1471,23 +1664,28 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#014357' }} />
                           <h3 className="text-lg tracking-wide" style={{ color: '#014357' }}>Order Information</h3>
                         </div>
+
                         <div className="grid grid-cols-2 gap-4">
                           <div>
                             <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Purchasing Document</p>
                             <p className="text-sm">{orderToUpdate.purchasingDocument}</p>
                           </div>
+
                           <div>
                             <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Item of Requisition</p>
                             <p className="text-sm">{orderToUpdate.itemOfRequisition}</p>
                           </div>
+
                           <div className="col-span-2">
                             <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Short Text</p>
                             <p className="text-sm">{orderToUpdate.shortText}</p>
                           </div>
+
                           <div>
                             <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Re-ETA Date</p>
                             <p className="text-sm">{orderToUpdate.reEtaDate || 'N/A'}</p>
                           </div>
+
                           <div>
                             <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Attention</p>
                             <div className="pt-0.5">{attentionBadge(orderToUpdate.attention)}</div>
@@ -1500,6 +1698,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#014357' }} />
                           <h3 className="text-lg tracking-wide" style={{ color: '#014357' }}>Update Details</h3>
                         </div>
+
                         <div className="space-y-2">
                           <Label htmlFor="update-remarks">Remarks / Additional Information</Label>
                           <Textarea
@@ -1517,8 +1716,13 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
                   <DialogFooter className="mt-4">
                     <Button variant="outline" onClick={() => setIsUpdateDialogOpen(false)}>Cancel</Button>
-                    <Button style={{ backgroundColor: '#014357' }} className="text-white hover:opacity-90" onClick={handleSubmitUpdate}>
-                      Submit Update
+                    <Button
+                      style={{ backgroundColor: '#014357' }}
+                      className="text-white hover:opacity-90"
+                      onClick={handleSubmitUpdate}
+                      disabled={submittingUpdate}
+                    >
+                      {submittingUpdate ? 'Submitting...' : 'Submit Update'}
                     </Button>
                   </DialogFooter>
                 </>
@@ -1526,7 +1730,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             </DialogContent>
           </Dialog>
 
-          {/* Upload PO Dialog */}
           <Dialog
             open={isUploadDialogOpen}
             onOpenChange={(open) => {
@@ -1551,20 +1754,31 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
                 <div
                   onClick={() => fileInputRef.current?.click()}
-                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragOver(true); }}
-                  onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragOver(false); }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsDragOver(true);
+                  }}
+                  onDragLeave={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsDragOver(false);
+                  }}
                   onDrop={handleDrop}
                   className={[
                     'border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition',
                     'flex flex-col items-center justify-center gap-2',
-                    isDragOver ? 'border-[#014357] bg-slate-50'
+                    isDragOver
+                      ? 'border-[#014357] bg-slate-50'
                       : 'border-slate-300 bg-slate-50/40 hover:border-[#014357]/70 hover:bg-slate-50',
                   ].join(' ')}
                 >
                   <Upload className="h-8 w-8 mb-1" style={{ color: '#014357' }} />
                   <p className="text-sm font-medium" style={{ color: '#014357' }}>Drag & drop Excel file di sini</p>
                   <p className="text-xs text-gray-500">atau <span className="underline">klik untuk memilih file</span></p>
-                  <p className="text-[11px] text-gray-400 mt-1">Hanya format <b>.xlsx</b> atau <b>.xls</b> yang diperbolehkan.</p>
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    Hanya format <b>.xlsx</b> atau <b>.xls</b> yang diperbolehkan.
+                  </p>
 
                   <input
                     ref={fileInputRef}
@@ -1589,6 +1803,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         </span>
                       </div>
                     </div>
+
                     <Button
                       type="button"
                       variant="ghost"
@@ -1608,16 +1823,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
               <DialogFooter>
                 <Button
                   variant="outline"
-                  onClick={() => {
-                    setIsUploadDialogOpen(false);
-                    setUploadFile(null);
-                    setIsDragOver(false);
-                    if (fileInputRef.current) fileInputRef.current.value = '';
-                  }}
+                  onClick={() => setIsUploadDialogOpen(false)}
                   disabled={uploading}
                 >
                   Cancel
                 </Button>
+
                 <Button
                   style={{ backgroundColor: '#014357' }}
                   className="text-white hover:opacity-90"
