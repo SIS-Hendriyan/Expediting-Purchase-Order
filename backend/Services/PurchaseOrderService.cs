@@ -83,11 +83,11 @@ namespace EXPOAPI.Services
         // ------------------------------------------------------------
         // Summary + items (Purchase_Order_SP)
         // ------------------------------------------------------------
-        public async Task<Dictionary<string, object?>> GetPurchaseOrderSummaryAsync(
-            Dictionary<string, object?>? parameters = null,
-            CancellationToken ct = default)
+        public async Task<Dictionary<string, object?>> GetPurchaseOrdersAsync(
+     Dictionary<string, object?>? parameters = null,
+     CancellationToken ct = default)
         {
-            parameters ??= new Dictionary<string, object?>();
+            parameters = NormalizePurchaseOrderParameters(parameters);
 
             using var cn = _db.CreateMain();
             var dp = ToDynamicParamsRemovingNull(parameters);
@@ -101,20 +101,22 @@ namespace EXPOAPI.Services
                     cancellationToken: ct
                 ));
 
-                var summary = DefaultSummary();
                 var items = new List<Dictionary<string, object?>>();
+                var summary = DefaultSummary();
+                var pagination = BuildDefaultPagination(parameters);
 
                 while (!grid.IsConsumed)
                 {
                     var rows = (await grid.ReadAsync<dynamic>()).ToList();
-                    if (rows.Count == 0) continue;
+                    if (rows.Count == 0)
+                        continue;
 
-                    var first = ToDict(rows[0]);
+                    var firstRow = ToDict(rows[0]);
 
-                    // Resultset summary dikenali dari "TotalPO"
-                    if (HasKey(first, "TotalPO"))
+                    if (IsSummaryResultSet(firstRow))
                     {
-                        summary = MergeSummary(first);
+                        summary = MergeSummary(firstRow);
+                        pagination = MergePagination(firstRow, parameters);
                     }
                     else
                     {
@@ -122,19 +124,123 @@ namespace EXPOAPI.Services
                     }
                 }
 
-                return new Dictionary<string, object?>
-                {
-                    ["summary"] = summary,
-                    ["items"] = items
-                };
+                return BuildPurchaseOrderResponse(summary, pagination, items);
             }
-            catch (OperationCanceledException) { throw; }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (SqlException ex)
             {
-                throw new InvalidOperationException($"DB error executing {SP_PURCHASE_ORDER}: {ex.Message}", ex);
+                throw new InvalidOperationException(
+                    $"DB error executing {SP_PURCHASE_ORDER}: {ex.Message}",
+                    ex
+                );
             }
         }
 
+        private Dictionary<string, object?> NormalizePurchaseOrderParameters(
+    Dictionary<string, object?>? parameters)
+        {
+            parameters ??= new Dictionary<string, object?>();
+
+            if (!parameters.ContainsKey("PageNumber") || parameters["PageNumber"] == null)
+                parameters["PageNumber"] = 1;
+
+            if (!parameters.ContainsKey("PageSize") || parameters["PageSize"] == null)
+                parameters["PageSize"] = 10;
+
+            if (TryConvertToInt(parameters["PageNumber"]) is int pageNumber && pageNumber < 1)
+                parameters["PageNumber"] = 1;
+
+            if (TryConvertToInt(parameters["PageSize"]) is int pageSize)
+            {
+                if (pageSize < 1)
+                    parameters["PageSize"] = 10;
+                else if (pageSize > 1000)
+                    parameters["PageSize"] = 1000;
+            }
+            else
+            {
+                parameters["PageSize"] = 10;
+            }
+
+            return parameters;
+        }
+
+        private Dictionary<string, object?> BuildDefaultPagination(
+            Dictionary<string, object?> parameters)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["pageNumber"] = TryConvertToInt(parameters.GetValueOrDefault("PageNumber")) ?? 1,
+                ["pageSize"] = TryConvertToInt(parameters.GetValueOrDefault("PageSize")) ?? 10,
+                ["totalFiltered"] = 0,
+                ["totalPages"] = 0
+            };
+        }
+
+        private bool IsSummaryResultSet(IDictionary<string, object?> row)
+        {
+            return HasKey(row, "TotalPO");
+        }
+
+        private Dictionary<string, object?> MergePagination(
+            IDictionary<string, object?> summaryRow,
+            Dictionary<string, object?> parameters)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["pageNumber"] =
+                    TryGetInt(summaryRow, "PageNumber")
+                    ?? TryConvertToInt(parameters.GetValueOrDefault("PageNumber"))
+                    ?? 1,
+
+                ["pageSize"] =
+                    TryGetInt(summaryRow, "PageSize")
+                    ?? TryConvertToInt(parameters.GetValueOrDefault("PageSize"))
+                    ?? 10,
+
+                ["totalFiltered"] = TryGetInt(summaryRow, "TotalFiltered") ?? 0,
+                ["totalPages"] = TryGetInt(summaryRow, "TotalPages") ?? 0
+            };
+        }
+
+        private Dictionary<string, object?> BuildPurchaseOrderResponse(
+            Dictionary<string, object?> summary,
+            Dictionary<string, object?> pagination,
+            List<Dictionary<string, object?>> items)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["summary"] = summary,
+                ["pagination"] = pagination,
+                ["items"] = items
+            };
+        }
+
+        private static int? TryGetInt(IDictionary<string, object?> dict, string key)
+        {
+            if (!dict.TryGetValue(key, out var value) || value == null || value is DBNull)
+                return null;
+
+            return TryConvertToInt(value);
+        }
+
+        private static int? TryConvertToInt(object? value)
+        {
+            if (value == null || value is DBNull)
+                return null;
+
+            try
+            {
+                return Convert.ToInt32(value);
+            }
+            catch
+            {
+                return null;
+            }
+        }
         // ------------------------------------------------------------
         // PurchaseOrderDetail_SP -> 2 result sets: statusFlow + reEtaRequests
         // ------------------------------------------------------------
@@ -550,8 +656,8 @@ namespace EXPOAPI.Services
                 dp.Add(name, value.Trim());
         }
 
-        private static bool HasKey(Dictionary<string, object?> dict, string key)
-            => dict.Keys.Any(k => k.Equals(key, StringComparison.OrdinalIgnoreCase));
+        private static bool HasKey(IDictionary<string, object?> dict, string key)
+      => dict.Keys.Any(k => k.Equals(key, StringComparison.OrdinalIgnoreCase));
 
         private static object? TryGetValueCaseInsensitive(Dictionary<string, object?> dict, string key)
         {

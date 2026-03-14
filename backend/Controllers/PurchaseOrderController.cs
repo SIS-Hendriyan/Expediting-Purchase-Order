@@ -39,7 +39,13 @@ namespace EXPOAPI.Controllers
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> Summary([FromQuery] string? status,int? Attraction, [FromQuery] string? vendorName, CancellationToken ct)
+        public async Task<IActionResult> Summary(
+    [FromQuery] string? status,
+    [FromQuery] int? attention,
+    [FromQuery] string? vendorName,
+    [FromQuery] int? pageNumber,
+    [FromQuery] int? pageSize,
+    CancellationToken ct)
         {
             var spParams = new Dictionary<string, object?>();
 
@@ -50,21 +56,23 @@ namespace EXPOAPI.Controllers
                 if (!StatusMap.TryGetValue(key, out var mapped))
                 {
                     return BadRequestResponse(
-                        "invalid status value. Allowed values: submitted, workInProgress, onDelivery, partiallyReceived, fullyReceived"
+                        "invalid status value. Allowed values: submitted, workInProgress, onDelivery, fullyReceived"
                     );
                 }
 
                 spParams["Status"] = mapped;
             }
 
-            if (Attraction.HasValue)
+            if (attention.HasValue)
             {
-                if (Attraction.Value != 1 && Attraction.Value != 2)
+                if (attention.Value != 1 && attention.Value != 2)
                 {
-                    return BadRequestResponse("invalid attention value. Allowed values: 1 (Need Update), 2 (Overdue)");
+                    return BadRequestResponse(
+                        "invalid attention value. Allowed values: 1 (Need Update), 2 (Overdue)"
+                    );
                 }
 
-                spParams["Attention"] = Attraction.Value; // ✅ matches SP param name
+                spParams["Attention"] = attention.Value;
             }
 
             if (!string.IsNullOrWhiteSpace(vendorName))
@@ -72,10 +80,39 @@ namespace EXPOAPI.Controllers
                 spParams["VendorName"] = vendorName.Trim();
             }
 
+            if (pageNumber.HasValue)
+            {
+                if (pageNumber.Value < 1)
+                {
+                    return BadRequestResponse("invalid pageNumber. Minimum value is 1.");
+                }
+
+                spParams["PageNumber"] = pageNumber.Value;
+            }
+
+            if (pageSize.HasValue)
+            {
+                if (pageSize.Value < 1)
+                {
+                    return BadRequestResponse("invalid pageSize. Minimum value is 1.");
+                }
+
+                if (pageSize.Value > 1000)
+                {
+                    return BadRequestResponse("invalid pageSize. Maximum value is 1000.");
+                }
+
+                spParams["PageSize"] = pageSize.Value;
+            }
+
             try
             {
-                var data = await _po.GetPurchaseOrderSummaryAsync(spParams, ct);
+                var data = await _po.GetPurchaseOrdersAsync(spParams, ct);
                 return OkResponse("purchase order summary retrieved", data);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
