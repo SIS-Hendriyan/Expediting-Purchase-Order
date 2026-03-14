@@ -80,8 +80,9 @@ builder.Services.AddScoped<IDbConnectionFactory, DbConnectionFactory>();
 // Email via DB setting SP + SMTP
 // =========================
 builder.Services.AddScoped<IEmailSettingProvider, DbEmailSettingProvider>();
+builder.Services.AddScoped<IPoStatusService, PoStatusService>();
 builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
-builder.Services.AddScoped<IVendorOtpEmailSender, VendorOtpEmailSender>();
+builder.Services.AddHttpClient<IVendorOtpEmailSender, VendorOtpEmailSender>();
 builder.Services.AddScoped<IInternalUserService, InternalUserService>();
 builder.Services.AddScoped<IPurchaseOrderService, PurchaseOrderService>();
 builder.Services.AddScoped<IVendorService, VendorService>();

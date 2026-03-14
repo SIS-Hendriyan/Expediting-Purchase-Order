@@ -49,6 +49,7 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
             "Short Text",
             "Material",
             "Name of Supplier",
+            "Qty Order",
             "Quantity Received",
             "Still to be delivered (qty)",
             "Plant",
@@ -111,7 +112,7 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
 
         if (upload.Length <= 0)
             throw new ArgumentException("file is empty");
-
+         
         using var ms = new MemoryStream();
         await upload.CopyToAsync(ms, ct);
         if (ms.Length == 0) throw new ArgumentException("file is empty");

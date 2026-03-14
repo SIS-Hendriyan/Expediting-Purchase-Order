@@ -485,29 +485,34 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
   // =====================
   // PO Items (Create dialog)
   // =====================
-  const loadPoItems = async () => {
-    try {
-      const qs = new URLSearchParams();
-      qs.set("eligibleOnly", "true");
-      qs.set("page", "1");
-      qs.set("pageSize", "200");
+ const loadPoItems = async () => {
+  try {
+    const qs = new URLSearchParams();
+    qs.set("eligibleOnly", "true");
+    qs.set("page", "1");
+    qs.set("pageSize", "200");
 
-      const raw = await apiFetch<any>(API.PO_ITEMS() + `?${qs.toString()}`, { method: "GET" });
-      const payload = unwrap(raw);
-      const items: PoItemRow[] = payload?.items || payload || [];
-
-      const filtered =
-        user.role === "vendor"
-          ? items.filter((x) => (x["Name of Supplier"] || "").trim().toLowerCase() === (user.company || "").trim().toLowerCase())
-          : items;
-
-      setPoItems(filtered);
-    } catch (e: any) {
-      toast.error(e.message || "Failed to load PO items");
-      setPoItems([]);
+    if (user.role === "vendor" && user.company) {
+      qs.set("vendor", user.company);
     }
-  };
 
+    const raw = await apiFetch<any>(API.PO_ITEMS() + `?${qs.toString()}`, {
+      method: "GET",
+    });
+
+    const payload = unwrap(raw);
+    console.log(payload);
+    console.log(user.company);
+    console.log(user);
+
+    const items: PoItemRow[] = payload?.items || payload || [];
+
+    setPoItems(items);
+  } catch (e: any) {
+    toast.error(e.message || "Failed to load PO items");
+    setPoItems([]);
+  }
+};
   const handleOpenCreateDialog = async () => {
     setCreateDialog(true);
     setSelectedPO("");
@@ -877,7 +882,6 @@ function getDocButtonTheme(status?: RequestStatus) {
             {user.role === "vendor"
               ? "Manage your reschedule requests"
               : "Review and process vendor reschedule requests"}
-             
           </p>
         </div>
 

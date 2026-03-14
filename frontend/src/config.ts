@@ -45,4 +45,6 @@ PO_ITEMS: () => `${CONFIG.apiBaseUrl}/api/purchase-order/items`,
     `${CONFIG.apiBaseUrl}/api/dashboard/scorecard`,
   MASTER_FILTER_DASHBOARD: () =>
     `${CONFIG.apiBaseUrl}/api/dashboard/master-filters`,
+
+  POSTATUS_UPSERT: () => `${CONFIG.apiBaseUrl}/api/PoStatus/upsert`,
 };
