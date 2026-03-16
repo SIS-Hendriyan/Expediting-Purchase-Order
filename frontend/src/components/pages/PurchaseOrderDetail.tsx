@@ -9,7 +9,6 @@ import {
   FileText,
   Package,
   PackageCheck,
-  PackageOpen,
   Truck,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -47,7 +46,6 @@ type FlowStatus =
   | 'PO Submitted'
   | 'Work in Progress'
   | 'On Delivery'
-  | 'Partially Received'
   | 'Fully Received';
 
 type ApiStatusFlowRow = {
@@ -65,22 +63,9 @@ type ReEtaFile = {
   uploadedBy?: string | null;
   uploadedDate?: string | null;
   url?: string | null;
-};
-
-type ApiReEtaFiles = {
-  approvalFile?: any | null;
-  rejectionFile?: any | null;
-  confirmationFile?: any | null;
-  name?: string | null;
-  uploadedBy?: string | null;
-  uploadedDate?: string | null;
-  url?: string | null;
-  Name?: string | null;
-  UploadedBy?: string | null;
-  UploadedDate?: string | null;
-  Url?: string | null;
-  confirmationFileName?: string | null;
-  ConfirmationFileName?: string | null;
+  contentType?: string | null;
+  base64Data?: string | null;
+  size?: number | null;
 };
 
 type NormalizedReEta = {
@@ -89,12 +74,15 @@ type NormalizedReEta = {
   requestedBy: string;
   oldETA: string | null;
   newETA: string | null;
+  proposedETADays: string;
   reason: string;
   status: 'Pending' | 'Approved' | 'Rejected' | string;
   responseDate: string | null;
+  evidenceFile?: ReEtaFile | null;
   approvalFile?: ReEtaFile | null;
   rejectionFile?: ReEtaFile | null;
   confirmationFile?: ReEtaFile | null;
+  waitingFile?: ReEtaFile | null;
 };
 
 type PoDetail = {
@@ -184,12 +172,18 @@ type ValidationNoticeProps = {
   onAction?: () => void;
 };
 
+type FileActionCardProps = {
+  file: ReEtaFile;
+  label: string;
+  iconColor?: string;
+  onDownload: (file: ReEtaFile) => void;
+};
+
 // ===================== Constants =====================
 const FLOW_ORDER: FlowStatus[] = [
   'PO Submitted',
   'Work in Progress',
   'On Delivery',
-  'Partially Received',
   'Fully Received',
 ];
 
@@ -222,9 +216,7 @@ const buildAuthHeaders = (): HeadersInit => {
 
 const buildMultipartAuthHeaders = (): HeadersInit => {
   const token = getAuthToken();
-  return {
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
+  return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
 // ===================== Helpers =====================
@@ -238,9 +230,8 @@ const parseServerDate = (value?: string | number | null): Date | undefined => {
 };
 
 const safeDateOnly = (v: unknown): string | null => {
-  const d = parseServerDate(v as any);
-  if (!d) return null;
-  return d.toISOString().split('T')[0];
+  const d = parseServerDate(v as string | number | null | undefined);
+  return d ? format(d, 'yyyy-MM-dd') : null;
 };
 
 const toIsoString = (v?: string | null): string | null => {
@@ -262,7 +253,11 @@ const toNumberOrZero = (value: unknown): number => {
 const formatDate = (dateString: string): string => {
   const d = new Date(dateString);
   if (Number.isNaN(d.getTime())) return '-';
-  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: '2-digit' });
+  return d.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+  });
 };
 
 const formatDateTime = (dateTimeString: string): string => {
@@ -311,13 +306,11 @@ const mapFlowStatus = (backendStatus?: string | null): FlowStatus | null => {
   if (u === 'SUBMITTED' || u === 'PO SUBMITTED') return 'PO Submitted';
   if (u === 'WORK IN PROGRESS') return 'Work in Progress';
   if (u === 'ON DELIVERY') return 'On Delivery';
-  if (u === 'PARTIALLY RECEIVED') return 'Partially Received';
   if (u === 'FULLY RECEIVED') return 'Fully Received';
 
   if (s === 'Submitted') return 'PO Submitted';
   if (s === 'Work In Progress' || s === 'Work in Progress') return 'Work in Progress';
   if (s === 'On Delivery') return 'On Delivery';
-  if (s === 'Partially Received') return 'Partially Received';
   if (s === 'Fully Received') return 'Fully Received';
 
   return null;
@@ -331,8 +324,6 @@ const getStatusColor = (status: string) => {
       return '#5C8CB6';
     case 'On Delivery':
       return '#008383';
-    case 'Partially Received':
-      return '#F59E0B';
     case 'Fully Received':
       return '#6AA75D';
     default:
@@ -361,8 +352,6 @@ const getStatusIcon = (statusName: string) => {
       return Package;
     case 'On Delivery':
       return Truck;
-    case 'Partially Received':
-      return PackageOpen;
     case 'Fully Received':
       return PackageCheck;
     default:
@@ -387,27 +376,39 @@ const safeId = (v: unknown, fallback: string) => {
   return s || fallback;
 };
 
-const pickFile = (x: any, fallbackName: string): ReEtaFile | null => {
-  if (!x) return null;
+const pickBase64File = (
+  fileName: unknown,
+  base64Data: unknown,
+  contentType?: unknown,
+  size?: unknown,
+  fallbackName = 'File',
+): ReEtaFile | null => {
+  const base64 = trim(base64Data);
+  if (!base64) return null;
 
-  if (typeof x === 'object') {
-    const name = trim(x?.name ?? x?.Name ?? x?.fileName ?? x?.FileName) || fallbackName;
-    const uploadedBy = trim(x?.uploadedBy ?? x?.UploadedBy) || null;
-    const uploadedDate = safeDateOnly(x?.uploadedDate ?? x?.UploadedDate) || null;
-    const url = trim(x?.url ?? x?.Url) || null;
+  const name = trim(fileName) || fallbackName;
+  const mime = trim(contentType) || null;
 
-    if (!name && !uploadedBy && !uploadedDate && !url) return null;
-    return { name, uploadedBy, uploadedDate, url };
-  }
+  const numericSize =
+    size === null || size === undefined || size === '' ? null : Number(size);
 
-  const s = trim(x);
-  return s ? { name: s, uploadedBy: null, uploadedDate: null, url: null } : null;
+  return {
+    name,
+    uploadedBy: null,
+    uploadedDate: null,
+    url: null,
+    contentType: mime,
+    base64Data: base64,
+    size: Number.isNaN(numericSize as number) ? null : numericSize,
+  };
 };
 
 const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
   const id = safeId(
     r?.POREETANUMBER ??
       r?.['POREETANUMBER'] ??
+      r?.ReETARequestID ??
+      r?.['ReETARequestID'] ??
       r?.id ??
       r?.ID ??
       r?.RequestID ??
@@ -419,20 +420,19 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
     r?.['Reschedule Status'] ?? r?.RescheduleStatus ?? r?.status ?? r?.Status,
   );
 
-  const oldETA = safeDateOnly(r?.OldETA ?? r?.oldETA ?? r?.OldEta ?? r?.OldEtaDate ?? r?.OldReEtaDate);
-  const newETA = safeDateOnly(
-    r?.NewETA ?? r?.newETA ?? r?.NewEta ?? r?.NewEtaDate ?? r?.NewReEtaDate ?? r?.ReEtaDate,
-  );
+  const oldETA = safeDateOnly(r?.OldETA ?? r?.oldETA);
+  const newETA = safeDateOnly(r?.NewETA ?? r?.newETA);
 
   const requestDate = safeDateOnly(
     r?.RequestedAt ?? r?.requestDate ?? r?.RequestDate ?? r?.CreatedAt ?? r?.CREATED_AT,
   );
 
   const responseDate = safeDateOnly(
-    r?.ResponseAt ?? r?.responseDate ?? r?.ResponseDate ?? r?.ApprovedAt ?? r?.RejectedAt ?? r?.FEEDBACK_AT,
+    r?.UpdatedAt ?? r?.UPDATED_AT ?? r?.ResponseAt ?? r?.responseDate ?? r?.ResponseDate,
   );
 
-  const requestedBy = trim(r?.RequestedBy ?? r?.requestedBy ?? r?.VendorName ?? r?.SupplierName) || '-';
+  const requestedBy =
+    trim(r?.RequestedBy ?? r?.requestedBy ?? r?.CREATED_BY ?? r?.VendorName ?? r?.SupplierName) || '-';
 
   const reason =
     trim(
@@ -446,31 +446,74 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
         r?.note,
     ) || '-';
 
-  const files = (r?.Files ?? r?.files ?? r?.FILES) as ApiReEtaFiles | undefined;
+  const proposedETADays = trim(r?.ProposedETADays ?? r?.['Proposed ETA']) || '-';
+
+  const evidenceFile =
+    pickBase64File(
+      r?.EvidenceFileName,
+      r?.EvidenceBase64Data,
+      r?.EvidenceContentType,
+      r?.EvidenceSize,
+      'Evidence File',
+    ) || null;
+
+  const feedbackFile =
+    pickBase64File(
+      r?.FeedbackFileName,
+      r?.FeedbackBase64Data,
+      r?.FeedbackContentType,
+      r?.FeedbackSize,
+      'Feedback File',
+    ) || null;
+
+  const vendorRespFile =
+    pickBase64File(
+      r?.VendorRespFileName,
+      r?.VendorRespBase64Data,
+      r?.VendorRespContentType,
+      r?.VendorRespSize,
+      'Vendor Response File',
+    ) || null;
 
   const approvalFile =
-    pickFile(r?.approvalFile, 'Approval File') ||
-    pickFile((files as any)?.approvalFile ?? (files as any)?.ApprovalFile, 'Approval File') ||
-    null;
+    pickBase64File(
+      r?.FeedbackFileName,
+      r?.ApprovalFile,
+      r?.FeedbackContentType,
+      r?.FeedbackSize,
+      'Approval File',
+    ) ||
+    (status === 'Approved' ? feedbackFile : null);
 
   const rejectionFile =
-    pickFile(r?.rejectionFile, 'Rejection File') ||
-    pickFile((files as any)?.rejectionFile ?? (files as any)?.RejectionFile, 'Rejection File') ||
-    null;
+    pickBase64File(
+      r?.FeedbackFileName,
+      r?.RejectionFile,
+      r?.FeedbackContentType,
+      r?.FeedbackSize,
+      'Rejection File',
+    ) ||
+    (status === 'Rejected' ? feedbackFile : null);
 
   const confirmationFile =
-    pickFile(r?.confirmationFile, 'Confirmation File') ||
-    pickFile((files as any)?.confirmationFile ?? (files as any)?.ConfirmationFile, 'Confirmation File') ||
-    pickFile((files as any)?.confirmationFileName ?? (files as any)?.ConfirmationFileName, 'Confirmation File') ||
-    null;
+    pickBase64File(
+      r?.VendorRespFileName,
+      r?.ConfirmationFile,
+      r?.VendorRespContentType,
+      r?.VendorRespSize,
+      'Confirmation File',
+    ) ||
+    (status === 'Rejected' ? vendorRespFile : null);
 
-  const flatMaybe = pickFile(
-    files && (files?.name ?? files?.Name ?? (files as any)?.fileName ?? (files as any)?.FileName) ? files : null,
-    'File',
-  );
-
-  const finalApprovalFile = approvalFile ?? (status === 'Approved' ? flatMaybe : null);
-  const finalRejectionFile = rejectionFile ?? (status === 'Rejected' ? flatMaybe : null);
+  const waitingFile =
+    pickBase64File(
+      r?.FeedbackFileName,
+      r?.WaitingFile,
+      r?.FeedbackContentType,
+      r?.FeedbackSize,
+      'Waiting File',
+    ) ||
+    ((status !== 'Approved' && status !== 'Rejected') ? feedbackFile : null);
 
   return {
     id,
@@ -478,12 +521,15 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
     requestedBy,
     oldETA,
     newETA,
+    proposedETADays,
     reason,
     status,
     responseDate,
-    approvalFile: finalApprovalFile,
-    rejectionFile: finalRejectionFile,
+    evidenceFile,
+    approvalFile,
+    rejectionFile,
     confirmationFile,
+    waitingFile,
   };
 };
 
@@ -658,10 +704,7 @@ function ValidationNotice({
         backgroundColor: warningPalette.background,
       }}
     >
-      <AlertCircle
-        className="mt-0.5 h-4 w-4 flex-shrink-0"
-        style={{ color: warningPalette.icon }}
-      />
+      <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" style={{ color: warningPalette.icon }} />
 
       <AlertDescription className="w-full justify-items-stretch gap-3">
         <div className="flex w-full flex-col gap-3">
@@ -934,6 +977,30 @@ function StatusRelatedInformation({
   );
 }
 
+function FileActionCard({ file, label, iconColor = '#014357', onDownload }: FileActionCardProps) {
+  return (
+    <Button
+      variant="outline"
+      className="h-auto w-full px-3 py-2"
+      onClick={() => onDownload(file)}
+      type="button"
+    >
+      <div className="flex w-full items-center gap-3">
+        <FileText className="h-4 w-4 flex-shrink-0" style={{ color: iconColor }} />
+        <div className="flex-1 text-left">
+          <p className="text-xs text-gray-500">{label}</p>
+          <p className="mb-1 text-sm">{file.name}</p>
+          <p className="text-xs text-gray-500">
+            Uploaded by {file.uploadedBy || '-'}
+            {file.uploadedDate ? ` on ${formatDate(file.uploadedDate)}` : ''}
+          </p>
+        </div>
+        <Download className="h-4 w-4 flex-shrink-0" style={{ color: '#014357' }} />
+      </div>
+    </Button>
+  );
+}
+
 // ===================== Component =====================
 export function PurchaseOrderDetail({
   user,
@@ -1003,7 +1070,7 @@ export function PurchaseOrderDetail({
         const flow = Array.isArray(data?.StatusFlow) ? data.StatusFlow : [];
         const reqs = Array.isArray(data?.ReEtaRequests) ? data.ReEtaRequests : [];
         const detail = (data?.PoDetail ?? data?.Order ?? null) as PoDetail | null;
-        console.log(data);
+
         setStatusFlowRows(flow);
         setReEtaRequestsRaw(reqs);
         setPoDetail(detail);
@@ -1047,15 +1114,15 @@ export function PurchaseOrderDetail({
 
   const idPoItem = useMemo(() => extractIdPoItem(poDetail, statusFlowRows), [poDetail, statusFlowRows]);
 
+  const deliveryDate = useMemo(() => {
+    return parseServerDate(poDetail?.DeliveryDate ?? poDetail?.['Delivery date']);
+  }, [poDetail]);
+
   const calculatedEtaDate = useMemo(() => {
     const days = parseInt(etaDays, 10);
     if (!etd || !etaDays || Number.isNaN(days) || days <= 0) return null;
     return new Date(etd.getTime() + days * 24 * 60 * 60 * 1000);
   }, [etd, etaDays]);
-
-  const deliveryDate = useMemo(() => {
-    return parseServerDate(poDetail?.DeliveryDate ?? poDetail?.['Delivery date']);
-  }, [poDetail]);
 
   const isEtaBeyondDeliveryDate = useMemo(() => {
     if (status !== 'PO Submitted') return false;
@@ -1159,10 +1226,6 @@ export function PurchaseOrderDetail({
       onBack();
     }
   }, [onBack, onRefreshPurchaseOrders]);
-
-  const goToRescheduleEtaPage = useCallback(() => {
-    window.location.href = '/reschedule-eta';
-  }, []);
 
   const handleAwbFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
@@ -1463,7 +1526,16 @@ export function PurchaseOrderDetail({
       return;
     }
 
-    toast.success(`Downloading ${file.name}...`);
+    if (file.base64Data) {
+      downloadBase64File(
+        file.base64Data,
+        file.name || 'document',
+        file.contentType || 'application/octet-stream',
+      );
+      return;
+    }
+
+    toast.error('File not found.');
   }, []);
 
   const handleDownloadAwbBase64File = useCallback(() => {
@@ -1541,7 +1613,11 @@ export function PurchaseOrderDetail({
       )}
 
       {canCreateReschedule(user.role, status) && (
-        <Button className="mb-6" style={{ backgroundColor: '#014357' }} onClick={handleOpenRescheduleDialog}>
+        <Button
+          className="mb-6"
+          style={{ backgroundColor: '#014357' }}
+          onClick={handleOpenRescheduleDialog}
+        >
           <Calendar className="mr-2 h-4 w-4" />
           Create Reschedule ETA Request
         </Button>
@@ -1575,26 +1651,21 @@ export function PurchaseOrderDetail({
 
                 <div className="space-y-4">
                   <div>
-  <Label htmlFor="vendor-etd">
-    ETD (Estimate Time of Delivery) <span className="text-red-500">*</span>
-  </Label>
-  <Popover>
-    <PopoverTrigger asChild>
-      <Button variant="outline" className="mt-1 w-full justify-start text-left" type="button">
-        <Calendar className="mr-2 h-4 w-4" />
-        {etd ? format(etd, 'PPP') : <span>Pick a date</span>}
-      </Button>
-    </PopoverTrigger>
-    <PopoverContent className="w-auto p-0">
-      <CalendarComponent
-        mode="single"
-        selected={etd}
-        onSelect={setEtd}
-        initialFocus
-      />
-    </PopoverContent>
-  </Popover>
-</div>
+                    <Label htmlFor="vendor-etd">
+                      ETD (Estimate Time of Delivery) <span className="text-red-500">*</span>
+                    </Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="mt-1 w-full justify-start text-left" type="button">
+                          <Calendar className="mr-2 h-4 w-4" />
+                          {etd ? format(etd, 'PPP') : <span>Pick a date</span>}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0">
+                        <CalendarComponent mode="single" selected={etd} onSelect={setEtd} initialFocus />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
 
                   <div>
                     <Label htmlFor="vendor-eta-days">
@@ -1624,7 +1695,7 @@ export function PurchaseOrderDetail({
                         title="ETA exceeds the PO delivery date"
                         description="The ETA date cannot be later than the PO delivery date. Please create a Reschedule ETA request before continuing."
                         actionLabel="Create Reschedule ETA Request"
-                        onAction={goToRescheduleEtaPage}
+                        onAction={handleOpenRescheduleDialog}
                       />
                     )}
                   </div>
@@ -1685,7 +1756,7 @@ export function PurchaseOrderDetail({
                       title="Delivery update cannot be submitted"
                       description="The calculated delivery date is later than the PO delivery date. Please create a Reschedule ETA request before continuing."
                       actionLabel="Go to RE ETA Request"
-                      onAction={goToRescheduleEtaPage}
+                      onAction={handleOpenRescheduleDialog}
                     />
                   )}
 
@@ -1704,26 +1775,26 @@ export function PurchaseOrderDetail({
                   </div>
 
                   <div>
-  <Label htmlFor="actual-delivery-date">
-    Actual Delivery Date <span className="text-red-500">*</span>
-  </Label>
-  <Popover>
-    <PopoverTrigger asChild>
-      <Button variant="outline" className="mt-1 w-full justify-start text-left" type="button">
-        <Calendar className="mr-2 h-4 w-4" />
-        {actualDeliveryDate ? format(actualDeliveryDate, 'PPP') : <span>Pick a date</span>}
-      </Button>
-    </PopoverTrigger>
-    <PopoverContent className="w-auto p-0">
-      <CalendarComponent
-        mode="single"
-        selected={actualDeliveryDate}
-        onSelect={setActualDeliveryDate}
-        initialFocus
-      />
-    </PopoverContent>
-  </Popover>
-</div>
+                    <Label htmlFor="actual-delivery-date">
+                      Actual Delivery Date <span className="text-red-500">*</span>
+                    </Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="mt-1 w-full justify-start text-left" type="button">
+                          <Calendar className="mr-2 h-4 w-4" />
+                          {actualDeliveryDate ? format(actualDeliveryDate, 'PPP') : <span>Pick a date</span>}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0">
+                        <CalendarComponent
+                          mode="single"
+                          selected={actualDeliveryDate}
+                          onSelect={setActualDeliveryDate}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
 
                   <div>
                     <Label htmlFor="leadtime-delivery">
@@ -1776,9 +1847,7 @@ export function PurchaseOrderDetail({
                       onChange={handleAwbFileChange}
                       className="mt-1"
                     />
-                    <p className="mt-1 text-xs text-gray-500">
-                      Allowed file types: PDF, PNG, JPG, JPEG
-                    </p>
+                    <p className="mt-1 text-xs text-gray-500">Allowed file types: PDF, PNG, JPG, JPEG</p>
 
                     {awbFile && (
                       <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
@@ -1837,7 +1906,7 @@ export function PurchaseOrderDetail({
                     </p>
                   </div>
 
-                  <div className="mb-3 grid grid-cols-2 gap-4 border-b border-gray-200 pb-3">
+                  <div className="mb-3 grid grid-cols-1 gap-4 border-b border-gray-200 pb-3 md:grid-cols-3">
                     <div>
                       <Label className="mb-1 block text-xs text-gray-500">Old ETA</Label>
                       <p className="text-sm text-gray-900">{request.oldETA ? formatDate(request.oldETA) : '-'}</p>
@@ -1846,6 +1915,10 @@ export function PurchaseOrderDetail({
                       <Label className="mb-1 block text-xs text-gray-500">New ETA</Label>
                       <p className="text-sm text-gray-900">{request.newETA ? formatDate(request.newETA) : '-'}</p>
                     </div>
+                    <div>
+                      <Label className="mb-1 block text-xs text-gray-500">Proposed ETA Days</Label>
+                      <p className="text-sm text-gray-900">{request.proposedETADays}</p>
+                    </div>
                   </div>
 
                   <div className="mb-3">
@@ -1853,73 +1926,52 @@ export function PurchaseOrderDetail({
                     <p className="text-sm text-gray-700">{request.reason}</p>
                   </div>
 
+                  {request.evidenceFile && (
+                    <div className="mb-3 border-t border-gray-200 pt-3">
+                      <FileActionCard
+                        file={request.evidenceFile}
+                        label="Evidence File"
+                        onDownload={handleDownloadFile}
+                      />
+                    </div>
+                  )}
+
+                  {request.status === 'Pending' && request.waitingFile && (
+                    <div className="grid grid-cols-1 gap-3 border-t border-gray-200 pt-3">
+                      <FileActionCard
+                        file={request.waitingFile}
+                        label="Waiting File"
+                        onDownload={handleDownloadFile}
+                      />
+                    </div>
+                  )}
+
                   {request.status === 'Approved' && request.approvalFile && (
-                    <div className="grid grid-cols-2 gap-3 border-t border-gray-200 pt-3">
-                      <Button
-                        variant="outline"
-                        className="h-auto w-full px-3 py-2"
-                        onClick={() => handleDownloadFile(request.approvalFile!)}
-                      >
-                        <div className="flex w-full items-center gap-3">
-                          <FileText className="h-4 w-4 flex-shrink-0" style={{ color: '#014357' }} />
-                          <div className="flex-1 text-left">
-                            <p className="mb-1 text-sm">{request.approvalFile.name}</p>
-                            <p className="text-xs text-gray-500">
-                              Uploaded by {request.approvalFile.uploadedBy || '-'}
-                              {request.approvalFile.uploadedDate
-                                ? ` on ${formatDate(request.approvalFile.uploadedDate)}`
-                                : ''}
-                            </p>
-                          </div>
-                          <Download className="h-4 w-4 flex-shrink-0" style={{ color: '#014357' }} />
-                        </div>
-                      </Button>
+                    <div className="grid grid-cols-1 gap-3 border-t border-gray-200 pt-3 md:grid-cols-2">
+                      <FileActionCard
+                        file={request.approvalFile}
+                        label="Approval File"
+                        onDownload={handleDownloadFile}
+                      />
                       <div />
                     </div>
                   )}
 
                   {request.status === 'Rejected' && request.rejectionFile && (
-                    <div className="grid grid-cols-2 gap-3 border-t border-gray-200 pt-3">
-                      <Button
-                        variant="outline"
-                        className="h-auto w-full px-3 py-2"
-                        onClick={() => handleDownloadFile(request.rejectionFile!)}
-                      >
-                        <div className="flex w-full items-center gap-3">
-                          <FileText className="h-4 w-4 flex-shrink-0" style={{ color: '#DC2626' }} />
-                          <div className="flex-1 text-left">
-                            <p className="mb-1 text-sm">{request.rejectionFile.name}</p>
-                            <p className="text-xs text-gray-500">
-                              Uploaded by {request.rejectionFile.uploadedBy || '-'}
-                              {request.rejectionFile.uploadedDate
-                                ? ` on ${formatDate(request.rejectionFile.uploadedDate)}`
-                                : ''}
-                            </p>
-                          </div>
-                          <Download className="h-4 w-4 flex-shrink-0" style={{ color: '#014357' }} />
-                        </div>
-                      </Button>
+                    <div className="grid grid-cols-1 gap-3 border-t border-gray-200 pt-3 md:grid-cols-2">
+                      <FileActionCard
+                        file={request.rejectionFile}
+                        label="Rejection File"
+                        iconColor="#DC2626"
+                        onDownload={handleDownloadFile}
+                      />
 
                       {request.confirmationFile ? (
-                        <Button
-                          variant="outline"
-                          className="h-auto w-full px-3 py-2"
-                          onClick={() => handleDownloadFile(request.confirmationFile!)}
-                        >
-                          <div className="flex w-full items-center gap-3">
-                            <FileText className="h-4 w-4 flex-shrink-0" style={{ color: '#014357' }} />
-                            <div className="flex-1 text-left">
-                              <p className="mb-1 text-sm">{request.confirmationFile.name}</p>
-                              <p className="text-xs text-gray-500">
-                                Uploaded by {request.confirmationFile.uploadedBy || '-'}
-                                {request.confirmationFile.uploadedDate
-                                  ? ` on ${formatDate(request.confirmationFile.uploadedDate)}`
-                                  : ''}
-                              </p>
-                            </div>
-                            <Download className="h-4 w-4 flex-shrink-0" style={{ color: '#014357' }} />
-                          </div>
-                        </Button>
+                        <FileActionCard
+                          file={request.confirmationFile}
+                          label="Confirmation File"
+                          onDownload={handleDownloadFile}
+                        />
                       ) : (
                         <div />
                       )}

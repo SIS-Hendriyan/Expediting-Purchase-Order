@@ -37,7 +37,6 @@ import {
   getAuthSession,
   getAccessToken,
   isVendorSession,
-  isInternalSession,
 } from '../../utils/authSession';
 
 // ================== Types ==================
@@ -311,7 +310,7 @@ const diffDaysFromToday = (date: Date): number => {
 const mapBackendStatusToDisplay = (status: string): string => {
   switch ((status || '').trim()) {
     case 'Submitted':
-      return 'PO Created';
+      return 'PO Submitted';
     case 'Work In Progress':
       return 'Work in Progress';
     case 'On Delivery':
@@ -325,15 +324,22 @@ const mapBackendStatusToDisplay = (status: string): string => {
 };
 
 const mapDisplayStatusToBackend = (status: string): string | null => {
-  switch ((status || '').trim()) {
-    case 'PO Created':
+  const normalized = (status || '').trim().toLowerCase();
+
+  switch (normalized) {
+    case 'po submitted':
+    case 'submitted':
       return 'submitted';
-    case 'Work in Progress':
+
+    case 'work in progress':
       return 'workInProgress';
-    case 'On Delivery':
+
+    case 'on delivery':
       return 'onDelivery';
-    case 'Received':
+
+    case 'received':
       return null;
+
     default:
       return null;
   }
@@ -346,7 +352,7 @@ const isReceivedBackendStatus = (status: string): boolean => {
 
 const statusColor = (displayStatus: string) => {
   switch (displayStatus) {
-    case 'PO Created': return '#ED832D';
+    case 'PO Submitted': return '#ED832D';
     case 'Work in Progress': return '#5C8CB6';
     case 'On Delivery': return '#008383';
     case 'Received': return '#6AA75D';
@@ -634,30 +640,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   );
 
   useEffect(() => {
-    const s = getAuthSession();
-
-    // if (isVendorSession(s)) {
-    //   console.log('[PO] VENDOR session:', {
-    //     id: s.id,
-    //     vendorName: s.vendorName,
-    //     email: s.email,
-    //   });
-    // }
-
-    // if (isInternalSession(s)) {
-    //   console.log('[PO] INTERNAL session:', {
-    //     id: s.id,
-    //     role: s.role,
-    //     email: s.email,
-    //   });
-    // }
-
-    // console.log('[PO] user.role =', user.role);
-    // console.log('[PO] vendorName =', vendorName);
-    // console.log('[PO] specialFilter from query =', specialFilter);
-  }, [user.role, vendorName, specialFilter]);
-
-  useEffect(() => {
     if (isFilterOpen) {
       setDraftFilters(appliedFilters);
     }
@@ -790,18 +772,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     const effectiveTab: StatusTab = attention ? 'all' : tab;
     const url = buildListUrl(effectiveTab, attention, pageNumber, pageSize, appliedFilters);
 
-    // console.log('[PO] list request:', {
-    //   url: url.toString(),
-    //   tab,
-    //   effectiveTab,
-    //   attention,
-    //   vendorName,
-    //   pageNumber,
-    //   pageSize,
-    //   appliedFilters,
-    //   headers: { hasAuth: !!getAuthToken() },
-    // });
-
     try {
       const res = await fetch(url.toString(), {
         method: 'GET',
@@ -841,7 +811,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       clearTimeout(timeout);
       setLoading(false);
     }
-  }, [buildListUrl, vendorName, appliedFilters]);
+  }, [buildListUrl, appliedFilters]);
 
   const fetchMasterFilters = useCallback(async () => {
     setLoadingMasterFilters(true);
@@ -897,7 +867,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     let list = orders;
 
     if (activeTab === 'created') {
-      list = list.filter(o => mapBackendStatusToDisplay(o.status) === 'PO Created');
+      list = list.filter(o => mapBackendStatusToDisplay(o.status) === 'PO Submitted');
     } else if (activeTab === 'wip') {
       list = list.filter(o => mapBackendStatusToDisplay(o.status) === 'Work in Progress');
     } else if (activeTab === 'delivery') {
@@ -953,12 +923,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
     return list;
   }, [scopedOrders, searchQuery, appliedFilters.status]);
-
-  const needUpdateCount = useMemo(() => {
-    const v = cardSummary?.PONeedUpdate;
-    if (typeof v === 'number') return v;
-    return orders.filter(o => normalizeAttention(o.attention) === 1).length;
-  }, [cardSummary, orders]);
 
   const overdueCount = useMemo(() => {
     const v = cardSummary?.POOverdue;
@@ -1487,11 +1451,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       variant="outline"
                       size="sm"
                       onClick={() => {
-                        console.log('[PO] view detail click', {
-                          id: o.id,
-                          purchasingDocument: o.purchasingDocument,
-                          key
-                        });
                         setSelectedOrderId(key);
                       }}
                       style={{ borderColor: '#014357', color: '#014357' }}
@@ -1637,31 +1596,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             )}
           </div>
 
-          {/* <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <div className="grid grid-cols-1 gap-4 mb-4">
             <Card
               className={[
-                'p-4 shadow-[0_2px_4px_rgba(237,131,45,0.25)] border-0 cursor-pointer transition-all',
-                specialFilter === 'updates' ? 'ring-2 ring-[#ED832D]' : ''
-              ].join(' ')}
-              style={{ backgroundColor: 'rgba(237, 131, 45, 0.1)' }}
-              onClick={() => handleToggleAttentionCard('updates')}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-white shadow-lg">
-                    <Clock className="h-4 w-4" style={{ color: '#ED832D' }} />
-                  </div>
-                  <div className="text-gray-900 text-sm" style={{ fontWeight: 600 }}>PO Need Updates</div>
-                </div>
-                <div className="text-2xl" style={{ color: '#ED832D', fontWeight: 800 }}>
-                  {needUpdateCount}
-                </div>
-              </div>
-            </Card>
-
-            <Card
-              className={[
-                'p-4 shadow-[0_2px_4px_rgba(220,38,38,0.25)] border-0 cursor-pointer transition-all',
+                'p-4 shadow-[0_2px_4px_rgba(220,38,38,0.25)] border-0 cursor-pointer transition-all w-full',
                 specialFilter === 'overdue' ? 'ring-2 ring-[#DC2626]' : ''
               ].join(' ')}
               style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)' }}
@@ -1679,29 +1617,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                 </div>
               </div>
             </Card>
-          </div> */}
-          <div className="grid grid-cols-1 gap-4 mb-4">
-  <Card
-    className={[
-      'p-4 shadow-[0_2px_4px_rgba(220,38,38,0.25)] border-0 cursor-pointer transition-all w-full',
-      specialFilter === 'overdue' ? 'ring-2 ring-[#DC2626]' : ''
-    ].join(' ')}
-    style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)' }}
-    onClick={() => handleToggleAttentionCard('overdue')}
-  >
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-3">
-        <div className="p-2 rounded-lg bg-white shadow-sm">
-          <AlertTriangle className="h-4 w-4" style={{ color: '#DC2626' }} />
-        </div>
-        <div className="text-gray-900 text-sm" style={{ fontWeight: 600 }}>Overdue</div>
-      </div>
-      <div className="text-2xl font-bold" style={{ color: '#DC2626', fontWeight: 800 }}>
-        {overdueCount}
-      </div>
-    </div>
-  </Card>
-</div>
+          </div>
 
           <div className="flex gap-3 mb-6">
             <Card className="flex-1 p-4">
@@ -1719,7 +1635,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                 <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(237, 131, 45, 0.1)' }}>
                   <FilePlus className="h-4 w-4" style={{ color: '#ED832D' }} />
                 </div>
-                <div className="text-gray-600 text-sm">PO Created</div>
+                <div className="text-gray-600 text-sm">PO Submitted</div>
               </div>
               <div className="text-3xl" style={{ color: '#ED832D' }}>{summary?.POSubmitted ?? 0}</div>
             </Card>
@@ -1834,7 +1750,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
               <TabsList>
                 <TabsTrigger value="all">All Orders</TabsTrigger>
-                <TabsTrigger value="created">PO Created</TabsTrigger>
+                <TabsTrigger value="created">PO Submitted</TabsTrigger>
                 <TabsTrigger value="wip">Work in Progress</TabsTrigger>
                 <TabsTrigger value="delivery">On Delivery</TabsTrigger>
                 <TabsTrigger value="received">Received</TabsTrigger>

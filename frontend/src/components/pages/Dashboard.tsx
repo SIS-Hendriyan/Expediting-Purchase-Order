@@ -1168,7 +1168,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
               icon: <Package className="h-6 w-6" style={{ color: '#014357' }} />,
               iconBg: 'rgba(1, 67, 87, 0.1)',
               iconColor: '#014357',
-              title: 'Total Purchase Orders',
+              title: 'Total Purchase Order Items',
               value: totalPO,
               subtitle: '+18 from last month',
               cardClassName: 'lg:col-span-1',
@@ -1242,7 +1242,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
               icon: <Package className="h-6 w-6" style={{ color: '#014357' }} />,
               iconBg: 'rgba(1, 67, 87, 0.1)',
               iconColor: '#014357',
-              title: 'Total Purchase Orders',
+              title: 'Total Purchase Order Items',
               value: totalPO,
               subtitle: '+18 from last month',
             })}
