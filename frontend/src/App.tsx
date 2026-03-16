@@ -6,7 +6,12 @@ import { PurchaseOrder } from './components/pages/PurchaseOrder';
 import { RescheduleETA } from './components/pages/RescheduleETA';
 import { Dashboard } from './components/pages/Dashboard';
 import Login, { type User } from './components/pages/Login';
-import { getAuthSession, isVendorSession, isInternalSession } from './utils/authSession';
+import {
+  getAuthSession,
+  isVendorSession,
+  isInternalSession,
+  clearAuthSession,
+} from './utils/authSession';
 import { OTP } from './components/pages/OTP';
 
 import {
@@ -49,99 +54,123 @@ type Page =
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const navigate = useNavigate();
-  const location = useLocation();
+  const [vendorOtpPending, setVendorOtpPending] = useState(false);
   const [isRestoring, setIsRestoring] = useState(true);
+
   const [userManagementExpanded, setUserManagementExpanded] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [profilePopoverOpen, setProfilePopoverOpen] = useState(false);
 
-  // Dipanggil dari <Login />
-  const handleLogin = (user: User) => {
-    // Set the user (app state)
-    setCurrentUser(user);
-    // Log incoming user and current page so we can debug state transitions
-    console.log('[App] handleLogin - setCurrentUser called with:', user, 'location (before):', location.pathname);
+  const navigate = useNavigate();
+  const location = useLocation();
 
-    if (user.role === 'vendor') {
-      // Vendor step-1: redirect to OTP page
-      navigate('/otp');
-      console.log('[App] handleLogin - navigate -> /otp');
-    } else {
-      // Internal/Admin -> dashboard
-      navigate('/dashboard');
-      console.log('[App] handleLogin - navigate -> /dashboard');
+  const derivePageFromPath = (path: string): Page => {
+    if (path.startsWith('/vendor-management')) return 'vendor-management';
+    if (path.startsWith('/internal-user-management')) return 'internal-user-management';
+    if (path.startsWith('/purchase-order')) return 'purchase-order';
+    if (path.startsWith('/reschedule-eta')) return 'reschedule-eta';
+    if (path.startsWith('/otp')) return 'otp';
+    return 'dashboard';
+  };
+
+  const clearClientAuthData = () => {
+    try {
+      clearAuthSession();
+
+      sessionStorage.removeItem('vendorSession');
+      sessionStorage.removeItem('internalSession');
+      sessionStorage.removeItem('accessToken');
+      sessionStorage.removeItem('refreshToken');
+      sessionStorage.removeItem('token');
+
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+      localStorage.removeItem('token');
+    } catch (e) {
+      console.error('Failed to clear auth data:', e);
     }
   };
 
-  // Attempt to restore auth session from sessionStorage on first render.
-  // If a session exists (saved by Login), map it to our `User` shape so
-  // the app keeps the user logged-in after a full page refresh.
-  useEffect(() => {
-    (async () => {
-      try {
-        const s = getAuthSession();
-        console.log('[restoreSession] raw session:', s);
+  const handleLogin = (user: User) => {
+    setCurrentUser(user);
 
-        if (!s) {
-          console.log('[restoreSession] no session found');
-          return;
-        }
+    if (user.role === 'vendor') {
+      setVendorOtpPending(true);
+      navigate('/otp', { replace: true });
+      return;
+    }
 
-        if (isVendorSession(s)) {
-          const restoredUser = {
-            email: s.email || '',
-            name: s.completeName || '',
-            role: 'vendor' as const,
-            company: s.vendorName || undefined,
-          };
-          console.log('[restoreSession] vendor session → currentUser:', restoredUser);
-          setCurrentUser(restoredUser);
-          return;
-        }
+    setVendorOtpPending(false);
+    navigate('/dashboard', { replace: true });
+  };
 
-        if (isInternalSession(s)) {
-          const mappedRole: User['role'] =
-            String(s.role || '').toLowerCase() === 'admin' ? 'admin' : 'user';
-
-          const restoredUser = {
-            email: s.email || '',
-            name: s.name || '',
-            role: mappedRole,
-            company: s.jobsite || undefined,
-          };
-          console.log('[restoreSession] internal session → currentUser:', restoredUser);
-          setCurrentUser(restoredUser);
-          return;
-        }
-
-        console.log('[restoreSession] session exists but is neither vendor nor internal');
-      } catch (e) {
-        console.log('[restoreSession] restore session failed:', e);
-        // ignore - non-fatal
-      } finally {
-        setIsRestoring(false);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-
-  // Dipanggil dari <OTP /> setelah OTP valid
   const handleOtpVerified = (user: User) => {
     setCurrentUser(user);
-    navigate('/dashboard');
+    setVendorOtpPending(false);
+    navigate('/dashboard', { replace: true });
   };
 
   const handleLogout = () => {
+    setProfilePopoverOpen(false);
     setCurrentUser(null);
-    navigate('/login');
+    setVendorOtpPending(false);
+
+    clearClientAuthData();
+
+    navigate('/login', { replace: true });
   };
 
-  // If not authenticated, render routes that allow /login and redirect others to /login
-  // While restoring session, show a small loading placeholder so we don't redirect
-  // away from the requested URL before we've had a chance to rehydrate the session.
+  useEffect(() => {
+    try {
+      const session = getAuthSession();
+      console.log('[restoreSession] raw session:', session);
+
+      if (!session) {
+        setIsRestoring(false);
+        return;
+      }
+
+      if (isVendorSession(session)) {
+        const restoredUser: User = {
+          email: session.email || '',
+          name: session.completeName || '',
+          role: 'vendor',
+          company: session.vendorName || undefined,
+          type: 'VENDOR',
+        };
+
+        setCurrentUser(restoredUser);
+        setVendorOtpPending(false);
+        setIsRestoring(false);
+        return;
+      }
+
+      if (isInternalSession(session)) {
+        const mappedRole: User['role'] =
+          String(session.role || '').toLowerCase() === 'admin' ? 'admin' : 'user';
+
+        const restoredUser: User = {
+          email: session.email || '',
+          name: session.name || '',
+          role: mappedRole,
+          company: session.jobsite || undefined,
+          type: 'INTERNAL',
+        };
+
+        setCurrentUser(restoredUser);
+        setVendorOtpPending(false);
+        setIsRestoring(false);
+        return;
+      }
+
+      setIsRestoring(false);
+    } catch (e) {
+      console.error('[restoreSession] failed:', e);
+      setIsRestoring(false);
+    }
+  }, []);
+
   if (isRestoring) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -161,21 +190,13 @@ export default function App() {
     );
   }
 
-  // 2) Vendor OTP fullpage route
-  if (location.pathname === '/otp' && currentUser.role === 'vendor') {
+  if (vendorOtpPending) {
+    if (location.pathname !== '/otp') {
+      return <Navigate to="/otp" replace />;
+    }
+
     return <OTP user={currentUser} onVerified={handleOtpVerified} />;
   }
-
-  // 3) Sudah authenticated penuh → tampilkan layout utama
-  // derive currentPage from the URL for active styling
-  const derivePageFromPath = (path: string): Page => {
-    if (path.startsWith('/vendor-management')) return 'vendor-management';
-    if (path.startsWith('/internal-user-management')) return 'internal-user-management';
-    if (path.startsWith('/purchase-order')) return 'purchase-order';
-    if (path.startsWith('/reschedule-eta')) return 'reschedule-eta';
-    if (path.startsWith('/otp')) return 'otp';
-    return 'dashboard';
-  };
 
   const currentPage = derivePageFromPath(location.pathname);
 
@@ -186,18 +207,27 @@ export default function App() {
       case 'internal-user-management':
         return <InternalUserManagement />;
       case 'purchase-order':
-        return <PurchaseOrder user={currentUser} />;
+        return (
+          <PurchaseOrder
+            user={currentUser}
+            onPageChange={(page) => navigate(`/${page}`)}
+          />
+        );
       case 'reschedule-eta':
         return <RescheduleETA user={currentUser} />;
       case 'dashboard':
       default:
-        return <Dashboard user={currentUser} />;
+        return (
+          <Dashboard
+            user={currentUser}
+            onPageChange={(page) => navigate(`/${page}`)}
+          />
+        );
     }
   };
 
   return (
     <div className="flex h-screen bg-gray-50">
-      {/* Mobile Overlay */}
       {isMobileMenuOpen && (
         <div
           className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
@@ -205,7 +235,6 @@ export default function App() {
         />
       )}
 
-      {/* Sidebar */}
       <TooltipProvider delayDuration={0}>
         <div
           className={`${
@@ -214,7 +243,6 @@ export default function App() {
             sidebarCollapsed ? 'w-20' : 'w-64'
           } transition-all duration-300 bg-white border-r border-gray-200 flex flex-col overflow-hidden`}
         >
-          {/* Logo */}
           <div className="px-6 py-4 border-b border-gray-200">
             <div className="flex items-center justify-between">
               {sidebarCollapsed ? (
@@ -263,9 +291,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* Navigation */}
           <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-            {/* Dashboard */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -284,7 +310,7 @@ export default function App() {
                   }
                 >
                   <BarChart3 className="h-5 w-5 flex-shrink-0" />
-                  {!sidebarCollapsed && <span  className="text-left">Analytical Dashboard</span>}
+                  {!sidebarCollapsed && <span className="text-left">Analytical Dashboard</span>}
                 </button>
               </TooltipTrigger>
               {sidebarCollapsed && (
@@ -294,23 +320,20 @@ export default function App() {
               )}
             </Tooltip>
 
-            {/* User Management - Admin Only */}
             {currentUser.role === 'admin' && (
               <div>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
                       onClick={() => {
-                          if (!sidebarCollapsed) {
-                            setUserManagementExpanded((v) => !v);
-                          } else {
-                            navigate('/vendor-management');
-                          }
-                        }}
+                        if (!sidebarCollapsed) {
+                          setUserManagementExpanded((v) => !v);
+                        } else {
+                          navigate('/vendor-management');
+                        }
+                      }}
                       className={`w-full flex items-center ${
-                        sidebarCollapsed
-                          ? 'justify-center'
-                          : 'justify-between'
+                        sidebarCollapsed ? 'justify-center' : 'justify-between'
                       } gap-3 px-4 py-3 rounded-lg transition-colors ${
                         currentPage === 'vendor-management' ||
                         currentPage === 'internal-user-management'
@@ -330,7 +353,7 @@ export default function App() {
                         }`}
                       >
                         <Users className="h-5 w-5 flex-shrink-0" />
-                        {!sidebarCollapsed && <span  className="text-left">User Management</span>}
+                        {!sidebarCollapsed && <span className="text-left">User Management</span>}
                       </div>
                       {!sidebarCollapsed && (
                         <ChevronDown
@@ -349,7 +372,6 @@ export default function App() {
                 </Tooltip>
 
                 {userManagementExpanded && !sidebarCollapsed && (
-                  // <div className="ml-4 mt-1 space-y-1">
                   <div className="text-left flex-1 ml-4 mt-1 space-y-1">
                     <button
                       onClick={() => navigate('/vendor-management')}
@@ -386,7 +408,6 @@ export default function App() {
               </div>
             )}
 
-            {/* Purchase Order */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -415,9 +436,7 @@ export default function App() {
               )}
             </Tooltip>
 
-            {/* Reschedule ETA - Admin & Vendor */}
-            {(currentUser.role === 'admin' ||
-              currentUser.role === 'vendor') && (
+            {(currentUser.role === 'admin' || currentUser.role === 'vendor') && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
@@ -450,12 +469,8 @@ export default function App() {
             )}
           </nav>
 
-          {/* Profile + Logout */}
           <div className="p-4 border-t border-gray-200">
-            <Popover
-              open={profilePopoverOpen}
-              onOpenChange={setProfilePopoverOpen}
-            >
+            <Popover open={profilePopoverOpen} onOpenChange={setProfilePopoverOpen}>
               <PopoverTrigger asChild>
                 <button
                   className={`w-full flex items-center ${
@@ -466,41 +481,32 @@ export default function App() {
                     className="w-8 h-8 rounded-full flex items-center justify-center text-white flex-shrink-0"
                     style={{ backgroundColor: '#014357' }}
                   >
-                    {currentUser.name
+                    {(currentUser.name || currentUser.email || 'U')
                       .split(' ')
                       .map((n) => n[0])
                       .join('')
                       .toUpperCase()
                       .slice(0, 2)}
                   </div>
+
                   {!sidebarCollapsed && (
                     <div className="flex-1 min-w-0 text-left">
-                      <p className="text-sm truncate">
-                        {currentUser.name}
-                      </p>
-                      <p className="text-xs text-gray-500 truncate">
-                        {currentUser.company}
-                      </p>
-                      <p className="text-xs text-gray-500 truncate">
-                        {currentUser.email}
-                      </p>
+                      <p className="text-sm truncate">{currentUser.name || '-'}</p>
+                      <p className="text-xs text-gray-500 truncate">{currentUser.company || '-'}</p>
+                      <p className="text-xs text-gray-500 truncate">{currentUser.email}</p>
                     </div>
                   )}
                 </button>
               </PopoverTrigger>
+
               <PopoverContent
                 side={sidebarCollapsed ? 'right' : 'top'}
                 align="start"
-                className={`${
-                  sidebarCollapsed ? 'w-auto' : 'w-56'
-                } p-0`}
+                className={`${sidebarCollapsed ? 'w-auto' : 'w-56'} p-0`}
                 sideOffset={8}
               >
                 <button
-                  onClick={() => {
-                    setProfilePopoverOpen(false);
-                    handleLogout();
-                  }}
+                  onClick={handleLogout}
                   className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm text-red-600 hover:bg-red-50 transition-colors"
                 >
                   <LogOut className="h-5 w-5" />
@@ -512,9 +518,7 @@ export default function App() {
         </div>
       </TooltipProvider>
 
-      {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
         <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 sm:gap-4 flex-1 min-w-0">
@@ -526,6 +530,7 @@ export default function App() {
               >
                 <Menu className="h-5 w-5" />
               </Button>
+
               <div className="min-w-0">
                 <h1
                   className="text-base sm:text-xl truncate"
@@ -535,23 +540,17 @@ export default function App() {
                 </h1>
               </div>
             </div>
+
             <div className="hidden sm:flex items-center gap-4">
               <div className="text-right">
-                <p className="text-sm text-gray-600">
-                  Welcome back,
-                </p>
-                <p style={{ color: '#014357' }}>
-                  {currentUser.name}
-                </p>
+                <p className="text-sm text-gray-600">Welcome back,</p>
+                <p style={{ color: '#014357' }}>{currentUser.name || currentUser.email}</p>
               </div>
             </div>
           </div>
         </header>
 
-        {/* Page Content */}
-        <main className="flex-1 min-h-0 overflow-y-auto">
-          {renderPage()}
-        </main>
+        <main className="flex-1 min-h-0 overflow-y-auto">{renderPage()}</main>
       </div>
 
       <Toaster />

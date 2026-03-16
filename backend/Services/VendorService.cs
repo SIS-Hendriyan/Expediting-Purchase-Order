@@ -5,8 +5,7 @@ using System.Security.Claims;
 
 namespace EXPOAPI.Services
 {
-
-    public  class VendorService : IVendorService
+    public class VendorService : IVendorService
     {
         private const string SP_VENDORS = "[exp].[VENDORS_SP]";
         private const string SP_VENDOR_IUD = "[exp].[Vendor_IUD_SP]";
@@ -50,26 +49,20 @@ namespace EXPOAPI.Services
             var vendors = new List<Dictionary<string, object?>>();
             var summary = DefaultSummary();
 
-            // Scan all result sets (like Python) & classify using column keys
             while (!grid.IsConsumed)
             {
                 var rows = (await grid.ReadAsync<dynamic>()).AsList();
                 if (rows.Count == 0) continue;
 
-                // IMPORTANT: force non-dynamic type here
                 Dictionary<string, object?> first = ToDict(rows[0]);
-
-                // Build normalized key set WITHOUT LINQ lambdas on dynamic
                 var lowerKeys = BuildLowerKeySet(first.Keys);
 
-                // Vendor list set: must have VendorID + VendorName
                 if (lowerKeys.Contains("vendorid") && lowerKeys.Contains("vendorname"))
                 {
                     vendors = rows.Select(r => (Dictionary<string, object?>)ToDict(r)).ToList();
                     continue;
                 }
 
-                // Summary set: must contain all summary keys
                 if (ContainsAllSummaryKeys(lowerKeys))
                 {
                     foreach (var k in SummaryKeys)
@@ -118,6 +111,25 @@ namespace EXPOAPI.Services
         }
 
         // =========================================================
+        // GET BY EMAIL
+        // requires SP_VENDOR_IUD action = GETBYEMAIL
+        // =========================================================
+        public Task<Dictionary<string, object?>?> GetVendorByEmailAsync(string email, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(email))
+                return Task.FromResult<Dictionary<string, object?>?>(null);
+
+            return ExecuteVendorSingleAsync(
+                "GETBYEMAIL",
+                new Dictionary<string, object?>
+                {
+                    ["Email"] = email.Trim()
+                },
+                ct
+            );
+        }
+
+        // =========================================================
         // IUD wrappers
         // =========================================================
         public Task<Dictionary<string, object?>> CreateVendorAsync(Dictionary<string, object?> payload, ClaimsPrincipal? user, CancellationToken ct = default)
@@ -159,6 +171,26 @@ namespace EXPOAPI.Services
             return ExecuteVendorIudAsync("UPDATE", p, ct);
         }
 
+        public Task<Dictionary<string, object?>> UpdateVendorOtpAsync(
+            int vendorId,
+            string otp,
+            DateTime otpExpiresAt,
+            string updatedBy,
+            CancellationToken ct = default)
+        {
+            return UpdateVendorAsync(
+                vendorId,
+                new Dictionary<string, object?>
+                {
+                    ["OTP"] = otp,
+                    ["OtpExpiresAt"] = otpExpiresAt,
+                    ["UpdatedBy"] = updatedBy
+                },
+                null,
+                ct
+            );
+        }
+
         public Task<Dictionary<string, object?>> UpdateVendorAccessAsync(int vendorId, Dictionary<string, object?> payload, ClaimsPrincipal? user, CancellationToken ct = default)
         {
             var actor = GetActor(payload, "UpdatedBy", user);
@@ -175,7 +207,6 @@ namespace EXPOAPI.Services
 
         public Task<Dictionary<string, object?>> DeleteVendorAsync(int vendorId, Dictionary<string, object?> payload, ClaimsPrincipal? user, CancellationToken ct = default)
         {
-            // Keep original Python key typo if your SP expects it
             var actor = GetActor(payload, "DeleteddBy", user);
 
             var p = new Dictionary<string, object?>
@@ -188,7 +219,7 @@ namespace EXPOAPI.Services
         }
 
         // =========================================================
-        // Core: Execute Vendor IUD (scan multi result sets; return first row found)
+        // Core: Execute Vendor IUD
         // =========================================================
         private async Task<Dictionary<string, object?>> ExecuteVendorIudAsync(string action, Dictionary<string, object?> parameters, CancellationToken ct)
         {
@@ -220,7 +251,39 @@ namespace EXPOAPI.Services
         }
 
         // =========================================================
-        // Result-set classification helpers (NO dynamic-lambda)
+        // Core: Execute single-row read from Vendor_IUD_SP
+        // =========================================================
+        private async Task<Dictionary<string, object?>?> ExecuteVendorSingleAsync(string action, Dictionary<string, object?> parameters, CancellationToken ct)
+        {
+            using var cn = _db.CreateMain();
+
+            var dp = new DynamicParameters();
+            dp.Add("Action", (action ?? "").ToUpperInvariant());
+
+            foreach (var kv in parameters)
+                dp.Add(kv.Key, kv.Value);
+
+            using var grid = await cn.QueryMultipleAsync(
+                new CommandDefinition(
+                    SP_VENDOR_IUD,
+                    dp,
+                    commandType: CommandType.StoredProcedure,
+                    cancellationToken: ct
+                )
+            );
+
+            while (!grid.IsConsumed)
+            {
+                var rows = (await grid.ReadAsync<dynamic>()).AsList();
+                if (rows.Count > 0)
+                    return ToDict(rows[0]);
+            }
+
+            return null;
+        }
+
+        // =========================================================
+        // Result-set classification helpers
         // =========================================================
         private static HashSet<string> BuildLowerKeySet(IEnumerable<string> keys)
         {
@@ -246,7 +309,7 @@ namespace EXPOAPI.Services
         }
 
         // =========================================================
-        // Python-mirror helpers
+        // Helpers
         // =========================================================
         private static Dictionary<string, object?> DefaultSummary() => new()
         {
@@ -306,10 +369,6 @@ namespace EXPOAPI.Services
         private static object? Get(Dictionary<string, object?> payload, string key)
             => payload != null && payload.TryGetValue(key, out var v) ? v : null;
 
-        /// <summary>
-        /// Convert Dapper dynamic row into Dictionary<string, object?>
-        /// Handles DapperRow and fallback reflection.
-        /// </summary>
         private static Dictionary<string, object?> ToDict(dynamic row)
         {
             if (row is null)

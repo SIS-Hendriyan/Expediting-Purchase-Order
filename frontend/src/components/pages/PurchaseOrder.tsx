@@ -1,4 +1,3 @@
-// src/components/pages/PurchaseOrder.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Card } from '../ui/card';
@@ -44,29 +43,27 @@ import {
 // ================== Types ==================
 interface PurchaseOrderProps { user: User; }
 
-type StatusTab = 'all' | 'created' | 'wip' | 'delivery' | 'partially' | 'delivered';
+type StatusTab = 'all' | 'created' | 'wip' | 'delivery' | 'received';
 type AttentionFilter = 'updates' | 'overdue' | null;
 
 type AttentionRaw = number | 'Need Update' | 'Overdue' | null | undefined;
 type AttentionNorm = 0 | 1 | 2;
-
-// ✅ NEW: key type for detail
 type OrderKey = string | number;
 
 export interface PurchaseOrderItem {
-  // ✅ NEW: from /purchaseorder/summary
   id?: OrderKey | null;
-
   purchaseRequisition: string;
   itemOfRequisition: string;
   purchasingDocument: string;
   item: string;
   documentDate: string;
-  deliveryDate: string;
+  deliveryDate: string | null;
+  etaDate: string | null;
   purchasingDocType: string;
   purchasingGroup: string;
   shortText: string;
   material: string;
+  qtyOrder: string | null;
   nameOfSupplier: string;
   quantityReceived: string;
   stillToBeDelivered: string;
@@ -76,9 +73,9 @@ export interface PurchaseOrderItem {
   changedOn: string | null;
   grCreatedDate: string | null;
   remarks: string | null;
-  reEtaDate: string | null;  // dd-MMM-yyyy from SP
-  status: string;            // backend raw
-  attention?: AttentionRaw;  // backend: 1/2 or "Need Update"/"Overdue"
+  reEtaDate: string | null;
+  status: string;
+  attention?: AttentionRaw;
 }
 
 interface PurchaseOrderSummary {
@@ -88,16 +85,22 @@ interface PurchaseOrderSummary {
   POOnDelivery: number;
   POPartiallyReceived: number;
   POFullyReceived: number;
-
-  // optional counts from backend
   PONeedUpdate?: number;
   POOverdue?: number;
   PONeedUpdateFiltered?: number;
   POOverdueFiltered?: number;
-
   TotalFiltered?: number;
   PageSize?: number;
+  PageNumber?: number;
+  TotalPages?: number;
   FilterStatus?: string | null;
+}
+
+interface PurchaseOrderPagination {
+  pageNumber: number;
+  pageSize: number;
+  totalFiltered: number;
+  totalPages: number;
 }
 
 type ColumnKey =
@@ -107,10 +110,12 @@ type ColumnKey =
   | 'item'
   | 'documentDate'
   | 'deliveryDate'
+  | 'etaDate'
   | 'purchasingDocType'
   | 'purchasingGroup'
   | 'shortText'
   | 'material'
+  | 'qtyOrder'
   | 'nameOfSupplier'
   | 'quantityReceived'
   | 'stillToBeDelivered'
@@ -131,8 +136,7 @@ const STATUS_TAB_TO_PARAM: Record<Exclude<StatusTab, 'all'>, string> = {
   created: 'submitted',
   wip: 'workInProgress',
   delivery: 'onDelivery',
-  partially: 'partiallyReceived',
-  delivered: 'fullyReceived',
+  received: 'received',
 };
 
 const ATTENTION_UI_TO_BACKEND: Record<Exclude<AttentionFilter, null>, 1 | 2> = {
@@ -141,23 +145,43 @@ const ATTENTION_UI_TO_BACKEND: Record<Exclude<AttentionFilter, null>, 1 | 2> = {
 };
 
 const ALLOWED_EXCEL_EXTENSIONS = ['.xlsx', '.xls'];
-const toArray = (v: any): any[] => (Array.isArray(v) ? v : v ? [v] : []);
 
-// ✅ normalize item.id (karena kadang backend kirim ID / Id)
+const toArray = (v: any): any[] => (Array.isArray(v) ? v : v ? [v] : []);
+const clampUploadProgress = (value: number) => Math.max(0, Math.min(99, value));
+
 const normalizeItemId = (it: any): OrderKey | null => {
   const v = it?.id ?? it?.ID ?? it?.Id ?? null;
   if (v === null || v === undefined || v === '') return null;
   return v as OrderKey;
 };
 
-// ✅ key for detail: prefer id, fallback purchasingDocument
 const getOrderKey = (o: PurchaseOrderItem): OrderKey =>
   (o.id !== null && o.id !== undefined && o.id !== '' ? o.id : o.purchasingDocument);
 
-function unwrapPOPayload(json: AnyObj): { summary: PurchaseOrderSummary | null; items: PurchaseOrderItem[] } {
+function unwrapPOPayload(json: AnyObj): {
+  summary: PurchaseOrderSummary | null;
+  pagination: PurchaseOrderPagination | null;
+  items: PurchaseOrderItem[];
+} {
   const lvl1 = (json?.data ?? json?.Data ?? json?.payload ?? json?.result ?? json) as AnyObj;
   const lvl2 = (lvl1?.Data ?? lvl1?.data ?? lvl1) as AnyObj;
+
   const summary = (lvl2?.summary ?? lvl2?.Summary ?? null) as PurchaseOrderSummary | null;
+
+  const paginationFromNode =
+    (lvl2?.pagination ?? lvl2?.Pagination ?? null) as PurchaseOrderPagination | null;
+
+  const paginationFromSummary =
+    summary
+      ? {
+          pageNumber: Number(summary.PageNumber ?? 1),
+          pageSize: Number(summary.PageSize ?? 10),
+          totalFiltered: Number(summary.TotalFiltered ?? 0),
+          totalPages: Number(summary.TotalPages ?? 0),
+        }
+      : null;
+
+  const pagination = paginationFromNode ?? paginationFromSummary;
 
   const itemsRaw =
     lvl2?.items ?? lvl2?.Items ?? lvl2?.rows ?? lvl2?.Rows ??
@@ -166,14 +190,46 @@ function unwrapPOPayload(json: AnyObj): { summary: PurchaseOrderSummary | null; 
 
   const items = (Array.isArray(itemsRaw) ? itemsRaw : toArray(itemsRaw)) as PurchaseOrderItem[];
 
-  // ✅ ensure id normalized
-  const normalizedItems = items.map((x: any) => ({ ...x, id: normalizeItemId(x) })) as PurchaseOrderItem[];
+  const normalizedItems = items.map((x: any) => ({
+    ...x,
+    id: normalizeItemId(x),
 
-  return { summary, items: normalizedItems };
+    deliveryDate:
+      x?.deliveryDate ??
+      x?.DeliveryDate ??
+      x?.['Delivery Date'] ??
+      null,
+
+    etaDate:
+      x?.etaDate ??
+      x?.ETADate ??
+      x?.EtaDate ??
+      x?.['ETA Date'] ??
+      null,
+
+    qtyOrder:
+      x?.qtyOrder ??
+      x?.QtyOrder ??
+      x?.['Qty Order'] ??
+      x?.quantityOrder ??
+      x?.QuantityOrder ??
+      x?.orderQty ??
+      x?.OrderQty ??
+      null,
+
+    reEtaDate:
+      x?.reEtaDate ??
+      x?.ReEtaDate ??
+      x?.['Re-ETA Date'] ??
+      x?.latestReEtaDate ??
+      x?.LatestReEtaDate ??
+      x?.proposedETA ??
+      x?.ProposedETA ??
+      null,
+  })) as PurchaseOrderItem[];
+
+  return { summary, pagination, items: normalizedItems };
 }
-
-const eqCI = (a?: string | null, b?: string | null) =>
-  (a ?? '').trim().toLowerCase() === (b ?? '').trim().toLowerCase();
 
 const normalizeAttention = (v: AttentionRaw): AttentionNorm => {
   if (v === 1 || v === 2) return v;
@@ -213,13 +269,23 @@ const diffDaysFromToday = (date: Date): number => {
 
 const mapBackendStatusToDisplay = (status: string): string => {
   switch ((status || '').trim()) {
-    case 'Submitted': return 'PO Created';
-    case 'Work In Progress': return 'Work in Progress';
-    case 'On Delivery': return 'On Delivery';
-    case 'Partially Received': return 'Partially Received';
-    case 'Fully Received': return 'Fully Received';
-    default: return status || '-';
+    case 'Submitted':
+      return 'PO Created';
+    case 'Work In Progress':
+      return 'Work in Progress';
+    case 'On Delivery':
+      return 'On Delivery';
+    case 'Partially Received':
+    case 'Fully Received':
+      return 'Received';
+    default:
+      return status || '-';
   }
+};
+
+const isReceivedBackendStatus = (status: string): boolean => {
+  const s = (status || '').trim();
+  return s === 'Partially Received' || s === 'Fully Received';
 };
 
 const statusColor = (displayStatus: string) => {
@@ -227,13 +293,37 @@ const statusColor = (displayStatus: string) => {
     case 'PO Created': return '#ED832D';
     case 'Work in Progress': return '#5C8CB6';
     case 'On Delivery': return '#008383';
-    case 'Partially Received': return '#F59E0B';
-    case 'Fully Received': return '#6AA75D';
+    case 'Received': return '#6AA75D';
     default: return '#014357';
   }
 };
 
-// ---- Auth helpers ----
+const getInitialAttentionFilterFromQuery = (): AttentionFilter => {
+  if (typeof window === 'undefined') return null;
+
+  const params = new URLSearchParams(window.location.search);
+  const attraction = params.get('attraction');
+
+  if (attraction === '1') return 'updates';
+  if (attraction === '2') return 'overdue';
+
+  return null;
+};
+
+const syncAttractionQuery = (value: 1 | 2 | null) => {
+  if (typeof window === 'undefined') return;
+
+  const url = new URL(window.location.href);
+
+  if (value === 1 || value === 2) {
+    url.searchParams.set('attraction', String(value));
+  } else {
+    url.searchParams.delete('attraction');
+  }
+
+  window.history.replaceState({}, '', url.toString());
+};
+
 const getAuthToken = (): string => {
   const local = localStorage.getItem('accessToken');
   const sessionToken = getAccessToken();
@@ -248,18 +338,19 @@ const buildAuthHeaders = (): HeadersInit => {
   };
 };
 
-// ---- Column defaults ----
 const vendorColumns: ColumnVis = {
   purchaseRequisition: false,
   itemOfRequisition: true,
   purchasingDocument: true,
   item: false,
   documentDate: false,
-  deliveryDate: true,
+  deliveryDate: false,
+  etaDate: true,
   purchasingDocType: false,
   purchasingGroup: false,
   shortText: true,
   material: true,
+  qtyOrder: true,
   nameOfSupplier: false,
   quantityReceived: false,
   stillToBeDelivered: false,
@@ -279,11 +370,13 @@ const internalColumns: ColumnVis = {
   purchasingDocument: true,
   item: true,
   documentDate: true,
-  deliveryDate: true,
+  deliveryDate: false,
+  etaDate: true,
   purchasingDocType: true,
   purchasingGroup: true,
   shortText: true,
   material: false,
+  qtyOrder: true,
   nameOfSupplier: true,
   quantityReceived: true,
   stillToBeDelivered: true,
@@ -308,10 +401,12 @@ const columnLabel = (k: ColumnKey, role: User['role']) => {
     item: 'Item',
     documentDate: 'Document Date',
     deliveryDate: 'Delivery Date',
+    etaDate: 'ETA Date',
     purchasingDocType: 'Purchasing Doc. Type',
     purchasingGroup: 'Purchasing Group',
     shortText: 'Short Text',
     material: 'Material',
+    qtyOrder: 'Qty Order',
     nameOfSupplier: 'Name of Supplier',
     quantityReceived: 'Qty Received',
     stillToBeDelivered: 'Still to be Delivered',
@@ -329,6 +424,7 @@ const columnLabel = (k: ColumnKey, role: User['role']) => {
 
 const attentionBadge = (raw: AttentionRaw) => {
   const att = normalizeAttention(raw);
+
   if (att === 2) {
     return (
       <Badge
@@ -339,6 +435,7 @@ const attentionBadge = (raw: AttentionRaw) => {
       </Badge>
     );
   }
+
   if (att === 1) {
     return (
       <Badge
@@ -349,6 +446,7 @@ const attentionBadge = (raw: AttentionRaw) => {
       </Badge>
     );
   }
+
   return <span className="text-gray-400">-</span>;
 };
 
@@ -359,14 +457,11 @@ const isExcelFile = (file: File): boolean => {
 
 // ================== Component ==================
 export function PurchaseOrder({ user }: PurchaseOrderProps) {
-  // View state
   const [selectedOrderId, setSelectedOrderId] = useState<OrderKey | null>(null);
 
-  // Tabs + special attention filter (affects LIST only)
   const [activeTab, setActiveTab] = useState<StatusTab>('all');
-  const [specialFilter, setSpecialFilter] = useState<AttentionFilter>(null);
+  const [specialFilter, setSpecialFilter] = useState<AttentionFilter>(() => getInitialAttentionFilterFromQuery());
 
-  // UI / filters / pagination
   const [searchQuery, setSearchQuery] = useState('');
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -379,62 +474,139 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const [filterSupplier, setFilterSupplier] = useState('');
   const [filterDocType, setFilterDocType] = useState('');
 
-  // Data (LIST)
   const [orders, setOrders] = useState<PurchaseOrderItem[]>([]);
   const [summary, setSummary] = useState<PurchaseOrderSummary | null>(null);
-
-  // ✅ Data (CARDS / GLOBAL COUNTS) - NEVER affected by specialFilter
   const [cardSummary, setCardSummary] = useState<PurchaseOrderSummary | null>(null);
+  const [pagination, setPagination] = useState<PurchaseOrderPagination | null>(null);
 
-  // Network
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Update dialog
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
   const [orderToUpdate, setOrderToUpdate] = useState<PurchaseOrderItem | null>(null);
   const [updateRemarks, setUpdateRemarks] = useState('');
 
-  // Upload PO dialog
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStatusText, setUploadStatusText] = useState('');
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Column visibility
+  const [submittingUpdate, setSubmittingUpdate] = useState(false);
+
   const [visibleColumns, setVisibleColumns] = useState<ColumnVis>(() => initialColumnsForRole(user.role));
+
+  const vendorName = useMemo(() => {
+    const s = getAuthSession();
+    return isVendorSession(s) ? s.vendorName : '';
+  }, [user.role]);
+
   const toggleColumn = useCallback((column: ColumnKey) => {
     setVisibleColumns(prev => ({ ...prev, [column]: !prev[column] }));
   }, []);
 
-  // Session debug (optional)
-  useEffect(() => {
-    const s = getAuthSession();
-    if (isVendorSession(s)) console.debug('[PO] VENDOR session:', s.vendorName, s.id);
-    if (isInternalSession(s)) console.debug('[PO] INTERNAL session:', s.role, s.id);
+  const currentAttentionParam: 1 | 2 | null = useMemo(() => {
+    return specialFilter ? ATTENTION_UI_TO_BACKEND[specialFilter] : null;
+  }, [specialFilter]);
+
+  const resetUploadState = useCallback(() => {
+    setUploadFile(null);
+    setUploading(false);
+    setUploadProgress(0);
+    setUploadStatusText('');
+    setIsDragOver(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   }, []);
 
-  // ----- URL builders -----
-  const buildListUrl = useCallback((tab: StatusTab, attention: 1 | 2 | null) => {
+  const submitPoStatusUpdate = useCallback(
+    async (payload: Record<string, unknown>) => {
+      const res = await fetch(API.POSTATUS_UPSERT(), {
+        method: 'POST',
+        headers: buildAuthHeaders(),
+        body: JSON.stringify(payload),
+      });
+
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
+
+      if (!res.ok) {
+        throw new Error(
+          data?.message ||
+          data?.Message ||
+          data?.title ||
+          'Failed to update PO status'
+        );
+      }
+
+      return data;
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const s = getAuthSession();
+
+    if (isVendorSession(s)) {
+      console.log('[PO] VENDOR session:', {
+        id: s.id,
+        vendorName: s.vendorName,
+        email: s.email,
+      });
+    }
+
+    if (isInternalSession(s)) {
+      console.log('[PO] INTERNAL session:', {
+        id: s.id,
+        role: s.role,
+        email: s.email,
+      });
+    }
+
+    console.log('[PO] user.role =', user.role);
+    console.log('[PO] vendorName =', vendorName);
+    console.log('[PO] specialFilter from query =', specialFilter);
+  }, [user.role, vendorName, specialFilter]);
+
+  const buildListUrl = useCallback((tab: StatusTab, attention: 1 | 2 | null, pageNumber: number, pageSize: number) => {
     const url = new URL(API.SUMMARYPO());
     const statusParam =
       tab === 'all' ? null : STATUS_TAB_TO_PARAM[tab as Exclude<StatusTab, 'all'>];
 
-    if (statusParam) url.searchParams.set('status', statusParam);
+    if (statusParam) {
+      url.searchParams.set('status', statusParam);
+    }
 
     if (attention === 1 || attention === 2) {
       url.searchParams.set('attention', String(attention));
       url.searchParams.set('attraction', String(attention));
     }
 
+    if (user.role === 'vendor' && vendorName) {
+      url.searchParams.set('vendorName', vendorName);
+    }
+
+    url.searchParams.set('pageNumber', String(pageNumber));
+    url.searchParams.set('pageSize', String(pageSize));
+
     return url;
-  }, []);
+  }, [user.role, vendorName]);
 
-  // ✅ Cards ALWAYS use global endpoint (no status, no attention)
-  const buildCardsUrl = useCallback(() => new URL(API.SUMMARYPO()), []);
+  const buildCardsUrl = useCallback(() => {
+    const url = new URL(API.SUMMARYPO());
 
-  // ----- Fetch: CARDS (GLOBAL COUNTS) -----
+    if (user.role === 'vendor' && vendorName) {
+      url.searchParams.set('vendorName', vendorName);
+    }
+
+    return url;
+  }, [user.role, vendorName]);
+
   const fetchCardSummary = useCallback(async () => {
     try {
       const url = buildCardsUrl();
@@ -456,20 +628,24 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     }
   }, [buildCardsUrl]);
 
-  // ----- Fetch: LIST (TAB + specialFilter) -----
-  const fetchPurchaseOrders = useCallback(async (tab: StatusTab, attention: 1 | 2 | null) => {
+  const fetchPurchaseOrders = useCallback(async (tab: StatusTab, attention: 1 | 2 | null, pageNumber: number, pageSize: number) => {
     setLoading(true);
     setLoadError(null);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 60_000);
 
-    const url = buildListUrl(tab, attention);
+    const effectiveTab: StatusTab = attention ? 'all' : tab;
+    const url = buildListUrl(effectiveTab, attention, pageNumber, pageSize);
 
-    console.debug('[PO] list request:', {
+    console.log('[PO] list request:', {
       url: url.toString(),
       tab,
+      effectiveTab,
       attention,
+      vendorName,
+      pageNumber,
+      pageSize,
       headers: { hasAuth: !!getAuthToken() },
     });
 
@@ -484,8 +660,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         let body: any = undefined;
         try {
           const text = await res.text();
-          body = (() => { try { return JSON.parse(text); } catch { return text; } })();
-        } catch { /* ignore */ }
+          body = (() => {
+            try { return JSON.parse(text); } catch { return text; }
+          })();
+        } catch {}
 
         console.error('[PO] HTTP error', res.status, body);
         throw new Error(`HTTP ${res.status}`);
@@ -495,40 +673,52 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       const unwrapped = unwrapPOPayload(json);
 
       setSummary(unwrapped.summary ?? null);
+      setPagination(unwrapped.pagination ?? null);
       setOrders(Array.isArray(unwrapped.items) ? unwrapped.items : []);
-      setCurrentPage(1);
     } catch (err: any) {
       console.error('[PO] list fetch failed:', err);
       const isAbort = err?.name === 'AbortError';
+
       setLoadError(isAbort ? 'Request timeout. Please try again.' : 'Failed to load purchase orders');
       setSummary(null);
       setOrders([]);
+      setPagination(null);
       toast.error(isAbort ? 'Request timeout' : 'Failed to load purchase orders');
     } finally {
       clearTimeout(timeout);
       setLoading(false);
     }
-  }, [buildListUrl]);
+  }, [buildListUrl, vendorName]);
 
-  // ✅ Fetch card summary once on mount (and you can also re-run after upload)
-  useEffect(() => { fetchCardSummary(); }, [fetchCardSummary]);
-
-  // ✅ Fetch list on tab OR specialFilter change
   useEffect(() => {
-    const att: 1 | 2 | null =
-      specialFilter ? ATTENTION_UI_TO_BACKEND[specialFilter] : null;
+    fetchCardSummary();
+  }, [fetchCardSummary]);
 
-    fetchPurchaseOrders(activeTab, att);
-  }, [activeTab, specialFilter, fetchPurchaseOrders]);
+  useEffect(() => {
+    fetchPurchaseOrders(activeTab, currentAttentionParam, currentPage, itemsPerPage);
+  }, [activeTab, currentAttentionParam, currentPage, itemsPerPage, fetchPurchaseOrders]);
 
-  // ----- Scoped for vendor -----
   const scopedOrders = useMemo(() => {
-    if (user.role !== 'vendor') return orders;
-    if (!user.company) return orders;
-    return orders.filter(o => eqCI(o.nameOfSupplier, user.company));
-  }, [orders, user.role, user.company]);
+    let list = orders;
 
-  // ----- Filter options -----
+    if (activeTab === 'created') {
+      list = list.filter(o => mapBackendStatusToDisplay(o.status) === 'PO Created');
+    } else if (activeTab === 'wip') {
+      list = list.filter(o => mapBackendStatusToDisplay(o.status) === 'Work in Progress');
+    } else if (activeTab === 'delivery') {
+      list = list.filter(o => mapBackendStatusToDisplay(o.status) === 'On Delivery');
+    } else if (activeTab === 'received') {
+      list = list.filter(o => isReceivedBackendStatus(o.status) || mapBackendStatusToDisplay(o.status) === 'Received');
+    }
+
+    if (specialFilter) {
+      const attentionValue = ATTENTION_UI_TO_BACKEND[specialFilter];
+      list = list.filter(o => normalizeAttention(o.attention) === attentionValue);
+    }
+
+    return list;
+  }, [orders, activeTab, specialFilter]);
+
   const filterOptions = useMemo(() => {
     const uniq = (arr: (string | null | undefined)[]) =>
       Array.from(new Set(arr.filter(Boolean).map(v => String(v)))) as string[];
@@ -542,7 +732,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     };
   }, [scopedOrders]);
 
-  // ----- Search + Filters (client-side) -----
   const filteredOrders = useMemo(() => {
     let list = scopedOrders;
 
@@ -553,37 +742,50 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         (o.purchaseRequisition ?? '').toLowerCase().includes(q) ||
         (o.shortText ?? '').toLowerCase().includes(q) ||
         (o.nameOfSupplier ?? '').toLowerCase().includes(q) ||
-        (o.material ?? '').toLowerCase().includes(q)
+        (o.material ?? '').toLowerCase().includes(q) ||
+        (o.qtyOrder ?? '').toString().toLowerCase().includes(q) ||
+        (o.etaDate ?? '').toLowerCase().includes(q) ||
+        (o.reEtaDate ?? '').toLowerCase().includes(q)
       );
     }
 
     if (filterStatus && filterStatus !== 'all') {
       list = list.filter(o => mapBackendStatusToDisplay(o.status) === filterStatus);
     }
+
     if (filterStorage && filterStorage !== 'all') {
       list = list.filter(o => (o.storageLocation ?? '') === filterStorage);
     }
+
     if (filterPlant && filterPlant !== 'all') {
       list = list.filter(o => (o.plant ?? '') === filterPlant);
     }
+
     if (filterGroup && filterGroup !== 'all') {
       list = list.filter(o => (o.purchasingGroup ?? '') === filterGroup);
     }
-    if (filterSupplier && filterSupplier !== 'all') {
+
+    if (user.role !== 'vendor' && filterSupplier && filterSupplier !== 'all') {
       list = list.filter(o => (o.nameOfSupplier ?? '') === filterSupplier);
     }
+
     if (filterDocType && filterDocType !== 'all') {
       list = list.filter(o => (o.purchasingDocType ?? '') === filterDocType);
     }
 
     return list;
   }, [
-    scopedOrders, searchQuery,
-    filterStatus, filterStorage, filterPlant,
-    filterGroup, filterSupplier, filterDocType
+    scopedOrders,
+    searchQuery,
+    filterStatus,
+    filterStorage,
+    filterPlant,
+    filterGroup,
+    filterSupplier,
+    filterDocType,
+    user.role,
   ]);
 
-  // ✅ Card counts ALWAYS from cardSummary (global). This fixes "Overdue becomes 0" problem.
   const needUpdateCount = useMemo(() => {
     const v = cardSummary?.PONeedUpdate;
     if (typeof v === 'number') return v;
@@ -596,46 +798,93 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     return orders.filter(o => normalizeAttention(o.attention) === 2).length;
   }, [cardSummary, orders]);
 
-  // ----- Pagination -----
-  const { pageOrders, totalOrders, totalPages, startIndex, endIndex } = useMemo(() => {
-    const total = filteredOrders.length;
-    const pages = Math.max(1, Math.ceil(total / itemsPerPage) || 1);
-    const start = (currentPage - 1) * itemsPerPage;
-    const end = start + itemsPerPage;
-    return {
-      pageOrders: filteredOrders.slice(start, end),
-      totalOrders: total,
-      totalPages: pages,
-      startIndex: start,
-      endIndex: end,
-    };
-  }, [filteredOrders, currentPage, itemsPerPage]);
+  const receivedCount = useMemo(() => {
+    if (summary) {
+      return (summary.POPartiallyReceived ?? 0) + (summary.POFullyReceived ?? 0);
+    }
 
-  // ----- Derived UI state -----
+    return orders.filter(o => isReceivedBackendStatus(o.status)).length;
+  }, [summary, orders]);
+
+  const isServerPagination = pagination !== null;
+
+  const totalOrders = isServerPagination
+    ? pagination.totalFiltered
+    : filteredOrders.length;
+
+  const totalPages = isServerPagination
+    ? Math.max(1, pagination.totalPages)
+    : Math.max(1, Math.ceil(filteredOrders.length / itemsPerPage) || 1);
+
+  const pageOrders = isServerPagination
+    ? filteredOrders
+    : filteredOrders.slice(
+        (currentPage - 1) * itemsPerPage,
+        currentPage * itemsPerPage
+      );
+
+  const startIndex = totalOrders === 0 ? 0 : (currentPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + pageOrders.length, totalOrders);
+
   const hasActiveFilters = useMemo(() => !!(
     (filterStatus && filterStatus !== 'all') ||
     (filterStorage && filterStorage !== 'all') ||
     (filterPlant && filterPlant !== 'all') ||
     (filterGroup && filterGroup !== 'all') ||
-    (filterSupplier && filterSupplier !== 'all') ||
+    (user.role !== 'vendor' && filterSupplier && filterSupplier !== 'all') ||
     (filterDocType && filterDocType !== 'all')
-  ), [filterStatus, filterStorage, filterPlant, filterGroup, filterSupplier, filterDocType]);
+  ), [
+    user.role,
+    filterStatus,
+    filterStorage,
+    filterPlant,
+    filterGroup,
+    filterSupplier,
+    filterDocType
+  ]);
 
   const activeFilterCount = useMemo(() => ([
     filterStatus && filterStatus !== 'all',
     filterStorage && filterStorage !== 'all',
     filterPlant && filterPlant !== 'all',
     filterGroup && filterGroup !== 'all',
-    filterSupplier && filterSupplier !== 'all',
+    user.role !== 'vendor' && filterSupplier && filterSupplier !== 'all',
     filterDocType && filterDocType !== 'all',
-  ].filter(Boolean).length), [filterStatus, filterStorage, filterPlant, filterGroup, filterSupplier, filterDocType]);
+  ].filter(Boolean).length), [
+    user.role,
+    filterStatus,
+    filterStorage,
+    filterPlant,
+    filterGroup,
+    filterSupplier,
+    filterDocType
+  ]);
 
   const ordersNeedingUpdate = useMemo(() => {
     if (user.role !== 'vendor') return [];
-    return filteredOrders.filter(o => normalizeAttention(o.attention) === 1);
+
+    return filteredOrders
+      .filter((o) => {
+        const displayStatus = mapBackendStatusToDisplay(o.status);
+        if (displayStatus !== 'On Delivery') return false;
+
+        const eta = parseDdMmmYyyy(o.reEtaDate);
+        if (!eta) return false;
+
+        const diffDays = diffDaysFromToday(eta);
+        return diffDays >= 0 && diffDays <= 2;
+      })
+      .sort((a, b) => {
+        const da = parseDdMmmYyyy(a.reEtaDate);
+        const db = parseDdMmmYyyy(b.reEtaDate);
+
+        const va = da ? diffDaysFromToday(da) : 9999;
+        const vb = db ? diffDaysFromToday(db) : 9999;
+
+        return va - vb;
+      });
   }, [filteredOrders, user.role]);
 
-  // ================== Handlers ==================
   const handleSearchChange = useCallback((v: string) => {
     setSearchQuery(v);
     setCurrentPage(1);
@@ -652,13 +901,62 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     setIsUpdateDialogOpen(true);
   }, []);
 
-  const handleSubmitUpdate = useCallback(() => {
-    if (!orderToUpdate) return;
-    toast.success(`Update submitted for PO ${orderToUpdate.purchasingDocument}`);
-    setIsUpdateDialogOpen(false);
-    setOrderToUpdate(null);
-    setUpdateRemarks('');
-  }, [orderToUpdate]);
+  const handleSubmitUpdate = useCallback(async () => {
+    try {
+      if (!orderToUpdate) {
+        toast.error('No purchase order selected');
+        return;
+      }
+
+      if (!updateRemarks.trim()) {
+        toast.error('Please enter update remarks');
+        return;
+      }
+
+      const idPoItem =
+        orderToUpdate.id !== null &&
+        orderToUpdate.id !== undefined &&
+        orderToUpdate.id !== ''
+          ? orderToUpdate.id
+          : orderToUpdate.purchasingDocument;
+
+      if (!idPoItem) {
+        toast.error('ID PO Item not found');
+        return;
+      }
+
+      setSubmittingUpdate(true);
+
+      await submitPoStatusUpdate({
+        IDPOItem: idPoItem,
+        DeliveryUpdate: updateRemarks.trim(),
+      });
+
+      toast.success(`Update submitted for PO ${orderToUpdate.purchasingDocument}`);
+
+      setIsUpdateDialogOpen(false);
+      setOrderToUpdate(null);
+      setUpdateRemarks('');
+
+      await fetchCardSummary();
+      await fetchPurchaseOrders(activeTab, currentAttentionParam, currentPage, itemsPerPage);
+    } catch (err: any) {
+      console.error('[PO] submit delivery update failed', err);
+      toast.error(err?.message || 'Failed to submit update');
+    } finally {
+      setSubmittingUpdate(false);
+    }
+  }, [
+    orderToUpdate,
+    updateRemarks,
+    submitPoStatusUpdate,
+    fetchCardSummary,
+    fetchPurchaseOrders,
+    activeTab,
+    currentAttentionParam,
+    currentPage,
+    itemsPerPage,
+  ]);
 
   const clearFilters = useCallback(() => {
     setFilterStatus('');
@@ -673,22 +971,35 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const handleTabChange = useCallback((v: string) => {
     setActiveTab(v as StatusTab);
     setSpecialFilter(null);
+    syncAttractionQuery(null);
     setCurrentPage(1);
   }, []);
 
-  // ========== Upload handlers ==========
+  const handleToggleAttentionCard = useCallback((type: Exclude<AttentionFilter, null>) => {
+    setCurrentPage(1);
+    setActiveTab('all');
+
+    setSpecialFilter(prev => {
+      const next: AttentionFilter = prev === type ? null : type;
+      syncAttractionQuery(next ? ATTENTION_UI_TO_BACKEND[next] : null);
+      return next;
+    });
+  }, []);
+
   const processFile = useCallback((file: File | null, input?: HTMLInputElement | null) => {
     if (!file) {
       setUploadFile(null);
       if (input) input.value = '';
       return;
     }
+
     if (!isExcelFile(file)) {
       toast.error('File must be an Excel file (.xlsx or .xls)');
       setUploadFile(null);
       if (input) input.value = '';
       return;
     }
+
     setUploadFile(file);
   }, []);
 
@@ -710,72 +1021,151 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       toast.error('Please select an Excel file first');
       return;
     }
+
     if (!isExcelFile(uploadFile)) {
       toast.error('File must be an Excel file (.xlsx or .xls)');
       return;
     }
 
     setUploading(true);
+    setUploadProgress(0);
+    setUploadStatusText('Preparing upload...');
 
     try {
       const formData = new FormData();
       formData.append('file', uploadFile);
 
       const token = getAuthToken();
-      const headers: HeadersInit = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      const res = await fetch(API.IMPORT_PO(), {
-        method: 'POST',
-        headers,
-        body: formData,
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', API.IMPORT_PO(), true);
+
+        if (token) {
+          xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        }
+
+        xhr.upload.onloadstart = () => {
+          setUploadProgress(0);
+          setUploadStatusText('Starting upload...');
+        };
+
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const rawPercent = Math.round((event.loaded / event.total) * 100);
+            const percent = clampUploadProgress(rawPercent);
+            setUploadProgress(percent);
+            setUploadStatusText(`Uploading... ${percent}%`);
+          } else {
+            setUploadStatusText('Uploading...');
+          }
+        };
+
+        xhr.onreadystatechange = () => {
+          if (xhr.readyState === XMLHttpRequest.HEADERS_RECEIVED) {
+            setUploadProgress(99);
+            setUploadStatusText('Processing file on server...');
+          }
+        };
+
+        xhr.onerror = () => {
+          reject(new Error('Network error while uploading file'));
+        };
+
+        xhr.ontimeout = () => {
+          reject(new Error('Upload timeout'));
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            setUploadProgress(100);
+            setUploadStatusText('Upload completed');
+            resolve();
+            return;
+          }
+
+          let msg = `Upload failed (HTTP ${xhr.status})`;
+
+          try {
+            const json = JSON.parse(xhr.responseText);
+            if (json?.message || json?.Message || json?.error) {
+              msg = json.message || json.Message || json.error;
+            }
+          } catch {
+            if (xhr.responseText) {
+              msg = xhr.responseText;
+            }
+          }
+
+          reject(new Error(msg));
+        };
+
+        xhr.send(formData);
       });
 
-      if (!res.ok) {
-        let msg = `Upload failed (HTTP ${res.status})`;
-        try {
-          const text = await res.text();
-          const json = (() => { try { return JSON.parse(text); } catch { return null; } })();
-          if (json?.message || json?.Message || json?.error) {
-            msg = json.message || json.Message || json.error;
-          }
-        } catch { /* ignore */ }
-        throw new Error(msg);
-      }
-
-      await res.json();
       toast.success('Purchase order data imported successfully');
 
-      // refresh cards + list
+      setUploadProgress(100);
+      setUploadStatusText('Upload completed');
+
+      await new Promise((resolve) => setTimeout(resolve, 400));
+
+      setUploadStatusText('Refreshing data...');
+
       await fetchCardSummary();
-      const att: 1 | 2 | null = specialFilter ? ATTENTION_UI_TO_BACKEND[specialFilter] : null;
-      await fetchPurchaseOrders(activeTab, att);
+      await fetchPurchaseOrders(activeTab, currentAttentionParam, currentPage, itemsPerPage);
 
       setIsUploadDialogOpen(false);
-      setUploadFile(null);
+      resetUploadState();
     } catch (err: any) {
       console.error('[PO] import failed', err);
       toast.error(err?.message || 'Failed to import purchase order data');
+      setUploadStatusText('');
     } finally {
       setUploading(false);
     }
-  }, [uploadFile, fetchPurchaseOrders, fetchCardSummary, activeTab, specialFilter]);
+  }, [
+    uploadFile,
+    fetchPurchaseOrders,
+    fetchCardSummary,
+    activeTab,
+    currentAttentionParam,
+    currentPage,
+    itemsPerPage,
+    resetUploadState,
+  ]);
 
   const handleDownloadTemplate = useCallback(() => {
     try {
       const me2nHeaders = [
-        'Purchase Requisition', 'Item of requisition', 'Purchasing Document', 'Item', 'Document Date',
-        'Delivery date', 'Purchasing Doc. Type', 'Purchasing Group', 'Short Text', 'Material',
-        'Name of Supplier', 'Quantity Received', 'Still to be delivered (qty)', 'Plant', 'Storage location'
+        'Purchase Requisition',
+        'Item of requisition',
+        'Purchasing Document',
+        'Item',
+        'Document Date',
+        'Delivery date',
+        'Purchasing Doc. Type',
+        'Purchasing Group',
+        'Short Text',
+        'Material',
+        'Qty Order',
+        'Name of Supplier',
+        'Quantity Received',
+        'Still to be delivered (qty)',
+        'Plant',
+        'Storage location',
+      ];
+
+      const zmm013rHeaders = [
+        'Purchase Order',
+        'Purchase Requisition',
+        'Purchase Order Item',
+        'GR Created Date',
       ];
 
       const me5aHeaders = [
         'Order', 'Changed On', 'Purchase order', 'Purchase Requisition', 'Item of requisition',
         'Material', 'Purchase Order Date', 'Created by'
-      ];
-
-      const zmm013rHeaders = [
-        'Purchase Order', 'Purchase Requisition', 'Purchase Order Item', 'GR Created Date'
       ];
 
       const wb = XLSX.utils.book_new();
@@ -787,6 +1177,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       const dd = String(now.getDate()).padStart(2, '0');
       const mm = String(now.getMonth() + 1).padStart(2, '0');
       const yyyy = now.getFullYear();
+
       XLSX.writeFile(wb, `TemplatePO_${dd}-${mm}-${yyyy}.xlsx`);
       toast.success('Template downloaded');
     } catch (err) {
@@ -799,8 +1190,8 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     try {
       const orderedKeys: ColumnKey[] = [
         'purchaseRequisition', 'itemOfRequisition', 'purchasingDocument', 'item', 'documentDate',
-        'deliveryDate', 'purchasingDocType', 'purchasingGroup', 'shortText', 'material',
-        'nameOfSupplier', 'quantityReceived', 'stillToBeDelivered', 'plant', 'storageLocation',
+        'deliveryDate', 'etaDate', 'purchasingDocType', 'purchasingGroup', 'shortText', 'material',
+        'qtyOrder', 'nameOfSupplier', 'quantityReceived', 'stillToBeDelivered', 'plant', 'storageLocation',
         'order', 'changedOn', 'grCreatedDate', 'remarks', 'reEtaDate', 'attention',
       ];
 
@@ -809,11 +1200,13 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
       const escapeCell = (v: any) => {
         if (v === null || v === undefined) return '';
+
         if (typeof v === 'number' || typeof v === 'string') {
           const att = normalizeAttention(v as AttentionRaw);
           if (att === 1) return 'Need Update';
           if (att === 2) return 'Overdue';
         }
+
         const s = String(v);
         const escaped = s.replace(/"/g, '""');
         if (/[",\n]/.test(escaped)) return `"${escaped}"`;
@@ -837,6 +1230,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
+
       a.href = url;
       a.setAttribute('download', filename);
       document.body.appendChild(a);
@@ -851,7 +1245,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     }
   }, [filteredOrders, visibleColumns, user.role]);
 
-  // ================== Table columns ==================
   const columns = useMemo(() => {
     const mk = (key: ColumnKey, render?: (o: PurchaseOrderItem) => React.ReactNode) => ({
       key,
@@ -866,11 +1259,13 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       mk('purchasingDocument', (o) => <span className="font-medium">{o.purchasingDocument}</span>),
       mk('item', (o) => o.item),
       mk('documentDate', (o) => <span className="text-sm text-gray-600">{o.documentDate}</span>),
-      mk('deliveryDate', (o) => <span className="text-sm text-gray-600">{o.deliveryDate}</span>),
+      mk('deliveryDate', (o) => <span className="text-sm text-gray-600">{o.deliveryDate || '-'}</span>),
+      mk('etaDate', (o) => <span className="text-sm text-gray-600">{o.etaDate || '-'}</span>),
       mk('purchasingDocType', (o) => o.purchasingDocType),
       mk('purchasingGroup', (o) => o.purchasingGroup),
       mk('shortText', (o) => <span className="max-w-xs truncate block">{o.shortText}</span>),
       mk('material', (o) => <span className="text-sm text-gray-600">{o.material}</span>),
+      mk('qtyOrder', (o) => <span className="text-right block">{o.qtyOrder || '-'}</span>),
       mk('nameOfSupplier', (o) => o.nameOfSupplier),
       mk('quantityReceived', (o) => <span className="text-right block">{o.quantityReceived}</span>),
       mk('stillToBeDelivered', (o) => <span className="text-right block">{o.stillToBeDelivered}</span>),
@@ -916,7 +1311,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   ))}
 
                   <TableCell className="sticky right-[100px] bg-white shadow-[-2px_0_4px_rgba(0,0,0,0.05)] z-10">
-                    <Badge className="min-w-[120px] justify-center" style={{ backgroundColor: statusColor(display), color: 'white' }}>
+                    <Badge
+                      className="min-w-[120px] justify-center"
+                      style={{ backgroundColor: statusColor(display), color: 'white' }}
+                    >
                       {display}
                     </Badge>
                   </TableCell>
@@ -926,8 +1324,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       variant="outline"
                       size="sm"
                       onClick={() => {
-                        console.debug('[PO] view detail click', { id: o.id, purchasingDocument: o.purchasingDocument, key });
-                        setSelectedOrderId(key); // ✅ use id
+                        console.log('[PO] view detail click', {
+                          id: o.id,
+                          purchasingDocument: o.purchasingDocument,
+                          key
+                        });
+                        setSelectedOrderId(key);
                       }}
                       style={{ borderColor: '#014357', color: '#014357' }}
                       className="hover:bg-gray-50 min-w-[80px]"
@@ -969,6 +1371,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
               {[...Array(totalPages)].map((_, i) => {
                 const page = i + 1;
+
                 if (page === 1 || page === totalPages || (page >= currentPage - 1 && page <= currentPage + 1)) {
                   return (
                     <PaginationItem key={page}>
@@ -981,9 +1384,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       </PaginationLink>
                     </PaginationItem>
                   );
-                } else if (page === currentPage - 2 || page === currentPage + 2) {
+                }
+
+                if (page === currentPage - 2 || page === currentPage + 2) {
                   return <PaginationEllipsis key={page} />;
                 }
+
                 return null;
               })}
 
@@ -1014,13 +1420,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     handleItemsPerPageChange,
   ]);
 
-  // ========== Detail vs List ==========
   return (
     <div className="p-4 sm:p-6 lg:p-8 h-full overflow-x-hidden">
       {selectedOrderId !== null ? (
         <PurchaseOrderDetail
           user={user}
-          orderId={selectedOrderId} // ✅ now can be number/string
+          orderId={selectedOrderId}
           onBack={() => setSelectedOrderId(null)}
         />
       ) : (
@@ -1033,7 +1438,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
           {loading && <div className="mb-4 text-sm text-gray-500">Loading purchase orders...</div>}
           {loadError && <div className="mb-4 text-sm text-red-600">{loadError}</div>}
 
-          {/* Actions Bar */}
           <div className="flex flex-col sm:flex-row gap-3 mb-4 items-start sm:items-center justify-between">
             <div className="relative flex-1 w-full sm:max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
@@ -1051,10 +1455,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   <FileSpreadsheet className="h-4 w-4 sm:mr-2" />
                   <span className="hidden sm:inline">Template</span>
                 </Button>
+
                 <Button variant="outline" className="flex-1 sm:flex-none" size="sm" onClick={handleDownloadPOData}>
                   <Download className="h-4 w-4 sm:mr-2" />
                   <span className="hidden sm:inline">Export</span>
                 </Button>
+
                 <Button
                   style={{ backgroundColor: '#014357' }}
                   className="text-white hover:opacity-90 flex-1 sm:flex-none"
@@ -1068,7 +1474,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             )}
           </div>
 
-          {/* Attention Cards (GLOBAL COUNTS) */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <Card
               className={[
@@ -1076,18 +1481,14 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                 specialFilter === 'updates' ? 'ring-2 ring-[#ED832D]' : ''
               ].join(' ')}
               style={{ backgroundColor: 'rgba(237, 131, 45, 0.1)' }}
-              onClick={() => {
-                setCurrentPage(1);
-                setActiveTab('all');
-                setSpecialFilter(prev => (prev === 'updates' ? null : 'updates'));
-              }}
+              onClick={() => handleToggleAttentionCard('updates')}
             >
               <div className="flex items-center justify-between">
-                         <div className="flex items-center gap-3">
-                           <div className="p-2 rounded-lg bg-white shadow-lg">
-                             <Clock className="h-4 w-4" style={{ color: '#ED832D' }} />
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-white shadow-lg">
+                    <Clock className="h-4 w-4" style={{ color: '#ED832D' }} />
                   </div>
-                <div className="text-gray-900 text-sm" style={{ fontWeight: 600 }}>PO Need Updates</div>
+                  <div className="text-gray-900 text-sm" style={{ fontWeight: 600 }}>PO Need Updates</div>
                 </div>
                 <div className="text-2xl" style={{ color: '#ED832D', fontWeight: 800 }}>
                   {needUpdateCount}
@@ -1101,34 +1502,29 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                 specialFilter === 'overdue' ? 'ring-2 ring-[#DC2626]' : ''
               ].join(' ')}
               style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)' }}
-              onClick={() => {
-                setCurrentPage(1);
-                setActiveTab('all');
-                setSpecialFilter(prev => (prev === 'overdue' ? null : 'overdue'));
-              }}
+              onClick={() => handleToggleAttentionCard('overdue')}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="p-2 rounded-lg bg-white shadow-sm">
                     <AlertTriangle className="h-4 w-4" style={{ color: '#DC2626' }} />
                   </div>
-                   <div className="text-gray-900 text-sm" style={{ fontWeight: 600 }}>Overdue</div>
+                  <div className="text-gray-900 text-sm" style={{ fontWeight: 600 }}>Overdue</div>
                 </div>
-                <div className="text-2xl font-bold" style={{ color: '#DC2626',fontWeight:800 }}>
+                <div className="text-2xl font-bold" style={{ color: '#DC2626', fontWeight: 800 }}>
                   {overdueCount}
                 </div>
               </div>
             </Card>
           </div>
 
-          {/* Stats (LIST SUMMARY - can change by tab/filter) */}
           <div className="flex gap-3 mb-6">
             <Card className="flex-1 p-4">
               <div className="flex items-center gap-2 mb-2">
                 <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(1, 67, 87, 0.1)' }}>
                   <Package className="h-4 w-4" style={{ color: '#014357' }} />
                 </div>
-                <div className="text-gray-600 text-sm">Total POs</div>
+                <div className="text-gray-600 text-sm">Total PO Items</div>
               </div>
               <div className="text-3xl" style={{ color: '#014357' }}>{summary?.TotalPO ?? 0}</div>
             </Card>
@@ -1165,47 +1561,42 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
             <Card className="flex-1 p-4">
               <div className="flex items-center gap-2 mb-2">
-                <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(245, 158, 11, 0.1)' }}>
-                  <CheckCircle2 className="h-4 w-4" style={{ color: '#F59E0B' }} />
-                </div>
-                <div className="text-gray-600 text-sm">Partially Received</div>
-              </div>
-              <div className="text-3xl" style={{ color: '#F59E0B' }}>{summary?.POPartiallyReceived ?? 0}</div>
-            </Card>
-
-            <Card className="flex-1 p-4">
-              <div className="flex items-center gap-2 mb-2">
                 <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(106, 167, 93, 0.1)' }}>
                   <CheckCircle2 className="h-4 w-4" style={{ color: '#6AA75D' }} />
                 </div>
-                <div className="text-gray-600 text-sm">Fully Received</div>
+                <div className="text-gray-600 text-sm">Received</div>
               </div>
-              <div className="text-3xl" style={{ color: '#6AA75D' }}>{summary?.POFullyReceived ?? 0}</div>
+              <div className="text-3xl" style={{ color: '#6AA75D' }}>
+                {receivedCount}
+              </div>
             </Card>
           </div>
 
-          {/* Orders Needing Update - Vendor Only */}
           {user.role === 'vendor' && ordersNeedingUpdate.length > 0 && (
             <Card className="mb-6 p-6" style={{ borderColor: '#ED832D', borderWidth: '2px' }}>
               <div className="flex items-center gap-2 mb-4">
                 <AlertCircle className="h-5 w-5" style={{ color: '#ED832D' }} />
                 <h2 style={{ color: '#014357' }}>Orders Needing Update</h2>
               </div>
+
               <p className="text-sm text-gray-600 mb-4">
-                These orders have an ETA date within 2 days. Please provide updates on their delivery status.
+                These orders have a Re-ETA Date within 2 days. Please provide updates on their delivery status.
               </p>
+
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Purchasing Document</TableHead>
                       <TableHead>Short Text</TableHead>
+                      <TableHead>ETA Date</TableHead>
                       <TableHead>Re-ETA Date</TableHead>
-                      <TableHead>Days Until ETA</TableHead>
+                      <TableHead>Days Until Re-ETA</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Action</TableHead>
                     </TableRow>
                   </TableHeader>
+
                   <TableBody>
                     {ordersNeedingUpdate.map((o, idx) => {
                       const d = parseDdMmmYyyy(o.reEtaDate);
@@ -1216,6 +1607,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         <TableRow key={`${getOrderKey(o)}-${idx}`}>
                           <TableCell className="font-medium">{o.purchasingDocument}</TableCell>
                           <TableCell>{o.shortText}</TableCell>
+                          <TableCell>{o.etaDate || '-'}</TableCell>
                           <TableCell>{o.reEtaDate || '-'}</TableCell>
                           <TableCell>
                             {diffDays === null ? (
@@ -1231,11 +1623,13 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                               </Badge>
                             )}
                           </TableCell>
+
                           <TableCell>
                             <Badge style={{ backgroundColor: statusColor(display), color: 'white' }}>
                               {display}
                             </Badge>
                           </TableCell>
+
                           <TableCell>
                             <Button variant="outline" size="sm" onClick={() => handleOpenUpdateDialog(o)}>
                               <Pencil className="h-4 w-4 mr-2" />
@@ -1251,7 +1645,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             </Card>
           )}
 
-          {/* Tabs */}
           <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
               <TabsList>
@@ -1259,12 +1652,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                 <TabsTrigger value="created">PO Created</TabsTrigger>
                 <TabsTrigger value="wip">Work in Progress</TabsTrigger>
                 <TabsTrigger value="delivery">On Delivery</TabsTrigger>
-                <TabsTrigger value="partially">Partially Received</TabsTrigger>
-                <TabsTrigger value="delivered">Fully Received</TabsTrigger>
+                <TabsTrigger value="received">Received</TabsTrigger>
               </TabsList>
 
               <div className="flex gap-2">
-                {/* Columns */}
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button variant="outline" size="sm">
@@ -1278,6 +1669,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         <h4 className="font-medium text-sm">Customize Table View</h4>
                         <p className="text-xs text-gray-500">Show or hide columns. Some cannot be hidden.</p>
                       </div>
+
                       <ScrollArea className="h-[320px]">
                         <div className="space-y-2 pr-4">
                           <div className="flex items-center space-x-2">
@@ -1318,7 +1710,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   </PopoverContent>
                 </Popover>
 
-                {/* Filters */}
                 <Dialog open={isFilterOpen} onOpenChange={setIsFilterOpen}>
                   <DialogTrigger asChild>
                     <Button variant="outline" size="sm" className="relative">
@@ -1335,6 +1726,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       )}
                     </Button>
                   </DialogTrigger>
+
                   <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle>Advanced Filters</DialogTitle>
@@ -1351,8 +1743,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                             <SelectItem value="PO Created">PO Created</SelectItem>
                             <SelectItem value="Work in Progress">Work in Progress</SelectItem>
                             <SelectItem value="On Delivery">On Delivery</SelectItem>
-                            <SelectItem value="Partially Received">Partially Received</SelectItem>
-                            <SelectItem value="Fully Received">Fully Received</SelectItem>
+                            <SelectItem value="Received">Received</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -1393,17 +1784,19 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         </Select>
                       </div>
 
-                      <div className="grid gap-2">
-                        <Label>Supplier</Label>
-                        <Select value={filterSupplier} onValueChange={(v) => { setFilterSupplier(v); setCurrentPage(1); }}>
-                          <SelectTrigger><SelectValue placeholder="All suppliers" /></SelectTrigger>
-                          <SelectContent>
-                            {filterOptions.supplier.map(opt => (
-                              <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                      {user.role !== 'vendor' && (
+                        <div className="grid gap-2">
+                          <Label>Supplier</Label>
+                          <Select value={filterSupplier} onValueChange={(v) => { setFilterSupplier(v); setCurrentPage(1); }}>
+                            <SelectTrigger><SelectValue placeholder="All suppliers" /></SelectTrigger>
+                            <SelectContent>
+                              {filterOptions.supplier.map(opt => (
+                                <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
 
                       <div className="grid gap-2">
                         <Label>Doc Type</Label>
@@ -1440,11 +1833,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             <TabsContent value="created">{renderTable()}</TabsContent>
             <TabsContent value="wip">{renderTable()}</TabsContent>
             <TabsContent value="delivery">{renderTable()}</TabsContent>
-            <TabsContent value="partially">{renderTable()}</TabsContent>
-            <TabsContent value="delivered">{renderTable()}</TabsContent>
+            <TabsContent value="received">{renderTable()}</TabsContent>
           </Tabs>
 
-          {/* Update Dialog */}
           <Dialog open={isUpdateDialogOpen} onOpenChange={setIsUpdateDialogOpen}>
             <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden">
               <DialogHeader>
@@ -1453,7 +1844,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                 {orderToUpdate && (
                   <div className="flex items-center gap-2 pt-2">
                     <Badge
-                      style={{ backgroundColor: statusColor(mapBackendStatusToDisplay(orderToUpdate.status)), color: 'white' }}
+                      style={{
+                        backgroundColor: statusColor(mapBackendStatusToDisplay(orderToUpdate.status)),
+                        color: 'white'
+                      }}
                       className="px-4 py-1.5"
                     >
                       {mapBackendStatusToDisplay(orderToUpdate.status)}
@@ -1471,23 +1865,38 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#014357' }} />
                           <h3 className="text-lg tracking-wide" style={{ color: '#014357' }}>Order Information</h3>
                         </div>
+
                         <div className="grid grid-cols-2 gap-4">
                           <div>
                             <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Purchasing Document</p>
                             <p className="text-sm">{orderToUpdate.purchasingDocument}</p>
                           </div>
+
                           <div>
                             <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Item of Requisition</p>
                             <p className="text-sm">{orderToUpdate.itemOfRequisition}</p>
                           </div>
+
                           <div className="col-span-2">
                             <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Short Text</p>
                             <p className="text-sm">{orderToUpdate.shortText}</p>
                           </div>
+
+                          <div>
+                            <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">ETA Date</p>
+                            <p className="text-sm">{orderToUpdate.etaDate || 'N/A'}</p>
+                          </div>
+
                           <div>
                             <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Re-ETA Date</p>
                             <p className="text-sm">{orderToUpdate.reEtaDate || 'N/A'}</p>
                           </div>
+
+                          <div>
+                            <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Qty Order</p>
+                            <p className="text-sm">{orderToUpdate.qtyOrder || 'N/A'}</p>
+                          </div>
+
                           <div>
                             <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Attention</p>
                             <div className="pt-0.5">{attentionBadge(orderToUpdate.attention)}</div>
@@ -1500,6 +1909,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#014357' }} />
                           <h3 className="text-lg tracking-wide" style={{ color: '#014357' }}>Update Details</h3>
                         </div>
+
                         <div className="space-y-2">
                           <Label htmlFor="update-remarks">Remarks / Additional Information</Label>
                           <Textarea
@@ -1517,8 +1927,13 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
                   <DialogFooter className="mt-4">
                     <Button variant="outline" onClick={() => setIsUpdateDialogOpen(false)}>Cancel</Button>
-                    <Button style={{ backgroundColor: '#014357' }} className="text-white hover:opacity-90" onClick={handleSubmitUpdate}>
-                      Submit Update
+                    <Button
+                      style={{ backgroundColor: '#014357' }}
+                      className="text-white hover:opacity-90"
+                      onClick={handleSubmitUpdate}
+                      disabled={submittingUpdate}
+                    >
+                      {submittingUpdate ? 'Submitting...' : 'Submit Update'}
                     </Button>
                   </DialogFooter>
                 </>
@@ -1526,15 +1941,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             </DialogContent>
           </Dialog>
 
-          {/* Upload PO Dialog */}
           <Dialog
             open={isUploadDialogOpen}
             onOpenChange={(open) => {
               setIsUploadDialogOpen(open);
               if (!open) {
-                setUploadFile(null);
-                setIsDragOver(false);
-                if (fileInputRef.current) fileInputRef.current.value = '';
+                resetUploadState();
               }
             }}
           >
@@ -1550,21 +1962,38 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                 <Label>Excel File (.xlsx / .xls)</Label>
 
                 <div
-                  onClick={() => fileInputRef.current?.click()}
-                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragOver(true); }}
-                  onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragOver(false); }}
-                  onDrop={handleDrop}
+                  onClick={() => !uploading && fileInputRef.current?.click()}
+                  onDragOver={(e) => {
+                    if (uploading) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsDragOver(true);
+                  }}
+                  onDragLeave={(e) => {
+                    if (uploading) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsDragOver(false);
+                  }}
+                  onDrop={(e) => {
+                    if (uploading) return;
+                    handleDrop(e);
+                  }}
                   className={[
-                    'border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition',
+                    'border-2 border-dashed rounded-lg p-6 text-center transition',
                     'flex flex-col items-center justify-center gap-2',
-                    isDragOver ? 'border-[#014357] bg-slate-50'
+                    uploading ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer',
+                    isDragOver
+                      ? 'border-[#014357] bg-slate-50'
                       : 'border-slate-300 bg-slate-50/40 hover:border-[#014357]/70 hover:bg-slate-50',
                   ].join(' ')}
                 >
                   <Upload className="h-8 w-8 mb-1" style={{ color: '#014357' }} />
                   <p className="text-sm font-medium" style={{ color: '#014357' }}>Drag & drop Excel file di sini</p>
                   <p className="text-xs text-gray-500">atau <span className="underline">klik untuk memilih file</span></p>
-                  <p className="text-[11px] text-gray-400 mt-1">Hanya format <b>.xlsx</b> atau <b>.xls</b> yang diperbolehkan.</p>
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    Hanya format <b>.xlsx</b> atau <b>.xls</b> yang diperbolehkan.
+                  </p>
 
                   <input
                     ref={fileInputRef}
@@ -1589,11 +2018,13 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         </span>
                       </div>
                     </div>
+
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon"
                       className="h-6 w-6"
+                      disabled={uploading}
                       onClick={() => {
                         setUploadFile(null);
                         if (fileInputRef.current) fileInputRef.current.value = '';
@@ -1603,26 +2034,43 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                     </Button>
                   </div>
                 )}
+
+                {uploading && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-gray-600">{uploadStatusText || 'Uploading...'}</span>
+                      <span className="font-medium" style={{ color: '#014357' }}>
+                        {uploadProgress}%
+                      </span>
+                    </div>
+
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
+                      <div
+                        className="h-full rounded-full transition-all duration-300"
+                        style={{
+                          width: `${uploadProgress}%`,
+                          backgroundColor: '#014357',
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <DialogFooter>
                 <Button
                   variant="outline"
-                  onClick={() => {
-                    setIsUploadDialogOpen(false);
-                    setUploadFile(null);
-                    setIsDragOver(false);
-                    if (fileInputRef.current) fileInputRef.current.value = '';
-                  }}
+                  onClick={() => setIsUploadDialogOpen(false)}
                   disabled={uploading}
                 >
                   Cancel
                 </Button>
+
                 <Button
                   style={{ backgroundColor: '#014357' }}
                   className="text-white hover:opacity-90"
                   onClick={handleSubmitUploadPO}
-                  disabled={uploading}
+                  disabled={uploading || !uploadFile}
                 >
                   {uploading ? 'Uploading...' : 'Upload'}
                 </Button>

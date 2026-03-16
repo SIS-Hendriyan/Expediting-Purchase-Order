@@ -1,5 +1,5 @@
-// src/components/pages/Dashboard.tsx
 import { useState, useEffect } from 'react';
+import * as XLSX from 'xlsx';
 import { Card } from '../ui/card';
 import { getAccessToken } from '../../utils/authSession';
 import {
@@ -15,14 +15,11 @@ import {
   ResponsiveContainer,
   ComposedChart,
   Bar,
-  Line,
+  // Line,
 } from 'recharts';
 import {
-  TrendingUp,
-  TrendingDown,
   Package,
   AlertTriangle,
-  Clock,
   RefreshCw,
   CheckCircle,
   Layers,
@@ -35,6 +32,9 @@ import {
   ArrowDown,
   ArrowRight,
   Download,
+  // TrendingUp,
+  // TrendingDown,
+  // Clock,
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
@@ -61,7 +61,6 @@ interface DashboardProps {
   onPageChange: (page: string) => void;
 }
 
-// type summary dari SP [exp].[PO_DASHBOARD_SUMMARY_SP]
 interface SummaryData {
   TotalPO: number;
   OutstandingQuantity: number;
@@ -77,7 +76,6 @@ interface SummaryData {
   VendorResponseRate: number;
 }
 
-// ---- API response models (UI side) ----
 interface PoTrendPoint {
   month: string;
   orders: number;
@@ -123,16 +121,13 @@ interface VendorScorecardAggregateUI {
   items: VendorScorecardItemUI[];
 }
 
-// master vendor option
 interface VendorOption {
   name: string;
   raw: string;
 }
 
-// helper mapping doc type UI -> API
 const mapDocTypeForApi = (docType: string): string | undefined => {
   if (!docType) return undefined;
-  // requirement: jika pilih "Purchase Order" maka kirim 'All' (no filter di SP)
   if (docType === 'purchase-order') return 'All';
   return docType;
 };
@@ -168,39 +163,33 @@ const getStatusColor = (name: string): string => {
   }
 };
 
-// helper: format tanggal berdasarkan local time (tanpa masalah timezone)
 const formatLocalDateParam = (date: Date) => {
   const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0'); // 0-based
+  const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
 
 export function Dashboard({ user, onPageChange }: DashboardProps) {
-  // ====== FILTER STATES ======
   const [startDate, setStartDate] = useState<Date>();
   const [endDate, setEndDate] = useState<Date>();
   const [plant, setPlant] = useState<string>('');
   const [group, setGroup] = useState<string>('');
-  const [vendor, setVendor] = useState<string>(''); // SINGLE vendor (raw value)
+  const [vendor, setVendor] = useState<string>('');
   const [docType, setDocType] = useState<string>('');
   const [isFiltersOpen, setIsFiltersOpen] = useState<boolean>(false);
 
-  // Filter master data (from /api/dashboard/master-filters)
   const [plantOptions, setPlantOptions] = useState<string[]>([]);
   const [vendorOptions, setVendorOptions] = useState<VendorOption[]>([]);
 
-  // ====== DASHBOARD SUMMARY ======
   const [summary, setSummary] = useState<SummaryData | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
-  // ====== TIME-SERIES / DISTRIBUTION DATA ======
   const [poTrendData, setPoTrendData] = useState<PoTrendPoint[]>([]);
   const [statusDistribution, setStatusDistribution] = useState<StatusDistributionItem[]>([]);
   const [monthlyTrends, setMonthlyTrends] = useState<MonthlyTrendPoint[]>([]);
 
-  // ====== VENDOR SCORECARD STATES ======
   const [scorecardCurrentPage, setScorecardCurrentPage] = useState(1);
   const [scorecardItemsPerPage, setScorecardItemsPerPage] = useState(10);
   const [expandedVendors, setExpandedVendors] = useState<string[]>([]);
@@ -213,7 +202,6 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
   const [vendorScorecardLoading, setVendorScorecardLoading] = useState(false);
   const [vendorScorecardError, setVendorScorecardError] = useState<string | null>(null);
 
-  // ====== SUMMARY DERIVED VALUES ======
   const totalPO = summary?.TotalPO ?? 0;
   const outstandingQty = summary?.OutstandingQuantity ?? 0;
   const totalCompletion = summary?.TotalCompletionRate ?? 0;
@@ -221,17 +209,16 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
   const totalLate = summary?.TotalLateOrder ?? 0;
   const totalNotArrived = summary?.TotalNotArrivedOrder ?? 0;
   const totalOverdue = summary?.TotalOverdueOrder ?? 0;
-  const avgDelay = summary?.AverageDelay ?? 0;
+  // const avgDelay = summary?.AverageDelay ?? 0;
   const totalResched = summary?.TotalRescheduledOrder ?? 0;
   const reschedRatio = summary?.RescheduleETARatio ?? 0;
   const totalVendorResp = summary?.TotalVendorResponse ?? 0;
   const vendorRespRate = summary?.VendorResponseRate ?? 0;
 
-  // ========= API CALL: /api/dashboard/master-filters =========
   const fetchMasterFilters = async () => {
     try {
       const token = getAuthToken();
-      console.log(token)
+      console.log(token);
       if (!token) {
         console.error('Missing authentication token for master filters');
         return;
@@ -267,7 +254,6 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
     }
   };
 
-  // ========= API CALL: /api/dashboard/summary =========
   const fetchSummary = async (useDefault: boolean = false) => {
     try {
       setSummaryLoading(true);
@@ -282,19 +268,16 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
 
       const params = new URLSearchParams();
 
-      // useDefault = true => tidak kirim filter apa pun (default)
       if (!useDefault) {
         if (startDate) params.append('start_date', formatLocalDateParam(startDate));
         if (endDate) params.append('end_date', formatLocalDateParam(endDate));
         if (plant) params.append('plant', plant);
-        // All = tidak kirim param
         if (group && group !== 'All') params.append('group', group);
 
-        // Backend sekarang cuma support 1 vendor
         if (user.role === 'vendor' && user.company) {
           params.append('vendor', user.company);
         } else if (vendor) {
-          params.append('vendor', vendor); // single raw value (backend bisa adjust)
+          params.append('vendor', vendor);
         }
 
         const mappedDocType = mapDocTypeForApi(docType);
@@ -303,9 +286,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
 
       const url = `${API.SUMMARYDASHBOARD()}?${params.toString()}`;
       const headers = buildAuthHeaders();
-      const res = await fetch(url, {
-        headers,
-      });
+      const res = await fetch(url, { headers });
 
       if (!res.ok) {
         const text = await res.text();
@@ -325,7 +306,6 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
     }
   };
 
-  // ========= API CALL: /api/dashboard/po-trend =========
   const fetchPoTrend = async (useDefault: boolean = false) => {
     try {
       const token = getAuthToken();
@@ -340,11 +320,8 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
         if (startDate) params.append('start_date', formatLocalDateParam(startDate));
         if (endDate) params.append('end_date', formatLocalDateParam(endDate));
         if (plant) params.append('plant', plant);
-
-        // backend expects "purchasing_group"
         if (group && group !== 'All') params.append('purchasing_group', group);
 
-        // vendor filter (backend expects "vendor")
         if (user.role === 'vendor' && user.company) {
           params.append('vendor', user.company);
         } else if (vendor) {
@@ -372,7 +349,6 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
     }
   };
 
-  // ========= API CALL: /api/dashboard/status-distribution =========
   const fetchStatusDistribution = async (useDefault: boolean = false) => {
     try {
       const token = getAuthToken();
@@ -426,7 +402,6 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
     }
   };
 
-  // ========= API CALL: /api/dashboard/monthly-completion-delay =========
   const fetchMonthlyCompletionDelay = async (useDefault: boolean = false) => {
     try {
       const token = getAuthToken();
@@ -470,7 +445,165 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
     }
   };
 
-  // ========= API CALL: /api/dashboard/vendor/scorecard =========
+  const escapeCsvValue = (value: unknown): string => {
+    if (value === null || value === undefined) return '""';
+    const str = String(value).replace(/"/g, '""');
+    return `"${str}"`;
+  };
+
+  const downloadCsvFile = (filename: string, rows: (string | number)[][]) => {
+    const csvContent = rows
+      .map((row) => row.map((cell) => escapeCsvValue(cell)).join(','))
+      .join('\n');
+
+    const blob = new Blob([csvContent], {
+      type: 'text/csv;charset=utf-8;',
+    });
+
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  };
+
+  const downloadXlsLikeTsvFile = (filename: string, rows: (string | number)[][]) => {
+    const sanitizeCell = (value: string | number) => {
+      if (value === null || value === undefined) return '';
+      return String(value).replace(/\t/g, ' ').replace(/\r?\n/g, ' ');
+    };
+
+    const content = rows
+      .map((row) => row.map((cell) => sanitizeCell(cell)).join('\t'))
+      .join('\n');
+
+    const blob = new Blob([content], {
+      type: 'application/vnd.ms-excel;charset=utf-8;',
+    });
+
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  };
+
+  const handleExportVendorScorecard = () => {
+    const today = new Date();
+    const fileDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(
+      2,
+      '0'
+    )}-${String(today.getDate()).padStart(2, '0')}`;
+
+    if (user.role === 'vendor') {
+      const filteredRecords = vendorScorecardItems.filter((item) => {
+        if (!user.company) return true;
+        return item.vendorName === user.company || item.vendorCode === user.company;
+      });
+
+      const sortedRecords = [...filteredRecords].sort((a, b) =>
+        scorecardSortOrder === 'desc'
+          ? b.overallScore - a.overallScore
+          : a.overallScore - b.overallScore
+      );
+
+      const rows: (string | number)[][] = [
+        [
+          'Purchase Order',
+          'Item of Requisition',
+          'Vendor Code',
+          'Vendor Name',
+          'OTD (%)',
+          'Communication (%)',
+          'Re-ETA Accepted (%)',
+          'Re-ETA Rejected (%)',
+          'Excellence Point (%)',
+          'Overall Score (%)',
+        ],
+        ...sortedRecords.map((record) => [
+          record.poNumber,
+          record.itemOfRequisition,
+          record.vendorCode,
+          record.vendorName,
+          record.otd,
+          record.communication,
+          record.reETAAccepted,
+          record.reETARejected,
+          record.excellencePoint,
+          record.overallScore,
+        ]),
+      ];
+
+      downloadXlsLikeTsvFile(`vendor-scorecard-${fileDate}.xls`, rows);
+      return;
+    }
+
+    const sortedVendorAggregates = [...vendorScorecardAggregates].sort((a, b) =>
+      scorecardSortOrder === 'desc'
+        ? b.overallScore - a.overallScore
+        : a.overallScore - b.overallScore
+    );
+
+    const rows: (string | number)[][] = [
+      [
+        'Vendor Code',
+        'Vendor Name',
+        'OTD (%)',
+        'Communication (%)',
+        'Re-ETA Accepted (%)',
+        'Re-ETA Rejected (%)',
+        'Excellence Point (%)',
+        'Overall Score (%)',
+        'Items Count',
+        'Row Type',
+        'PO Number',
+        'Item of Requisition',
+      ],
+    ];
+
+    sortedVendorAggregates.forEach((vendorData) => {
+      rows.push([
+        vendorData.vendorCode,
+        vendorData.vendorName,
+        vendorData.otd,
+        vendorData.communication,
+        vendorData.reETAAccepted,
+        vendorData.reETARejected,
+        vendorData.excellencePoint,
+        vendorData.overallScore,
+        vendorData.itemsCount,
+        'SUMMARY',
+        '',
+        '',
+      ]);
+
+      vendorData.items.forEach((item) => {
+        rows.push([
+          item.vendorCode,
+          item.vendorName,
+          item.otd,
+          item.communication,
+          item.reETAAccepted,
+          item.reETARejected,
+          item.excellencePoint,
+          item.overallScore,
+          '',
+          'DETAIL',
+          item.poNumber,
+          item.itemOfRequisition,
+        ]);
+      });
+    });
+
+    downloadCsvFile(`vendor-scorecard-${fileDate}.csv`, rows);
+  };
+
   const fetchVendorScorecard = async (useDefault: boolean = false) => {
     try {
       setVendorScorecardLoading(true);
@@ -494,14 +627,11 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
         const mappedDocType = mapDocTypeForApi(docType);
         if (mappedDocType) params.append('doc_type', mappedDocType);
 
-        // === vendor filter: backend expects ?vendor=FULL_VENDOR_NAME ===
         let vendorFilter: string | undefined;
 
         if (user.role === 'vendor' && user.company) {
-          // Kalau di token user.company = full "3100000018 CV HAJI USNAN ELECTRIC", biarkan saja
           vendorFilter = user.company;
         } else if (vendor) {
-          // vendor state sudah berisi raw, misalnya "3100000018 CV HAJI USNAN ELECTRIC"
           vendorFilter = vendor;
         }
 
@@ -509,6 +639,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
           params.append('vendor', vendorFilter);
         }
       }
+
       const url = `${API.DASHBOARD_VENDOR_SCORECARD()}?${params.toString()}`;
       const res = await fetch(url, { headers: buildAuthHeaders() });
 
@@ -539,7 +670,6 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
 
       const aggregatesMap: Record<string, VendorScorecardAggregateUI> = {};
 
-      // base aggregates dari backend
       for (const agg of aggregates) {
         const key = `${agg.VendorCode}|${agg.VendorName}`;
         aggregatesMap[key] = {
@@ -556,7 +686,6 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
         };
       }
 
-      // attach items ke masing-masing vendor
       for (const item of uiItems) {
         const key = `${item.vendorCode}|${item.vendorName}`;
         if (!aggregatesMap[key]) {
@@ -587,7 +716,6 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
     }
   };
 
-  // ========= Helper to reload all data =========
   const reloadAllData = (useDefault: boolean = false) => {
     fetchSummary(useDefault);
     fetchPoTrend(useDefault);
@@ -596,14 +724,12 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
     fetchVendorScorecard(useDefault);
   };
 
-  // ========= INITIAL LOAD (tanpa filter) =========
   useEffect(() => {
     fetchMasterFilters();
-    reloadAllData(true); // initial load: default, tanpa filter
+    reloadAllData(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Format date for display
   const formatDate = (date: Date | undefined) => {
     if (!date) return 'Select date';
     return date.toLocaleDateString('en-US', {
@@ -613,14 +739,12 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
     });
   };
 
-  // Toggle vendor selection (single select, value = raw)
   const toggleVendor = (vendorRaw: string) => {
     setVendor((prev) => (prev === vendorRaw ? '' : vendorRaw));
   };
 
   const selectedVendorOption = vendorOptions.find((opt) => opt.raw === vendor);
 
-  // Vendor score from aggregates
   const currentVendorAggregate =
     user.role === 'vendor' && user.company
       ? vendorScorecardAggregates.find(
@@ -643,19 +767,16 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
 
   const vendorComposition = getCurrentVendorComposition();
 
-  // Toggle vendor expansion
   const toggleVendorExpansion = (vendorName: string) => {
     setExpandedVendors((prev) =>
       prev.includes(vendorName) ? prev.filter((v) => v !== vendorName) : [...prev, vendorName]
     );
   };
 
-  // Toggle scorecard sort order
   const toggleScorecardSort = () => {
     setScorecardSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
   };
 
-  // Helper: hitung total pages + range display untuk pagination scorecard
   const getScorecardDataLength = () =>
     user.role === 'vendor' ? vendorScorecardItems.length : vendorScorecardAggregates.length;
 
@@ -667,18 +788,16 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
 
   const getScorecardDisplayRange = () => {
     const len = getScorecardDataLength();
-    if (len === 0) return { start: 0, end: 0 };
+    if (len === 0) return { start: 0, end: 0, total: 0 };
     const startIndex = (scorecardCurrentPage - 1) * scorecardItemsPerPage;
     const endIndex = Math.min(startIndex + scorecardItemsPerPage, len);
     return { start: startIndex + 1, end: endIndex, total: len };
   };
 
-  // Custom label for pie chart
   const renderPercentageLabel = ({
     cx,
     cy,
     midAngle,
-    innerRadius,
     outerRadius,
     percent,
   }: any) => {
@@ -711,21 +830,18 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
         <p className="text-gray-600">Overview of key metrics and insights</p>
       </div>
 
-      {/* Error summary */}
       {summaryError && (
         <Alert variant="destructive" className="mb-4">
           <AlertDescription>{summaryError}</AlertDescription>
         </Alert>
       )}
 
-      {/* Vendor scorecard error */}
       {vendorScorecardError && (
         <Alert variant="destructive" className="mb-4">
           <AlertDescription>{vendorScorecardError}</AlertDescription>
         </Alert>
       )}
 
-      {/* Filters Section with Gradient */}
       <Collapsible open={isFiltersOpen} onOpenChange={setIsFiltersOpen}>
         <div
           className="rounded-lg mb-6"
@@ -747,7 +863,6 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
           <CollapsibleContent>
             <div className="px-4 sm:px-6 pb-4 sm:pb-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {/* Start Date */}
                 <div className="space-y-2">
                   <Label htmlFor="start-date" className="text-sm text-white">
                     Start Date
@@ -773,7 +888,6 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                   </Popover>
                 </div>
 
-                {/* End Date */}
                 <div className="space-y-2">
                   <Label htmlFor="end-date" className="text-sm text-white">
                     End Date
@@ -799,7 +913,6 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                   </Popover>
                 </div>
 
-                {/* Plant / Jobsite */}
                 <div className="space-y-2">
                   <Label htmlFor="plant" className="text-sm text-white">
                     {user.role === 'vendor' ? 'Jobsite' : 'Plant'}
@@ -830,7 +943,6 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                   </Select>
                 </div>
 
-                {/* Group - Hidden for vendors */}
                 {user.role !== 'vendor' && (
                   <div className="space-y-2">
                     <Label htmlFor="group" className="text-sm text-white">
@@ -845,7 +957,6 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                         <SelectValue placeholder="Select group" />
                       </SelectTrigger>
                       <SelectContent>
-                        {/* All = kirim null (tidak kirim param) */}
                         <SelectItem value="All">All</SelectItem>
                         <SelectItem value="logistics">Logistics</SelectItem>
                         <SelectItem value="operations">Operations</SelectItem>
@@ -856,7 +967,6 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                   </div>
                 )}
 
-                {/* Vendor - Hidden for vendors */}
                 {user.role !== 'vendor' && (
                   <div className="space-y-2">
                     <Label htmlFor="vendor" className="text-sm text-white">
@@ -907,7 +1017,6 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                   </div>
                 )}
 
-                {/* Doc Type - Admin Only */}
                 {user.role === 'admin' && (
                   <div className="space-y-2">
                     <Label htmlFor="doc-type" className="text-sm text-white">
@@ -923,14 +1032,12 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="purchase-order">Purchase Order</SelectItem>
-                        {/* sesuaikan nanti dengan real DocType jika perlu */}
                       </SelectContent>
                     </Select>
                   </div>
                 )}
               </div>
 
-              {/* Apply/Reset Buttons */}
               <div className="flex gap-3 mt-6">
                 <Button
                   className="px-6"
@@ -940,7 +1047,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                     fontWeight: 600,
                   }}
                   onClick={() => {
-                    reloadAllData(false); // pakai filter di state
+                    reloadAllData(false);
                     setScorecardCurrentPage(1);
                   }}
                   disabled={summaryLoading}
@@ -956,15 +1063,12 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                     color: 'white',
                   }}
                   onClick={() => {
-                    // reset state filter
                     setStartDate(undefined);
                     setEndDate(undefined);
                     setPlant('');
                     setGroup('');
                     setVendor('');
                     setDocType('');
-
-                    // langsung reload data default (tanpa filter)
                     reloadAllData(true);
                     setScorecardCurrentPage(1);
                   }}
@@ -977,22 +1081,21 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
         </div>
       </Collapsible>
 
-      {/* KPI Cards - Conditional Layout Based on Role */}
-      {user.role === 'vendor' ? 
-      (
+      {user.role === 'vendor' ? (
         <>
-          {/* Vendor View - Row 1 */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 mb-3 sm:mb-4">
-            {/* Vendor Average Score */}
             <Card className="p-6 sm:col-span-2 lg:col-span-2">
               <div className="flex items-start justify-between mb-2">
                 <div className="p-3 rounded-lg" style={{ backgroundColor: 'rgba(0, 131, 131, 0.1)' }}>
                   <CheckCircle className="h-6 w-6" style={{ color: '#008383' }} />
                 </div>
+
+                {/*
                 <div className="flex items-center gap-1 text-green-600 text-sm">
                   <TrendingUp className="h-4 w-4" />
                   2%
                 </div>
+                */}
               </div>
 
               <div className="flex items-start gap-6">
@@ -1030,16 +1133,18 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
               </div>
             </Card>
 
-            {/* Total Purchase Orders */}
             <Card className="p-6 lg:col-span-1">
               <div className="flex items-start justify-between mb-2">
                 <div className="p-3 rounded-lg" style={{ backgroundColor: 'rgba(1, 67, 87, 0.1)' }}>
                   <Package className="h-6 w-6" style={{ color: '#014357' }} />
                 </div>
+
+                {/*
                 <div className="flex items-center gap-1 text-green-600 text-sm">
                   <TrendingUp className="h-4 w-4" />
                   12%
                 </div>
+                */}
               </div>
               <div className="text-gray-600 text-sm mb-0.5">Total Purchase Orders</div>
               <div className="text-3xl" style={{ color: '#014357' }}>
@@ -1048,16 +1153,18 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
               <div className="text-xs text-gray-500 mt-0.5">+18 from last month</div>
             </Card>
 
-            {/* Completion Rate */}
             <Card className="p-6 lg:col-span-1">
               <div className="flex items-start justify-between mb-2">
                 <div className="p-3 rounded-lg" style={{ backgroundColor: 'rgba(106, 167, 93, 0.1)' }}>
                   <CheckCircle className="h-6 w-6" style={{ color: '#6AA75D' }} />
                 </div>
+
+                {/*
                 <div className="flex items-center gap-1 text-green-600 text-sm">
                   <TrendingUp className="h-4 w-4" />
                   3%
                 </div>
+                */}
               </div>
               <div className="text-gray-600 text-sm mb-0.5">Completion Rate</div>
               <div className="text-3xl" style={{ color: '#6AA75D' }}>
@@ -1068,66 +1175,86 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
               </div>
             </Card>
 
-            {/* Overdue Orders */}
-            <Card className="p-6 lg:col-span-1 relative">
+            <Card className="p-6 lg:col-span-1 relative min-h-[220px] flex flex-col">
               <div className="flex items-start justify-between mb-2">
-                <div className="p-3 rounded-lg" style={{ backgroundColor: 'rgba(212, 24, 61, 0.1)' }}>
+                <div
+                  className="p-3 rounded-lg"
+                  style={{ backgroundColor: 'rgba(212, 24, 61, 0.1)' }}
+                >
                   <AlertTriangle className="h-6 w-6 text-red-600" />
                 </div>
-                <div className="flex items-center gap-1 text-red-600 text-sm mr-6">
+
+                {/*
+                <div className="flex items-center gap-1 text-red-600 text-sm mr-2">
                   <TrendingUp className="h-4 w-4" />
                   8%
                 </div>
+                */}
               </div>
+
               <div className="text-gray-600 text-sm mb-0.5">Overdue Orders</div>
               <div className="text-3xl text-red-600">{totalOverdue}</div>
-              <div className="text-xs text-gray-500 mt-0.5">
-                {`${totalLate} late + ${totalNotArrived} not arrived`}
+              <div className="mt-0.5 flex items-center justify-between gap-2">
+                <div className="text-xs text-gray-500">
+                  {`${totalLate} late + ${totalNotArrived} not arrived`}
+                </div>
+
+                <button
+                  onClick={() => onPageChange('purchase-order?attraction=2')}
+                  className="inline-flex !h-10 !w-10 items-center justify-center rounded-full p-1 bg-red-50 text-red-600 transition-colors hover:bg-red-100 shrink-0"
+                  aria-label="View orders"
+                >
+                  <ArrowRight className="h-4 w-4" />
+                </button>
               </div>
-              <button
-                onClick={() => onPageChange('purchase-order')}
-                className="absolute bottom-4 right-4 p-1.5 rounded-full bg-red-50 text-red-600 transition-colors hover:bg-red-100"
-                aria-label="View orders"
-              >
-                <ArrowRight className="h-4 w-4" />
-              </button>
             </Card>
           </div>
 
-          {/* Vendor View - Row 2 */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 mb-4 sm:mb-6">
-            {/* POs Need Update (dummy logic) */}
-            <Card className="p-6 relative">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-4 sm:mb-6">
+            {/*
+            <Card className="p-6 min-h-[220px] flex flex-col">
               <div className="flex items-start justify-between mb-2">
-                <div className="p-3 rounded-lg" style={{ backgroundColor: 'rgba(237, 131, 45, 0.1)' }}>
+                <div
+                  className="p-3 rounded-lg"
+                  style={{ backgroundColor: 'rgba(237, 131, 45, 0.1)' }}
+                >
                   <AlertTriangle className="h-6 w-6" style={{ color: '#ED832D' }} />
                 </div>
                 <div className="flex items-center gap-1 text-gray-600 text-sm">
                   <span>—</span>
                 </div>
               </div>
+
               <div className="text-gray-600 text-sm mb-0.5">POs Need Update</div>
               <div className="text-3xl" style={{ color: '#ED832D' }}>
                 12
               </div>
-              <div className="text-xs text-gray-500 mt-0.5">ETA D-2 or D-1</div>
-              <button
-                onClick={() => onPageChange('purchase-order')}
-                className="absolute bottom-4 right-4 p-1.5 rounded-full transition-colors"
-                style={{ backgroundColor: 'rgba(237, 131, 45, 0.1)', color: '#ED832D' }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'rgba(237, 131, 45, 0.2)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'rgba(237, 131, 45, 0.1)';
-                }}
-                aria-label="Update POs"
-              >
-                <ArrowRight className="h-4 w-4" />
-              </button>
-            </Card>
 
-            {/* Average Delay */}
+              <div className="mt-0.5 flex items-center justify-between gap-2">
+                <div className="text-xs text-gray-500">ETA D-2 or D-1</div>
+
+                <button
+                  onClick={() => onPageChange('purchase-order?attraction=1')}
+                  className="inline-flex !h-10 !w-10 items-center justify-center rounded-full p-1 transition-colors shrink-0"
+                  style={{
+                    backgroundColor: 'rgba(237, 131, 45, 0.1)',
+                    color: '#ED832D',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = 'rgba(237, 131, 45, 0.2)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'rgba(237, 131, 45, 0.1)';
+                  }}
+                  aria-label="Update POs"
+                >
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              </div>
+            </Card>
+            */}
+
+            {/*
             <Card className="p-6">
               <div className="flex items-start justify-between mb-2">
                 <div className="p-3 rounded-lg" style={{ backgroundColor: 'rgba(237, 131, 45, 0.1)' }}>
@@ -1144,16 +1271,19 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
               </div>
               <div className="text-xs text-gray-500 mt-0.5">For delayed orders only</div>
             </Card>
+            */}
 
-            {/* Reschedule ETA Ratio */}
             <Card className="p-6">
               <div className="flex items-start justify-between mb-2">
                 <div className="p-3 rounded-lg" style={{ backgroundColor: 'rgba(0, 131, 131, 0.1)' }}>
                   <RefreshCw className="h-6 w-6" style={{ color: '#008383' }} />
                 </div>
+
+                {/*
                 <div className="flex items-center gap-1 text-gray-600 text-sm">
                   <span>—</span>
                 </div>
+                */}
               </div>
               <div className="text-gray-600 text-sm mb-0.5">Reschedule ETA Ratio</div>
               <div className="text-3xl" style={{ color: '#008383' }}>
@@ -1164,16 +1294,18 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
               </div>
             </Card>
 
-            {/* Vendor Response Rate */}
             <Card className="p-6">
               <div className="flex items-start justify-between mb-2">
                 <div className="p-3 rounded-lg" style={{ backgroundColor: 'rgba(92, 140, 182, 0.1)' }}>
                   <CheckCircle className="h-6 w-6" style={{ color: '#5C8CB6' }} />
                 </div>
+
+                {/*
                 <div className="flex items-center gap-1 text-green-600 text-sm">
                   <TrendingUp className="h-4 w-4" />
                   5%
                 </div>
+                */}
               </div>
               <div className="text-gray-600 text-sm mb-0.5">Vendor Response Rate</div>
               <div className="text-3xl" style={{ color: '#5C8CB6' }}>
@@ -1186,15 +1318,17 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
               </div>
             </Card>
 
-            {/* Outstanding Quantity */}
             <Card className="p-6">
               <div className="flex items-start justify-between mb-2">
                 <div className="p-3 rounded-lg" style={{ backgroundColor: 'rgba(1, 67, 87, 0.1)' }}>
                   <Layers className="h-6 w-6" style={{ color: '#014357' }} />
                 </div>
+
+                {/*
                 <div className="flex items-center gap-1 text-gray-600 text-sm">
                   <span>—</span>
                 </div>
+                */}
               </div>
               <div className="text-gray-600 text-sm mb-0.5">Outstanding Quantity</div>
               <div className="text-3xl" style={{ color: '#014357' }}>
@@ -1206,22 +1340,19 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
         </>
       ) : (
         <>
-          {/* Admin/User View - Row 1 */}
-          <div
-            className={`grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mb-3 sm:mb-4 ${
-              user.role === 'admin' ? 'lg:grid-cols-4' : 'lg:grid-cols-3'
-            }`}
-          >
-            {/* Total Purchase Orders */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-3 sm:mb-4">
             <Card className="p-6">
               <div className="flex items-start justify-between mb-2">
                 <div className="p-3 rounded-lg" style={{ backgroundColor: 'rgba(1, 67, 87, 0.1)' }}>
                   <Package className="h-6 w-6" style={{ color: '#014357' }} />
                 </div>
+
+                {/*
                 <div className="flex items-center gap-1 text-green-600 text-sm">
                   <TrendingUp className="h-4 w-4" />
                   12%
                 </div>
+                */}
               </div>
               <div className="text-gray-600 text-sm mb-0.5">Total Purchase Orders</div>
               <div className="text-3xl" style={{ color: '#014357' }}>
@@ -1230,16 +1361,18 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
               <div className="text-xs text-gray-500 mt-0.5">+18 from last month</div>
             </Card>
 
-            {/* Completion Rate */}
             <Card className="p-6">
               <div className="flex items-start justify-between mb-2">
                 <div className="p-3 rounded-lg" style={{ backgroundColor: 'rgba(106, 167, 93, 0.1)' }}>
                   <CheckCircle className="h-6 w-6" style={{ color: '#6AA75D' }} />
                 </div>
+
+                {/*
                 <div className="flex items-center gap-1 text-green-600 text-sm">
                   <TrendingUp className="h-4 w-4" />
                   3%
                 </div>
+                */}
               </div>
               <div className="text-gray-600 text-sm mb-0.5">Completion Rate</div>
               <div className="text-3xl" style={{ color: '#6AA75D' }}>
@@ -1250,32 +1383,41 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
               </div>
             </Card>
 
-            {/* Overdue Orders */}
-            <Card className="p-6 relative">
+            <Card className="p-6 lg:col-span-1 relative min-h-[220px] flex flex-col">
               <div className="flex items-start justify-between mb-2">
-                <div className="p-3 rounded-lg" style={{ backgroundColor: 'rgba(212, 24, 61, 0.1)' }}>
+                <div
+                  className="p-3 rounded-lg"
+                  style={{ backgroundColor: 'rgba(212, 24, 61, 0.1)' }}
+                >
                   <AlertTriangle className="h-6 w-6 text-red-600" />
                 </div>
-               <div className="flex items-center gap-1 text-red-600 text-sm mr-2">
+
+                {/*
+                <div className="flex items-center gap-1 text-red-600 text-sm mr-2">
                   <TrendingUp className="h-4 w-4" />
                   8%
                 </div>
+                */}
               </div>
+
               <div className="text-gray-600 text-sm mb-0.5">Overdue Orders</div>
               <div className="text-3xl text-red-600">{totalOverdue}</div>
-              <div className="text-xs text-gray-500 mt-0.5">
-                {`${totalLate} late + ${totalNotArrived} not arrived`}
+              <div className="mt-0.5 flex items-center justify-between gap-2">
+                <div className="text-xs text-gray-500">
+                  {`${totalLate} late + ${totalNotArrived} not arrived`}
+                </div>
+
+                <button
+                  onClick={() => onPageChange('purchase-order?attraction=2')}
+                  className="inline-flex !h-10 !w-10 items-center justify-center rounded-full p-1 bg-red-50 text-red-600 transition-colors hover:bg-red-100 shrink-0"
+                  aria-label="View orders"
+                >
+                  <ArrowRight className="h-4 w-4" />
+                </button>
               </div>
-              <button
-                onClick={() => onPageChange('purchase-order')}
-                className="absolute bottom-4 right-4 p-1.5 rounded-full bg-red-50 text-red-600 transition-colors hover:bg-red-100"
-                aria-label="View orders"
-              >
-                <ArrowRight className="h-4 w-4" />
-              </button>
             </Card>
 
-            {/* Average Delay - Admin only */}
+            {/*
             {user.role === 'admin' && (
               <Card className="p-6">
                 <div className="flex items-start justify-between mb-2">
@@ -1294,11 +1436,11 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                 <div className="text-xs text-gray-500 mt-0.5">For delayed orders only</div>
               </Card>
             )}
+            */}
           </div>
 
-          {/* Admin/User View - Row 2 */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-4 sm:mb-6">
-            {/* Average Delay - User View */}
+            {/*
             {user.role === 'user' && (
               <Card className="p-6">
                 <div className="flex items-start justify-between mb-2">
@@ -1317,16 +1459,19 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                 <div className="text-xs text-gray-500 mt-0.5">For delayed orders only</div>
               </Card>
             )}
+            */}
 
-            {/* Reschedule ETA Request Ratio */}
             <Card className="p-6">
               <div className="flex items-start justify-between mb-2">
                 <div className="p-3 rounded-lg" style={{ backgroundColor: 'rgba(0, 131, 131, 0.1)' }}>
                   <RefreshCw className="h-6 w-6" style={{ color: '#008383' }} />
                 </div>
+
+                {/*
                 <div className="flex items-center gap-1 text-gray-600 text-sm">
                   <span>—</span>
                 </div>
+                */}
               </div>
               <div className="text-gray-600 text-sm mb-0.5">Reschedule ETA Ratio</div>
               <div className="text-3xl" style={{ color: '#008383' }}>
@@ -1337,17 +1482,19 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
               </div>
             </Card>
 
-            {/* Vendor Response Rate - Admin Only */}
             {user.role === 'admin' && (
               <Card className="p-6">
                 <div className="flex items-start justify-between mb-2">
                   <div className="p-3 rounded-lg" style={{ backgroundColor: 'rgba(92, 140, 182, 0.1)' }}>
                     <CheckCircle className="h-6 w-6" style={{ color: '#5C8CB6' }} />
                   </div>
+
+                  {/*
                   <div className="flex items-center gap-1 text-green-600 text-sm">
                     <TrendingUp className="h-4 w-4" />
                     5%
                   </div>
+                  */}
                 </div>
                 <div className="text-gray-600 text-sm mb-0.5">Vendor Response Rate</div>
                 <div className="text-3xl" style={{ color: '#5C8CB6' }}>
@@ -1361,15 +1508,17 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
               </Card>
             )}
 
-            {/* Outstanding Quantity */}
             <Card className="p-6">
               <div className="flex items-start justify-between mb-2">
                 <div className="p-3 rounded-lg" style={{ backgroundColor: 'rgba(1, 67, 87, 0.1)' }}>
                   <Layers className="h-6 w-6" style={{ color: '#014357' }} />
                 </div>
+
+                {/*
                 <div className="flex items-center gap-1 text-gray-600 text-sm">
                   <span>—</span>
                 </div>
+                */}
               </div>
               <div className="text-gray-600 text-sm mb-0.5">Outstanding Quantity</div>
               <div className="text-3xl" style={{ color: '#014357' }}>
@@ -1381,9 +1530,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
         </>
       )}
 
-      {/* Charts Row: PO Line Chart + Status Distribution */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mb-4 sm:mb-6">
-        {/* PO Line Chart */}
         <Card className="p-4 sm:p-6">
           <h3 className="mb-0" style={{ color: '#014357', lineHeight: '1.2' }}>
             Purchase Order Trend
@@ -1438,7 +1585,6 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
           </div>
         </Card>
 
-        {/* Status Distribution */}
         <Card className="p-4 sm:p-6">
           <h3 className="mb-0" style={{ color: '#014357', lineHeight: '1.2' }}>
             PO Status Distribution
@@ -1500,13 +1646,12 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
         </Card>
       </div>
 
-      {/* Monthly Trends */}
       <Card className="p-4 sm:p-6 mb-4 sm:mb-6">
         <h3 className="mb-0" style={{ color: '#014357', lineHeight: '1.2' }}>
           Monthly Trends: Completion & Delay
         </h3>
         <p className="text-sm text-gray-600 mb-4 sm:mb-6 mt-1">
-          Compare completion rates against average delivery delays
+          Monthly completion rate overview
         </p>
         <ResponsiveContainer width="100%" height={300}>
           <ComposedChart data={monthlyTrends} margin={{ top: 5, right: 50, left: 10, bottom: 5 }}>
@@ -1523,6 +1668,8 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                 style: { fontSize: 12, fill: '#6b7280' },
               }}
             />
+
+            {/*
             <YAxis
               yAxisId="right"
               orientation="right"
@@ -1534,6 +1681,8 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                 style: { fontSize: 12, fill: '#6b7280' },
               }}
             />
+            */}
+
             <Tooltip
               contentStyle={{
                 backgroundColor: 'white',
@@ -1549,6 +1698,8 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
               name="Completion Rate (%)"
               radius={[4, 4, 0, 0]}
             />
+
+            {/*
             <Line
               yAxisId="right"
               type="monotone"
@@ -1559,6 +1710,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
               dot={{ r: 5, fill: '#ED832D', strokeWidth: 2, stroke: '#fff' }}
               activeDot={{ r: 7 }}
             />
+            */}
           </ComposedChart>
         </ResponsiveContainer>
         <div className="flex flex-wrap items-center justify-center gap-4 pt-4 border-t border-gray-200">
@@ -1566,14 +1718,16 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
             <div className="w-4 h-4" style={{ backgroundColor: '#014357' }}></div>
             <span className="text-sm text-gray-700">Completion Rate (%)</span>
           </div>
+
+          {/*
           <div className="flex items-center gap-2">
             <div className="w-4 h-4" style={{ backgroundColor: '#ED832D' }}></div>
             <span className="text-sm text-gray-700">Avg Delay (days)</span>
           </div>
+          */}
         </div>
       </Card>
 
-      {/* Vendor Performance Scorecard (Admin/Vendor Only) */}
       {(user.role === 'admin' || user.role === 'vendor') && (
         <Card className="mt-4 sm:mt-6">
           <div className="p-6 pb-0">
@@ -1590,9 +1744,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
               </div>
               {user.role === 'admin' && (
                 <Button
-                  onClick={() => {
-                    console.log('Exporting vendor scorecard to Excel...');
-                  }}
+                  onClick={handleExportVendorScorecard}
                   variant="outline"
                   className="transition-colors"
                   style={{
@@ -1653,7 +1805,6 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
               </TableHeader>
               <TableBody>
                 {user.role === 'vendor' ? (
-                  // Vendor view – pakai items dari API (1 baris per PO)
                   (() => {
                     const filteredRecords = vendorScorecardItems.filter((item) => {
                       if (!user.company) return true;
@@ -1666,9 +1817,6 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                         : a.overallScore - b.overallScore
                     );
 
-                    const totalPages = Math.ceil(
-                      sortedRecords.length / scorecardItemsPerPage || 1
-                    );
                     const startIndex = (scorecardCurrentPage - 1) * scorecardItemsPerPage;
                     const endIndex = startIndex + scorecardItemsPerPage;
                     const paginatedRecords = sortedRecords.slice(startIndex, endIndex);
@@ -1726,7 +1874,6 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                     ));
                   })()
                 ) : (
-                  // Admin/User view – pakai aggregates dari API (1 baris per vendor, bisa expand detail)
                   (() => {
                     const sortedVendorAggregates = [...vendorScorecardAggregates].sort((a, b) =>
                       scorecardSortOrder === 'desc'
@@ -1734,9 +1881,6 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                         : a.overallScore - b.overallScore
                     );
 
-                    const totalPages = Math.ceil(
-                      sortedVendorAggregates.length / scorecardItemsPerPage || 1
-                    );
                     const startIndex = (scorecardCurrentPage - 1) * scorecardItemsPerPage;
                     const endIndex = startIndex + scorecardItemsPerPage;
                     const paginatedVendors = sortedVendorAggregates.slice(startIndex, endIndex);
@@ -1862,7 +2006,6 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
             </Table>
           </div>
 
-          {/* Pagination */}
           {((user.role === 'vendor' && vendorScorecardItems.length > 0) ||
             (user.role !== 'vendor' && vendorScorecardAggregates.length > 0)) && (
             <div className="flex items-center justify-between px-4 py-4 border-t gap-4">
