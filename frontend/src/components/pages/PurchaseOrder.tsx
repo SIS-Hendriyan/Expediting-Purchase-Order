@@ -131,12 +131,33 @@ type ColumnKey =
 type ColumnVis = Record<ColumnKey, boolean>;
 type AnyObj = Record<string, any>;
 
+type MasterOption = {
+  value: string;
+  text: string;
+};
+
+type PurchaseOrderMasterResponse = {
+  listStatus: MasterOption[];
+  listPlant: MasterOption[];
+  listLocation: MasterOption[];
+  listDocType: MasterOption[];
+  listPurchasingGroup: MasterOption[];
+};
+
+type AppliedAdvancedFilters = {
+  status: string;
+  storageLocation: string;
+  plant: string;
+  purchasingGroup: string;
+  supplier: string;
+  purchasingDocType: string;
+};
+
 // ================== Constants / Helpers ==================
-const STATUS_TAB_TO_PARAM: Record<Exclude<StatusTab, 'all'>, string> = {
+const STATUS_TAB_TO_PARAM: Partial<Record<Exclude<StatusTab, 'all'>, string>> = {
   created: 'submitted',
   wip: 'workInProgress',
   delivery: 'onDelivery',
-  received: 'received',
 };
 
 const ATTENTION_UI_TO_BACKEND: Record<Exclude<AttentionFilter, null>, 1 | 2> = {
@@ -193,20 +214,17 @@ function unwrapPOPayload(json: AnyObj): {
   const normalizedItems = items.map((x: any) => ({
     ...x,
     id: normalizeItemId(x),
-
     deliveryDate:
       x?.deliveryDate ??
       x?.DeliveryDate ??
       x?.['Delivery Date'] ??
       null,
-
     etaDate:
       x?.etaDate ??
       x?.ETADate ??
       x?.EtaDate ??
       x?.['ETA Date'] ??
       null,
-
     qtyOrder:
       x?.qtyOrder ??
       x?.QtyOrder ??
@@ -216,7 +234,6 @@ function unwrapPOPayload(json: AnyObj): {
       x?.orderQty ??
       x?.OrderQty ??
       null,
-
     reEtaDate:
       x?.reEtaDate ??
       x?.ReEtaDate ??
@@ -229,6 +246,30 @@ function unwrapPOPayload(json: AnyObj): {
   })) as PurchaseOrderItem[];
 
   return { summary, pagination, items: normalizedItems };
+}
+
+function unwrapPOMasterPayload(json: AnyObj): PurchaseOrderMasterResponse {
+  const lvl1 = (json?.data ?? json?.Data ?? json?.payload ?? json?.result ?? json) as AnyObj;
+  const lvl2 = (lvl1?.Data ?? lvl1?.data ?? lvl1) as AnyObj;
+
+  const normalizeList = (rows: any): MasterOption[] => {
+    const arr = Array.isArray(rows) ? rows : toArray(rows);
+
+    return arr
+      .map((x: any) => ({
+        value: String(x?.value ?? x?.Value ?? '').trim(),
+        text: String(x?.text ?? x?.Text ?? x?.value ?? x?.Value ?? '').trim(),
+      }))
+      .filter((x: MasterOption) => x.value);
+  };
+
+  return {
+    listStatus: normalizeList(lvl2?.listStatus ?? lvl2?.ListStatus),
+    listPlant: normalizeList(lvl2?.listPlant ?? lvl2?.ListPlant),
+    listLocation: normalizeList(lvl2?.listLocation ?? lvl2?.ListLocation),
+    listDocType: normalizeList(lvl2?.listDocType ?? lvl2?.ListDocType),
+    listPurchasingGroup: normalizeList(lvl2?.listPurchasingGroup ?? lvl2?.ListPurchasingGroup),
+  };
 }
 
 const normalizeAttention = (v: AttentionRaw): AttentionNorm => {
@@ -280,6 +321,21 @@ const mapBackendStatusToDisplay = (status: string): string => {
       return 'Received';
     default:
       return status || '-';
+  }
+};
+
+const mapDisplayStatusToBackend = (status: string): string | null => {
+  switch ((status || '').trim()) {
+    case 'PO Created':
+      return 'submitted';
+    case 'Work in Progress':
+      return 'workInProgress';
+    case 'On Delivery':
+      return 'onDelivery';
+    case 'Received':
+      return null;
+    default:
+      return null;
   }
 };
 
@@ -455,6 +511,14 @@ const isExcelFile = (file: File): boolean => {
   return ALLOWED_EXCEL_EXTENSIONS.some(ext => name.endsWith(ext));
 };
 
+const dedupeStrings = (arr: (string | null | undefined)[]) =>
+  Array.from(new Set(arr.filter(Boolean).map(v => String(v).trim()).filter(Boolean)));
+
+const normalizeDisplayStatusOptions = (rows: MasterOption[]): string[] => {
+  const mapped = rows.map(x => mapBackendStatusToDisplay(x.text || x.value));
+  return dedupeStrings(mapped);
+};
+
 // ================== Component ==================
 export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const [selectedOrderId, setSelectedOrderId] = useState<OrderKey | null>(null);
@@ -467,17 +531,37 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
 
-  const [filterStatus, setFilterStatus] = useState('');
-  const [filterStorage, setFilterStorage] = useState('');
-  const [filterPlant, setFilterPlant] = useState('');
-  const [filterGroup, setFilterGroup] = useState('');
-  const [filterSupplier, setFilterSupplier] = useState('');
-  const [filterDocType, setFilterDocType] = useState('');
+  const [appliedFilters, setAppliedFilters] = useState<AppliedAdvancedFilters>({
+    status: '',
+    storageLocation: '',
+    plant: '',
+    purchasingGroup: '',
+    supplier: '',
+    purchasingDocType: '',
+  });
+
+  const [draftFilters, setDraftFilters] = useState<AppliedAdvancedFilters>({
+    status: '',
+    storageLocation: '',
+    plant: '',
+    purchasingGroup: '',
+    supplier: '',
+    purchasingDocType: '',
+  });
 
   const [orders, setOrders] = useState<PurchaseOrderItem[]>([]);
   const [summary, setSummary] = useState<PurchaseOrderSummary | null>(null);
   const [cardSummary, setCardSummary] = useState<PurchaseOrderSummary | null>(null);
   const [pagination, setPagination] = useState<PurchaseOrderPagination | null>(null);
+
+  const [masterFilters, setMasterFilters] = useState<PurchaseOrderMasterResponse>({
+    listStatus: [],
+    listPlant: [],
+    listLocation: [],
+    listDocType: [],
+    listPurchasingGroup: [],
+  });
+  const [loadingMasterFilters, setLoadingMasterFilters] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -552,34 +636,54 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   useEffect(() => {
     const s = getAuthSession();
 
-    if (isVendorSession(s)) {
-      console.log('[PO] VENDOR session:', {
-        id: s.id,
-        vendorName: s.vendorName,
-        email: s.email,
-      });
-    }
+    // if (isVendorSession(s)) {
+    //   console.log('[PO] VENDOR session:', {
+    //     id: s.id,
+    //     vendorName: s.vendorName,
+    //     email: s.email,
+    //   });
+    // }
 
-    if (isInternalSession(s)) {
-      console.log('[PO] INTERNAL session:', {
-        id: s.id,
-        role: s.role,
-        email: s.email,
-      });
-    }
+    // if (isInternalSession(s)) {
+    //   console.log('[PO] INTERNAL session:', {
+    //     id: s.id,
+    //     role: s.role,
+    //     email: s.email,
+    //   });
+    // }
 
-    console.log('[PO] user.role =', user.role);
-    console.log('[PO] vendorName =', vendorName);
-    console.log('[PO] specialFilter from query =', specialFilter);
+    // console.log('[PO] user.role =', user.role);
+    // console.log('[PO] vendorName =', vendorName);
+    // console.log('[PO] specialFilter from query =', specialFilter);
   }, [user.role, vendorName, specialFilter]);
 
-  const buildListUrl = useCallback((tab: StatusTab, attention: 1 | 2 | null, pageNumber: number, pageSize: number) => {
-    const url = new URL(API.SUMMARYPO());
-    const statusParam =
-      tab === 'all' ? null : STATUS_TAB_TO_PARAM[tab as Exclude<StatusTab, 'all'>];
+  useEffect(() => {
+    if (isFilterOpen) {
+      setDraftFilters(appliedFilters);
+    }
+  }, [isFilterOpen, appliedFilters]);
 
-    if (statusParam) {
-      url.searchParams.set('status', statusParam);
+  const buildListUrl = useCallback((
+    tab: StatusTab,
+    attention: 1 | 2 | null,
+    pageNumber: number,
+    pageSize: number,
+    filters: AppliedAdvancedFilters
+  ) => {
+    const url = new URL(API.SUMMARYPO());
+
+    const tabStatusParam =
+      tab === 'all' ? null : STATUS_TAB_TO_PARAM[tab as Exclude<StatusTab, 'all'>] ?? null;
+
+    const filterStatusParam =
+      filters.status && filters.status !== 'all'
+        ? mapDisplayStatusToBackend(filters.status)
+        : null;
+
+    const effectiveStatusParam = filterStatusParam ?? tabStatusParam;
+
+    if (effectiveStatusParam) {
+      url.searchParams.set('status', effectiveStatusParam);
     }
 
     if (attention === 1 || attention === 2) {
@@ -589,6 +693,24 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
     if (user.role === 'vendor' && vendorName) {
       url.searchParams.set('vendorName', vendorName);
+    } else if (filters.supplier && filters.supplier !== 'all') {
+      url.searchParams.set('vendorName', filters.supplier);
+    }
+
+    if (filters.plant && filters.plant !== 'all') {
+      url.searchParams.set('plant', filters.plant);
+    }
+
+    if (filters.storageLocation && filters.storageLocation !== 'all') {
+      url.searchParams.set('storageLocation', filters.storageLocation);
+    }
+
+    if (filters.purchasingGroup && filters.purchasingGroup !== 'all') {
+      url.searchParams.set('purchasingGroup', filters.purchasingGroup);
+    }
+
+    if (filters.purchasingDocType && filters.purchasingDocType !== 'all') {
+      url.searchParams.set('purchasingDocType', filters.purchasingDocType);
     }
 
     url.searchParams.set('pageNumber', String(pageNumber));
@@ -606,6 +728,36 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
     return url;
   }, [user.role, vendorName]);
+
+  const buildMasterUrl = useCallback(() => {
+    const url = new URL(API.MASTERPO());
+
+    const tabStatusParam =
+      activeTab === 'all' ? null : STATUS_TAB_TO_PARAM[activeTab as Exclude<StatusTab, 'all'>] ?? null;
+
+    const filterStatusParam =
+      appliedFilters.status && appliedFilters.status !== 'all'
+        ? mapDisplayStatusToBackend(appliedFilters.status)
+        : null;
+
+    const effectiveStatusParam = filterStatusParam ?? tabStatusParam;
+
+    if (effectiveStatusParam) {
+      url.searchParams.set('status', effectiveStatusParam);
+    }
+
+    if (currentAttentionParam === 1 || currentAttentionParam === 2) {
+      url.searchParams.set('attention', String(currentAttentionParam));
+    }
+
+    if (user.role === 'vendor' && vendorName) {
+      url.searchParams.set('vendorName', vendorName);
+    } else if (appliedFilters.supplier && appliedFilters.supplier !== 'all') {
+      url.searchParams.set('vendorName', appliedFilters.supplier);
+    }
+
+    return url;
+  }, [activeTab, currentAttentionParam, user.role, vendorName, appliedFilters]);
 
   const fetchCardSummary = useCallback(async () => {
     try {
@@ -636,18 +788,19 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     const timeout = setTimeout(() => controller.abort(), 60_000);
 
     const effectiveTab: StatusTab = attention ? 'all' : tab;
-    const url = buildListUrl(effectiveTab, attention, pageNumber, pageSize);
+    const url = buildListUrl(effectiveTab, attention, pageNumber, pageSize, appliedFilters);
 
-    console.log('[PO] list request:', {
-      url: url.toString(),
-      tab,
-      effectiveTab,
-      attention,
-      vendorName,
-      pageNumber,
-      pageSize,
-      headers: { hasAuth: !!getAuthToken() },
-    });
+    // console.log('[PO] list request:', {
+    //   url: url.toString(),
+    //   tab,
+    //   effectiveTab,
+    //   attention,
+    //   vendorName,
+    //   pageNumber,
+    //   pageSize,
+    //   appliedFilters,
+    //   headers: { hasAuth: !!getAuthToken() },
+    // });
 
     try {
       const res = await fetch(url.toString(), {
@@ -688,7 +841,45 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       clearTimeout(timeout);
       setLoading(false);
     }
-  }, [buildListUrl, vendorName]);
+  }, [buildListUrl, vendorName, appliedFilters]);
+
+  const fetchMasterFilters = useCallback(async () => {
+    setLoadingMasterFilters(true);
+
+    try {
+      const url = buildMasterUrl();
+      const res = await fetch(url.toString(), {
+        method: 'GET',
+        headers: buildAuthHeaders(),
+      });
+
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try {
+          const err = await res.json();
+          msg = err?.message || err?.Message || msg;
+        } catch {}
+        throw new Error(msg);
+      }
+
+      const json = await res.json();
+      const data = unwrapPOMasterPayload(json);
+
+      setMasterFilters(data);
+    } catch (err: any) {
+      console.error('[PO] master filters fetch failed', err);
+      toast.error(err?.message || 'Failed to load filter options');
+      setMasterFilters({
+        listStatus: [],
+        listPlant: [],
+        listLocation: [],
+        listDocType: [],
+        listPurchasingGroup: [],
+      });
+    } finally {
+      setLoadingMasterFilters(false);
+    }
+  }, [buildMasterUrl]);
 
   useEffect(() => {
     fetchCardSummary();
@@ -697,6 +888,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   useEffect(() => {
     fetchPurchaseOrders(activeTab, currentAttentionParam, currentPage, itemsPerPage);
   }, [activeTab, currentAttentionParam, currentPage, itemsPerPage, fetchPurchaseOrders]);
+
+  useEffect(() => {
+    fetchMasterFilters();
+  }, [fetchMasterFilters]);
 
   const scopedOrders = useMemo(() => {
     let list = orders;
@@ -720,17 +915,20 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   }, [orders, activeTab, specialFilter]);
 
   const filterOptions = useMemo(() => {
-    const uniq = (arr: (string | null | undefined)[]) =>
-      Array.from(new Set(arr.filter(Boolean).map(v => String(v)))) as string[];
+    const supplierOptions =
+      user.role !== 'vendor'
+        ? ['all', ...dedupeStrings(scopedOrders.map(o => o.nameOfSupplier))]
+        : [];
 
     return {
-      storage: ['all', ...uniq(scopedOrders.map(o => o.storageLocation))],
-      plant: ['all', ...uniq(scopedOrders.map(o => o.plant))],
-      group: ['all', ...uniq(scopedOrders.map(o => o.purchasingGroup))],
-      supplier: ['all', ...uniq(scopedOrders.map(o => o.nameOfSupplier))],
-      docType: ['all', ...uniq(scopedOrders.map(o => o.purchasingDocType))],
+      status: ['all', ...normalizeDisplayStatusOptions(masterFilters.listStatus)],
+      storage: ['all', ...dedupeStrings(masterFilters.listLocation.map(x => x.text || x.value))],
+      plant: ['all', ...dedupeStrings(masterFilters.listPlant.map(x => x.text || x.value))],
+      group: ['all', ...dedupeStrings(masterFilters.listPurchasingGroup.map(x => x.text || x.value))],
+      supplier: supplierOptions,
+      docType: ['all', ...dedupeStrings(masterFilters.listDocType.map(x => x.text || x.value))],
     };
-  }, [scopedOrders]);
+  }, [masterFilters, scopedOrders, user.role]);
 
   const filteredOrders = useMemo(() => {
     let list = scopedOrders;
@@ -749,42 +947,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       );
     }
 
-    if (filterStatus && filterStatus !== 'all') {
-      list = list.filter(o => mapBackendStatusToDisplay(o.status) === filterStatus);
-    }
-
-    if (filterStorage && filterStorage !== 'all') {
-      list = list.filter(o => (o.storageLocation ?? '') === filterStorage);
-    }
-
-    if (filterPlant && filterPlant !== 'all') {
-      list = list.filter(o => (o.plant ?? '') === filterPlant);
-    }
-
-    if (filterGroup && filterGroup !== 'all') {
-      list = list.filter(o => (o.purchasingGroup ?? '') === filterGroup);
-    }
-
-    if (user.role !== 'vendor' && filterSupplier && filterSupplier !== 'all') {
-      list = list.filter(o => (o.nameOfSupplier ?? '') === filterSupplier);
-    }
-
-    if (filterDocType && filterDocType !== 'all') {
-      list = list.filter(o => (o.purchasingDocType ?? '') === filterDocType);
+    if (appliedFilters.status && appliedFilters.status !== 'all' && appliedFilters.status === 'Received') {
+      list = list.filter(o => isReceivedBackendStatus(o.status) || mapBackendStatusToDisplay(o.status) === 'Received');
     }
 
     return list;
-  }, [
-    scopedOrders,
-    searchQuery,
-    filterStatus,
-    filterStorage,
-    filterPlant,
-    filterGroup,
-    filterSupplier,
-    filterDocType,
-    user.role,
-  ]);
+  }, [scopedOrders, searchQuery, appliedFilters.status]);
 
   const needUpdateCount = useMemo(() => {
     const v = cardSummary?.PONeedUpdate;
@@ -827,38 +995,22 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const endIndex = Math.min(startIndex + pageOrders.length, totalOrders);
 
   const hasActiveFilters = useMemo(() => !!(
-    (filterStatus && filterStatus !== 'all') ||
-    (filterStorage && filterStorage !== 'all') ||
-    (filterPlant && filterPlant !== 'all') ||
-    (filterGroup && filterGroup !== 'all') ||
-    (user.role !== 'vendor' && filterSupplier && filterSupplier !== 'all') ||
-    (filterDocType && filterDocType !== 'all')
-  ), [
-    user.role,
-    filterStatus,
-    filterStorage,
-    filterPlant,
-    filterGroup,
-    filterSupplier,
-    filterDocType
-  ]);
+    (appliedFilters.status && appliedFilters.status !== 'all') ||
+    (appliedFilters.storageLocation && appliedFilters.storageLocation !== 'all') ||
+    (appliedFilters.plant && appliedFilters.plant !== 'all') ||
+    (appliedFilters.purchasingGroup && appliedFilters.purchasingGroup !== 'all') ||
+    (user.role !== 'vendor' && appliedFilters.supplier && appliedFilters.supplier !== 'all') ||
+    (appliedFilters.purchasingDocType && appliedFilters.purchasingDocType !== 'all')
+  ), [user.role, appliedFilters]);
 
   const activeFilterCount = useMemo(() => ([
-    filterStatus && filterStatus !== 'all',
-    filterStorage && filterStorage !== 'all',
-    filterPlant && filterPlant !== 'all',
-    filterGroup && filterGroup !== 'all',
-    user.role !== 'vendor' && filterSupplier && filterSupplier !== 'all',
-    filterDocType && filterDocType !== 'all',
-  ].filter(Boolean).length), [
-    user.role,
-    filterStatus,
-    filterStorage,
-    filterPlant,
-    filterGroup,
-    filterSupplier,
-    filterDocType
-  ]);
+    appliedFilters.status && appliedFilters.status !== 'all',
+    appliedFilters.storageLocation && appliedFilters.storageLocation !== 'all',
+    appliedFilters.plant && appliedFilters.plant !== 'all',
+    appliedFilters.purchasingGroup && appliedFilters.purchasingGroup !== 'all',
+    user.role !== 'vendor' && appliedFilters.supplier && appliedFilters.supplier !== 'all',
+    appliedFilters.purchasingDocType && appliedFilters.purchasingDocType !== 'all',
+  ].filter(Boolean).length), [user.role, appliedFilters]);
 
   const ordersNeedingUpdate = useMemo(() => {
     if (user.role !== 'vendor') return [];
@@ -940,6 +1092,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
       await fetchCardSummary();
       await fetchPurchaseOrders(activeTab, currentAttentionParam, currentPage, itemsPerPage);
+      await fetchMasterFilters();
     } catch (err: any) {
       console.error('[PO] submit delivery update failed', err);
       toast.error(err?.message || 'Failed to submit update');
@@ -952,6 +1105,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     submitPoStatusUpdate,
     fetchCardSummary,
     fetchPurchaseOrders,
+    fetchMasterFilters,
     activeTab,
     currentAttentionParam,
     currentPage,
@@ -959,14 +1113,21 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   ]);
 
   const clearFilters = useCallback(() => {
-    setFilterStatus('');
-    setFilterStorage('');
-    setFilterPlant('');
-    setFilterGroup('');
-    setFilterSupplier('');
-    setFilterDocType('');
-    setCurrentPage(1);
+    setDraftFilters({
+      status: '',
+      storageLocation: '',
+      plant: '',
+      purchasingGroup: '',
+      supplier: '',
+      purchasingDocType: '',
+    });
   }, []);
+
+  const handleApplyFilters = useCallback(() => {
+    setAppliedFilters(draftFilters);
+    setCurrentPage(1);
+    setIsFilterOpen(false);
+  }, [draftFilters]);
 
   const handleTabChange = useCallback((v: string) => {
     setActiveTab(v as StatusTab);
@@ -1114,6 +1275,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
       await fetchCardSummary();
       await fetchPurchaseOrders(activeTab, currentAttentionParam, currentPage, itemsPerPage);
+      await fetchMasterFilters();
 
       setIsUploadDialogOpen(false);
       resetUploadState();
@@ -1128,6 +1290,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     uploadFile,
     fetchPurchaseOrders,
     fetchCardSummary,
+    fetchMasterFilters,
     activeTab,
     currentAttentionParam,
     currentPage,
@@ -1733,28 +1896,38 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       <DialogDescription>Filter purchase orders by multiple criteria</DialogDescription>
                     </DialogHeader>
 
+                    {loadingMasterFilters && (
+                      <div className="py-2 text-sm text-gray-500">
+                        Loading filter options...
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-4">
                       <div className="grid gap-2">
                         <Label>Status</Label>
-                        <Select value={filterStatus} onValueChange={(v) => { setFilterStatus(v); setCurrentPage(1); }}>
+                        <Select
+                          value={draftFilters.status}
+                          onValueChange={(v) => setDraftFilters(prev => ({ ...prev, status: v }))}
+                        >
                           <SelectTrigger><SelectValue placeholder="All statuses" /></SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="all">All</SelectItem>
-                            <SelectItem value="PO Created">PO Created</SelectItem>
-                            <SelectItem value="Work in Progress">Work in Progress</SelectItem>
-                            <SelectItem value="On Delivery">On Delivery</SelectItem>
-                            <SelectItem value="Received">Received</SelectItem>
+                            {filterOptions.status.map(opt => (
+                              <SelectItem key={opt} value={opt}>{opt === 'all' ? 'All' : opt}</SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>
 
                       <div className="grid gap-2">
                         <Label>Storage Location</Label>
-                        <Select value={filterStorage} onValueChange={(v) => { setFilterStorage(v); setCurrentPage(1); }}>
+                        <Select
+                          value={draftFilters.storageLocation}
+                          onValueChange={(v) => setDraftFilters(prev => ({ ...prev, storageLocation: v }))}
+                        >
                           <SelectTrigger><SelectValue placeholder="All storage locations" /></SelectTrigger>
                           <SelectContent>
                             {filterOptions.storage.map(opt => (
-                              <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                              <SelectItem key={opt} value={opt}>{opt === 'all' ? 'All' : opt}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
@@ -1762,11 +1935,14 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
                       <div className="grid gap-2">
                         <Label>Plant</Label>
-                        <Select value={filterPlant} onValueChange={(v) => { setFilterPlant(v); setCurrentPage(1); }}>
+                        <Select
+                          value={draftFilters.plant}
+                          onValueChange={(v) => setDraftFilters(prev => ({ ...prev, plant: v }))}
+                        >
                           <SelectTrigger><SelectValue placeholder="All plants" /></SelectTrigger>
                           <SelectContent>
                             {filterOptions.plant.map(opt => (
-                              <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                              <SelectItem key={opt} value={opt}>{opt === 'all' ? 'All' : opt}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
@@ -1774,11 +1950,14 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
                       <div className="grid gap-2">
                         <Label>Purchasing Group</Label>
-                        <Select value={filterGroup} onValueChange={(v) => { setFilterGroup(v); setCurrentPage(1); }}>
+                        <Select
+                          value={draftFilters.purchasingGroup}
+                          onValueChange={(v) => setDraftFilters(prev => ({ ...prev, purchasingGroup: v }))}
+                        >
                           <SelectTrigger><SelectValue placeholder="All groups" /></SelectTrigger>
                           <SelectContent>
                             {filterOptions.group.map(opt => (
-                              <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                              <SelectItem key={opt} value={opt}>{opt === 'all' ? 'All' : opt}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
@@ -1787,11 +1966,14 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       {user.role !== 'vendor' && (
                         <div className="grid gap-2">
                           <Label>Supplier</Label>
-                          <Select value={filterSupplier} onValueChange={(v) => { setFilterSupplier(v); setCurrentPage(1); }}>
+                          <Select
+                            value={draftFilters.supplier}
+                            onValueChange={(v) => setDraftFilters(prev => ({ ...prev, supplier: v }))}
+                          >
                             <SelectTrigger><SelectValue placeholder="All suppliers" /></SelectTrigger>
                             <SelectContent>
                               {filterOptions.supplier.map(opt => (
-                                <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                <SelectItem key={opt} value={opt}>{opt === 'all' ? 'All' : opt}</SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
@@ -1800,11 +1982,14 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
                       <div className="grid gap-2">
                         <Label>Doc Type</Label>
-                        <Select value={filterDocType} onValueChange={(v) => { setFilterDocType(v); setCurrentPage(1); }}>
+                        <Select
+                          value={draftFilters.purchasingDocType}
+                          onValueChange={(v) => setDraftFilters(prev => ({ ...prev, purchasingDocType: v }))}
+                        >
                           <SelectTrigger><SelectValue placeholder="All document types" /></SelectTrigger>
                           <SelectContent>
                             {filterOptions.docType.map(opt => (
-                              <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                              <SelectItem key={opt} value={opt}>{opt === 'all' ? 'All' : opt}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
@@ -1819,7 +2004,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       <Button
                         style={{ backgroundColor: '#014357' }}
                         className="text-white hover:opacity-90 flex-1"
-                        onClick={() => setIsFilterOpen(false)}
+                        onClick={handleApplyFilters}
                       >
                         Apply Filters
                       </Button>
