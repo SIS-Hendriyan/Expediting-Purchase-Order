@@ -12,7 +12,7 @@ namespace EXPOAPI.Services
     public sealed class PurchaseOrderService : IPurchaseOrderService
     {
         private readonly IDbConnectionFactory _db;
-
+        private const string SP_PURCHASE_ORDER_MASTER = "[exp].[Purchase_Order_Master_SP]";
         private const string SP_PURCHASE_ORDER = "[exp].[Purchase_Order_SP]";
         private const string SP_PO_DASHBOARD_SUMMARY = "[exp].[PO_DASHBOARD_SUMMARY_SP]";
         private const string SP_PO_VENDOR_SCORECARD = "[exp].[PO_VENDOR_SCORECARD_SP]";
@@ -78,6 +78,100 @@ namespace EXPOAPI.Services
         public PurchaseOrderService(IDbConnectionFactory db)
         {
             _db = db ?? throw new ArgumentNullException(nameof(db));
+        }
+
+        private static object? TryGetValueIgnoreCase(IDictionary<string, object?> dict, string key)
+        {
+            foreach (var kv in dict)
+            {
+                if (kv.Key.Equals(key, StringComparison.OrdinalIgnoreCase))
+                    return kv.Value;
+            }
+
+            return null;
+        }
+        private static List<Dictionary<string, object?>> NormalizeMasterList(
+    List<Dictionary<string, object?>> rows)
+        {
+            var result = new List<Dictionary<string, object?>>();
+
+            foreach (var row in rows)
+            {
+                var value = TryGetValueIgnoreCase(row, "Value");
+                var text = TryGetValueIgnoreCase(row, "Text");
+
+                if (value == null && text == null)
+                    continue;
+
+                result.Add(new Dictionary<string, object?>
+                {
+                    ["value"] = value,
+                    ["text"] = text ?? value
+                });
+            }
+
+            return result;
+        }
+
+        public async Task<Dictionary<string, object?>> GetPurchaseOrderMasterAsync(
+    string? status = null,
+    int? attention = null,
+    string? vendorName = null,
+    CancellationToken ct = default)
+        {
+            using var cn = _db.CreateMain();
+
+            var dp = new DynamicParameters();
+            AddString(dp, "Status", status);
+            if (attention.HasValue) dp.Add("Attention", attention.Value);
+            AddString(dp, "VendorName", vendorName);
+
+            try
+            {
+                using var grid = await cn.QueryMultipleAsync(new CommandDefinition(
+                    SP_PURCHASE_ORDER_MASTER,
+                    dp,
+                    commandType: CommandType.StoredProcedure,
+                    cancellationToken: ct
+                ));
+
+                var listStatus = (await grid.ReadAsync<dynamic>()).Select(ToDict).ToList();
+                var listPlant = !grid.IsConsumed
+                    ? (await grid.ReadAsync<dynamic>()).Select(ToDict).ToList()
+                    : new List<Dictionary<string, object?>>();
+
+                var listLocation = !grid.IsConsumed
+                    ? (await grid.ReadAsync<dynamic>()).Select(ToDict).ToList()
+                    : new List<Dictionary<string, object?>>();
+
+                var listDocType = !grid.IsConsumed
+                    ? (await grid.ReadAsync<dynamic>()).Select(ToDict).ToList()
+                    : new List<Dictionary<string, object?>>();
+
+                var listPurchasingGroup = !grid.IsConsumed
+                    ? (await grid.ReadAsync<dynamic>()).Select(ToDict).ToList()
+                    : new List<Dictionary<string, object?>>();
+
+                return new Dictionary<string, object?>
+                {
+                    ["listStatus"] = NormalizeMasterList(listStatus),
+                    ["listPlant"] = NormalizeMasterList(listPlant),
+                    ["listLocation"] = NormalizeMasterList(listLocation),
+                    ["listDocType"] = NormalizeMasterList(listDocType),
+                    ["listPurchasingGroup"] = NormalizeMasterList(listPurchasingGroup)
+                };
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (SqlException ex)
+            {
+                throw new InvalidOperationException(
+                    $"DB error executing {SP_PURCHASE_ORDER_MASTER}: {ex.Message}",
+                    ex
+                );
+            }
         }
 
         // ------------------------------------------------------------

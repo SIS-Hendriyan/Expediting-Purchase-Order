@@ -10,6 +10,7 @@ namespace EXPOAPI.Services
     {
         private const string SP_PO_STATUS_UPSERT = "[exp].[PO_STATUS_TRANSACTION_UPSERT_SP]";
         private const string SP_PO_STATUS = "[exp].[PO_STATUS_TRANSACTION_SP]";
+        private const string SP_PO_STATUS_ON_DELIVERY_UPSERT = "[exp].[PO_STATUS_ON_DELIVERY_UPSERT_SP]";
 
         private readonly IDbConnectionFactory _db;
 
@@ -19,7 +20,7 @@ namespace EXPOAPI.Services
         }
 
         // =========================================================
-        // UPSERT
+        // UPSERT GENERAL STATUS
         // =========================================================
         public Task<Dictionary<string, object?>> UpsertPoStatusAsync(
             Dictionary<string, object?> payload,
@@ -56,6 +57,102 @@ namespace EXPOAPI.Services
             catch (Exception ex)
             {
                 throw new InvalidOperationException("Failed to prepare PO status upsert request.", ex);
+            }
+        }
+
+        // =========================================================
+        // UPSERT ON DELIVERY
+        // =========================================================
+        public Task<Dictionary<string, object?>> UpsertOnDeliveryAsync(
+            Dictionary<string, object?> payload,
+            ClaimsPrincipal? user,
+            CancellationToken ct = default)
+        {
+            try
+            {
+                if (payload is null)
+                    throw new ArgumentNullException(nameof(payload));
+
+                var actor = GetActor(payload, "CreatedBy", user);
+
+                var parameters = new Dictionary<string, object?>
+                {
+                    ["ID_PO_Item"] = Get(payload, "ID_PO_Item")
+                                  ?? Get(payload, "IDPOItem")
+                                  ?? Get(payload, "IdPoItem")
+                                  ?? Get(payload, "ID PO Item"),
+
+                    ["AWB"] = Get(payload, "AWB"),
+
+                    ["ActualDeliveryDate"] = ParseDateTime(
+                                                Get(payload, "ActualDeliveryDate")
+                                             ?? Get(payload, "ACTUAL_DELIVERY_DATE")
+                                             ?? Get(payload, "OnDeliveryAt")
+                                             ?? Get(payload, "ON_DELIVERY_AT")
+                                             ?? Get(payload, "Actual Delivery Date")
+                                            ),
+
+                    ["LeadtimeDelivery"] = ParseInt(
+                                                Get(payload, "LeadtimeDelivery")
+                                             ?? Get(payload, "LEADTIME_DELIVERY")
+                                             ?? Get(payload, "Lead Time Delivery")
+                                            ),
+
+                    ["Quantity"] = ParseDecimal(
+                                        Get(payload, "Quantity")
+                                     ?? Get(payload, "QUANTITY")
+                                    ),
+
+                    ["FileName"] = Get(payload, "FileName")
+                                ?? Get(payload, "FILE_NAME")
+                                ?? Get(payload, "fileName"),
+
+                    ["ContentType"] = Get(payload, "ContentType")
+                                   ?? Get(payload, "CONTENT_TYPE")
+                                   ?? Get(payload, "contentType"),
+
+                    ["FileSize"] = ParseLong(
+                                        Get(payload, "FileSize")
+                                     ?? Get(payload, "FILE_SIZE")
+                                     ?? Get(payload, "fileSize")
+                                    ),
+
+                    ["BinaryData"] = ParseBytes(
+                                        Get(payload, "BinaryData")
+                                     ?? Get(payload, "BINARY_DATA")
+                                    ),
+
+                    ["Base64Data"] = Get(payload, "Base64Data")
+                                  ?? Get(payload, "BASE64_DATA")
+                                  ?? Get(payload, "base64Data"),
+
+                    ["CreatedBy"] = actor
+                };
+
+                if (string.IsNullOrWhiteSpace(parameters["ID_PO_Item"]?.ToString()))
+                    throw new ArgumentException("ID_PO_Item is required.", nameof(payload));
+
+                if (string.IsNullOrWhiteSpace(parameters["AWB"]?.ToString()))
+                    throw new ArgumentException("AWB is required.", nameof(payload));
+
+                if (parameters["ActualDeliveryDate"] is null)
+                    throw new ArgumentException("ActualDeliveryDate is required.", nameof(payload));
+
+                if (string.IsNullOrWhiteSpace(parameters["FileName"]?.ToString()))
+                    throw new ArgumentException("FileName is required.", nameof(payload));
+
+                if (string.IsNullOrWhiteSpace(parameters["ContentType"]?.ToString()))
+                    throw new ArgumentException("ContentType is required.", nameof(payload));
+
+                var fileSize = parameters["FileSize"] as long?;
+                if (!fileSize.HasValue || fileSize.Value <= 0)
+                    throw new ArgumentException("FileSize must be greater than zero.", nameof(payload));
+
+                return ExecutePoStatusOnDeliveryUpsertAsync(parameters, ct);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException("Failed to prepare PO on-delivery upsert request.", ex);
             }
         }
 
@@ -141,7 +238,7 @@ namespace EXPOAPI.Services
         }
 
         // =========================================================
-        // Core: Execute Upsert SP
+        // Core: Execute General Upsert SP
         // =========================================================
         private async Task<Dictionary<string, object?>> ExecutePoStatusUpsertAsync(
             Dictionary<string, object?> parameters,
@@ -179,11 +276,60 @@ namespace EXPOAPI.Services
             {
                 var parameterText = string.Join(
                     ", ",
-                    parameters.Select(x => $"{x.Key}={x.Value ?? "NULL"}")
+                    parameters.Select(x => $"{x.Key}={FormatParameterValue(x.Value)}")
                 );
 
                 throw new InvalidOperationException(
                     $"Failed to execute stored procedure {SP_PO_STATUS_UPSERT}. Parameters: {parameterText}",
+                    ex
+                );
+            }
+        }
+
+        // =========================================================
+        // Core: Execute On Delivery Upsert SP
+        // =========================================================
+        private async Task<Dictionary<string, object?>> ExecutePoStatusOnDeliveryUpsertAsync(
+            Dictionary<string, object?> parameters,
+            CancellationToken ct)
+        {
+            try
+            {
+                using var cn = _db.CreateMain();
+
+                var dp = new DynamicParameters();
+                foreach (var (key, value) in parameters)
+                {
+                    dp.Add(key, value);
+                }
+
+                using var grid = await cn.QueryMultipleAsync(
+                    new CommandDefinition(
+                        commandText: SP_PO_STATUS_ON_DELIVERY_UPSERT,
+                        parameters: dp,
+                        commandType: CommandType.StoredProcedure,
+                        cancellationToken: ct
+                    )
+                );
+
+                while (!grid.IsConsumed)
+                {
+                    var rows = (await grid.ReadAsync<dynamic>()).AsList();
+                    if (rows.Count > 0)
+                        return ToDict(rows[0]);
+                }
+
+                return new Dictionary<string, object?>();
+            }
+            catch (Exception ex)
+            {
+                var parameterText = string.Join(
+                    ", ",
+                    parameters.Select(x => $"{x.Key}={FormatParameterValue(x.Value)}")
+                );
+
+                throw new InvalidOperationException(
+                    $"Failed to execute stored procedure {SP_PO_STATUS_ON_DELIVERY_UPSERT}. Parameters: {parameterText}",
                     ex
                 );
             }
@@ -227,7 +373,67 @@ namespace EXPOAPI.Services
                 return null;
 
             if (!int.TryParse(text, out var parsed))
-                throw new ArgumentException("ETA must be a valid integer.");
+                throw new ArgumentException($"Value '{text}' must be a valid integer.");
+
+            return parsed;
+        }
+
+        private static long? ParseLong(object? value)
+        {
+            if (value is null)
+                return null;
+
+            if (value is long l)
+                return l;
+
+            if (value is int i)
+                return i;
+
+            if (value is short s)
+                return s;
+
+            if (value is byte b)
+                return b;
+
+            if (value is decimal d)
+                return (long)d;
+
+            var text = value.ToString()?.Trim();
+            if (string.IsNullOrWhiteSpace(text))
+                return null;
+
+            if (!long.TryParse(text, out var parsed))
+                throw new ArgumentException($"Value '{text}' must be a valid long integer.");
+
+            return parsed;
+        }
+
+        private static decimal? ParseDecimal(object? value)
+        {
+            if (value is null)
+                return null;
+
+            if (value is decimal d)
+                return d;
+
+            if (value is double db)
+                return Convert.ToDecimal(db);
+
+            if (value is float f)
+                return Convert.ToDecimal(f);
+
+            if (value is int i)
+                return i;
+
+            if (value is long l)
+                return l;
+
+            var text = value.ToString()?.Trim();
+            if (string.IsNullOrWhiteSpace(text))
+                return null;
+
+            if (!decimal.TryParse(text, out var parsed))
+                throw new ArgumentException($"Value '{text}' must be a valid decimal.");
 
             return parsed;
         }
@@ -250,6 +456,17 @@ namespace EXPOAPI.Services
             return DateTime.TryParse(text, out var parsed) ? parsed : null;
         }
 
+        private static byte[]? ParseBytes(object? value)
+        {
+            if (value is null)
+                return null;
+
+            if (value is byte[] bytes)
+                return bytes;
+
+            return null;
+        }
+
         private static string GetActor(
             Dictionary<string, object?> payload,
             string key,
@@ -261,9 +478,26 @@ namespace EXPOAPI.Services
 
             var identity = user?.FindFirstValue("identity")
                         ?? user?.FindFirstValue(ClaimTypes.NameIdentifier)
-                        ?? user?.FindFirstValue(JwtRegisteredClaimNames.Sub);
+                        ?? user?.FindFirstValue(JwtRegisteredClaimNames.Sub)
+                        ?? user?.FindFirstValue(ClaimTypes.Name)
+                        ?? user?.Identity?.Name;
 
             return identity ?? string.Empty;
+        }
+
+        private static string FormatParameterValue(object? value)
+        {
+            if (value is null)
+                return "NULL";
+
+            if (value is byte[] bytes)
+                return $"byte[{bytes.Length}]";
+
+            var text = value.ToString();
+            if (string.IsNullOrWhiteSpace(text))
+                return "''";
+
+            return text;
         }
 
         private static Dictionary<string, object?> ToDict(dynamic row)
