@@ -1637,7 +1637,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          {/* <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <Card
               className={[
                 'p-4 shadow-[0_2px_4px_rgba(237,131,45,0.25)] border-0 cursor-pointer transition-all',
@@ -1679,7 +1679,29 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                 </div>
               </div>
             </Card>
-          </div>
+          </div> */}
+          <div className="grid grid-cols-1 gap-4 mb-4">
+  <Card
+    className={[
+      'p-4 shadow-[0_2px_4px_rgba(220,38,38,0.25)] border-0 cursor-pointer transition-all w-full',
+      specialFilter === 'overdue' ? 'ring-2 ring-[#DC2626]' : ''
+    ].join(' ')}
+    style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)' }}
+    onClick={() => handleToggleAttentionCard('overdue')}
+  >
+    <div className="flex items-center justify-between">
+      <div className="flex items-center gap-3">
+        <div className="p-2 rounded-lg bg-white shadow-sm">
+          <AlertTriangle className="h-4 w-4" style={{ color: '#DC2626' }} />
+        </div>
+        <div className="text-gray-900 text-sm" style={{ fontWeight: 600 }}>Overdue</div>
+      </div>
+      <div className="text-2xl font-bold" style={{ color: '#DC2626', fontWeight: 800 }}>
+        {overdueCount}
+      </div>
+    </div>
+  </Card>
+</div>
 
           <div className="flex gap-3 mb-6">
             <Card className="flex-1 p-4">
