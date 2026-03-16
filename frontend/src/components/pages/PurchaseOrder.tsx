@@ -1,4 +1,3 @@
-// src/components/pages/PurchaseOrder.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Card } from '../ui/card';
@@ -44,7 +43,7 @@ import {
 // ================== Types ==================
 interface PurchaseOrderProps { user: User; }
 
-type StatusTab = 'all' | 'created' | 'wip' | 'delivery' | 'partially' | 'delivered';
+type StatusTab = 'all' | 'created' | 'wip' | 'delivery' | 'received';
 type AttentionFilter = 'updates' | 'overdue' | null;
 
 type AttentionRaw = number | 'Need Update' | 'Overdue' | null | undefined;
@@ -58,11 +57,13 @@ export interface PurchaseOrderItem {
   purchasingDocument: string;
   item: string;
   documentDate: string;
-  deliveryDate: string;
+  deliveryDate: string | null;
+  etaDate: string | null;
   purchasingDocType: string;
   purchasingGroup: string;
   shortText: string;
   material: string;
+  qtyOrder: string | null;
   nameOfSupplier: string;
   quantityReceived: string;
   stillToBeDelivered: string;
@@ -90,7 +91,16 @@ interface PurchaseOrderSummary {
   POOverdueFiltered?: number;
   TotalFiltered?: number;
   PageSize?: number;
+  PageNumber?: number;
+  TotalPages?: number;
   FilterStatus?: string | null;
+}
+
+interface PurchaseOrderPagination {
+  pageNumber: number;
+  pageSize: number;
+  totalFiltered: number;
+  totalPages: number;
 }
 
 type ColumnKey =
@@ -100,10 +110,12 @@ type ColumnKey =
   | 'item'
   | 'documentDate'
   | 'deliveryDate'
+  | 'etaDate'
   | 'purchasingDocType'
   | 'purchasingGroup'
   | 'shortText'
   | 'material'
+  | 'qtyOrder'
   | 'nameOfSupplier'
   | 'quantityReceived'
   | 'stillToBeDelivered'
@@ -124,8 +136,7 @@ const STATUS_TAB_TO_PARAM: Record<Exclude<StatusTab, 'all'>, string> = {
   created: 'submitted',
   wip: 'workInProgress',
   delivery: 'onDelivery',
-  partially: 'partiallyReceived',
-  delivered: 'fullyReceived',
+  received: 'received',
 };
 
 const ATTENTION_UI_TO_BACKEND: Record<Exclude<AttentionFilter, null>, 1 | 2> = {
@@ -134,7 +145,9 @@ const ATTENTION_UI_TO_BACKEND: Record<Exclude<AttentionFilter, null>, 1 | 2> = {
 };
 
 const ALLOWED_EXCEL_EXTENSIONS = ['.xlsx', '.xls'];
+
 const toArray = (v: any): any[] => (Array.isArray(v) ? v : v ? [v] : []);
+const clampUploadProgress = (value: number) => Math.max(0, Math.min(99, value));
 
 const normalizeItemId = (it: any): OrderKey | null => {
   const v = it?.id ?? it?.ID ?? it?.Id ?? null;
@@ -145,10 +158,30 @@ const normalizeItemId = (it: any): OrderKey | null => {
 const getOrderKey = (o: PurchaseOrderItem): OrderKey =>
   (o.id !== null && o.id !== undefined && o.id !== '' ? o.id : o.purchasingDocument);
 
-function unwrapPOPayload(json: AnyObj): { summary: PurchaseOrderSummary | null; items: PurchaseOrderItem[] } {
+function unwrapPOPayload(json: AnyObj): {
+  summary: PurchaseOrderSummary | null;
+  pagination: PurchaseOrderPagination | null;
+  items: PurchaseOrderItem[];
+} {
   const lvl1 = (json?.data ?? json?.Data ?? json?.payload ?? json?.result ?? json) as AnyObj;
   const lvl2 = (lvl1?.Data ?? lvl1?.data ?? lvl1) as AnyObj;
+
   const summary = (lvl2?.summary ?? lvl2?.Summary ?? null) as PurchaseOrderSummary | null;
+
+  const paginationFromNode =
+    (lvl2?.pagination ?? lvl2?.Pagination ?? null) as PurchaseOrderPagination | null;
+
+  const paginationFromSummary =
+    summary
+      ? {
+          pageNumber: Number(summary.PageNumber ?? 1),
+          pageSize: Number(summary.PageSize ?? 10),
+          totalFiltered: Number(summary.TotalFiltered ?? 0),
+          totalPages: Number(summary.TotalPages ?? 0),
+        }
+      : null;
+
+  const pagination = paginationFromNode ?? paginationFromSummary;
 
   const itemsRaw =
     lvl2?.items ?? lvl2?.Items ?? lvl2?.rows ?? lvl2?.Rows ??
@@ -156,9 +189,46 @@ function unwrapPOPayload(json: AnyObj): { summary: PurchaseOrderSummary | null; 
     lvl2?.list ?? lvl2?.List ?? [];
 
   const items = (Array.isArray(itemsRaw) ? itemsRaw : toArray(itemsRaw)) as PurchaseOrderItem[];
-  const normalizedItems = items.map((x: any) => ({ ...x, id: normalizeItemId(x) })) as PurchaseOrderItem[];
 
-  return { summary, items: normalizedItems };
+  const normalizedItems = items.map((x: any) => ({
+    ...x,
+    id: normalizeItemId(x),
+
+    deliveryDate:
+      x?.deliveryDate ??
+      x?.DeliveryDate ??
+      x?.['Delivery Date'] ??
+      null,
+
+    etaDate:
+      x?.etaDate ??
+      x?.ETADate ??
+      x?.EtaDate ??
+      x?.['ETA Date'] ??
+      null,
+
+    qtyOrder:
+      x?.qtyOrder ??
+      x?.QtyOrder ??
+      x?.['Qty Order'] ??
+      x?.quantityOrder ??
+      x?.QuantityOrder ??
+      x?.orderQty ??
+      x?.OrderQty ??
+      null,
+
+    reEtaDate:
+      x?.reEtaDate ??
+      x?.ReEtaDate ??
+      x?.['Re-ETA Date'] ??
+      x?.latestReEtaDate ??
+      x?.LatestReEtaDate ??
+      x?.proposedETA ??
+      x?.ProposedETA ??
+      null,
+  })) as PurchaseOrderItem[];
+
+  return { summary, pagination, items: normalizedItems };
 }
 
 const normalizeAttention = (v: AttentionRaw): AttentionNorm => {
@@ -199,13 +269,23 @@ const diffDaysFromToday = (date: Date): number => {
 
 const mapBackendStatusToDisplay = (status: string): string => {
   switch ((status || '').trim()) {
-    case 'Submitted': return 'PO Created';
-    case 'Work In Progress': return 'Work in Progress';
-    case 'On Delivery': return 'On Delivery';
-    case 'Partially Received': return 'Partially Received';
-    case 'Fully Received': return 'Fully Received';
-    default: return status || '-';
+    case 'Submitted':
+      return 'PO Created';
+    case 'Work In Progress':
+      return 'Work in Progress';
+    case 'On Delivery':
+      return 'On Delivery';
+    case 'Partially Received':
+    case 'Fully Received':
+      return 'Received';
+    default:
+      return status || '-';
   }
+};
+
+const isReceivedBackendStatus = (status: string): boolean => {
+  const s = (status || '').trim();
+  return s === 'Partially Received' || s === 'Fully Received';
 };
 
 const statusColor = (displayStatus: string) => {
@@ -213,13 +293,11 @@ const statusColor = (displayStatus: string) => {
     case 'PO Created': return '#ED832D';
     case 'Work in Progress': return '#5C8CB6';
     case 'On Delivery': return '#008383';
-    case 'Partially Received': return '#F59E0B';
-    case 'Fully Received': return '#6AA75D';
+    case 'Received': return '#6AA75D';
     default: return '#014357';
   }
 };
 
-// ---- Querystring helpers ----
 const getInitialAttentionFilterFromQuery = (): AttentionFilter => {
   if (typeof window === 'undefined') return null;
 
@@ -246,7 +324,6 @@ const syncAttractionQuery = (value: 1 | 2 | null) => {
   window.history.replaceState({}, '', url.toString());
 };
 
-// ---- Auth helpers ----
 const getAuthToken = (): string => {
   const local = localStorage.getItem('accessToken');
   const sessionToken = getAccessToken();
@@ -261,18 +338,19 @@ const buildAuthHeaders = (): HeadersInit => {
   };
 };
 
-// ---- Column defaults ----
 const vendorColumns: ColumnVis = {
   purchaseRequisition: false,
   itemOfRequisition: true,
   purchasingDocument: true,
   item: false,
   documentDate: false,
-  deliveryDate: true,
+  deliveryDate: false,
+  etaDate: true,
   purchasingDocType: false,
   purchasingGroup: false,
   shortText: true,
   material: true,
+  qtyOrder: true,
   nameOfSupplier: false,
   quantityReceived: false,
   stillToBeDelivered: false,
@@ -292,11 +370,13 @@ const internalColumns: ColumnVis = {
   purchasingDocument: true,
   item: true,
   documentDate: true,
-  deliveryDate: true,
+  deliveryDate: false,
+  etaDate: true,
   purchasingDocType: true,
   purchasingGroup: true,
   shortText: true,
   material: false,
+  qtyOrder: true,
   nameOfSupplier: true,
   quantityReceived: true,
   stillToBeDelivered: true,
@@ -321,10 +401,12 @@ const columnLabel = (k: ColumnKey, role: User['role']) => {
     item: 'Item',
     documentDate: 'Document Date',
     deliveryDate: 'Delivery Date',
+    etaDate: 'ETA Date',
     purchasingDocType: 'Purchasing Doc. Type',
     purchasingGroup: 'Purchasing Group',
     shortText: 'Short Text',
     material: 'Material',
+    qtyOrder: 'Qty Order',
     nameOfSupplier: 'Name of Supplier',
     quantityReceived: 'Qty Received',
     stillToBeDelivered: 'Still to be Delivered',
@@ -395,6 +477,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const [orders, setOrders] = useState<PurchaseOrderItem[]>([]);
   const [summary, setSummary] = useState<PurchaseOrderSummary | null>(null);
   const [cardSummary, setCardSummary] = useState<PurchaseOrderSummary | null>(null);
+  const [pagination, setPagination] = useState<PurchaseOrderPagination | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -406,6 +489,8 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStatusText, setUploadStatusText] = useState('');
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -425,6 +510,15 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const currentAttentionParam: 1 | 2 | null = useMemo(() => {
     return specialFilter ? ATTENTION_UI_TO_BACKEND[specialFilter] : null;
   }, [specialFilter]);
+
+  const resetUploadState = useCallback(() => {
+    setUploadFile(null);
+    setUploading(false);
+    setUploadProgress(0);
+    setUploadStatusText('');
+    setIsDragOver(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, []);
 
   const submitPoStatusUpdate = useCallback(
     async (payload: Record<string, unknown>) => {
@@ -479,7 +573,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     console.log('[PO] specialFilter from query =', specialFilter);
   }, [user.role, vendorName, specialFilter]);
 
-  const buildListUrl = useCallback((tab: StatusTab, attention: 1 | 2 | null) => {
+  const buildListUrl = useCallback((tab: StatusTab, attention: 1 | 2 | null, pageNumber: number, pageSize: number) => {
     const url = new URL(API.SUMMARYPO());
     const statusParam =
       tab === 'all' ? null : STATUS_TAB_TO_PARAM[tab as Exclude<StatusTab, 'all'>];
@@ -496,6 +590,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     if (user.role === 'vendor' && vendorName) {
       url.searchParams.set('vendorName', vendorName);
     }
+
+    url.searchParams.set('pageNumber', String(pageNumber));
+    url.searchParams.set('pageSize', String(pageSize));
 
     return url;
   }, [user.role, vendorName]);
@@ -531,20 +628,24 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     }
   }, [buildCardsUrl]);
 
-  const fetchPurchaseOrders = useCallback(async (tab: StatusTab, attention: 1 | 2 | null) => {
+  const fetchPurchaseOrders = useCallback(async (tab: StatusTab, attention: 1 | 2 | null, pageNumber: number, pageSize: number) => {
     setLoading(true);
     setLoadError(null);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 60_000);
 
-    const url = buildListUrl(tab, attention);
+    const effectiveTab: StatusTab = attention ? 'all' : tab;
+    const url = buildListUrl(effectiveTab, attention, pageNumber, pageSize);
 
     console.log('[PO] list request:', {
       url: url.toString(),
       tab,
+      effectiveTab,
       attention,
       vendorName,
+      pageNumber,
+      pageSize,
       headers: { hasAuth: !!getAuthToken() },
     });
 
@@ -572,8 +673,8 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       const unwrapped = unwrapPOPayload(json);
 
       setSummary(unwrapped.summary ?? null);
+      setPagination(unwrapped.pagination ?? null);
       setOrders(Array.isArray(unwrapped.items) ? unwrapped.items : []);
-      setCurrentPage(1);
     } catch (err: any) {
       console.error('[PO] list fetch failed:', err);
       const isAbort = err?.name === 'AbortError';
@@ -581,6 +682,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       setLoadError(isAbort ? 'Request timeout. Please try again.' : 'Failed to load purchase orders');
       setSummary(null);
       setOrders([]);
+      setPagination(null);
       toast.error(isAbort ? 'Request timeout' : 'Failed to load purchase orders');
     } finally {
       clearTimeout(timeout);
@@ -593,10 +695,29 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   }, [fetchCardSummary]);
 
   useEffect(() => {
-    fetchPurchaseOrders(activeTab, currentAttentionParam);
-  }, [activeTab, currentAttentionParam, fetchPurchaseOrders]);
+    fetchPurchaseOrders(activeTab, currentAttentionParam, currentPage, itemsPerPage);
+  }, [activeTab, currentAttentionParam, currentPage, itemsPerPage, fetchPurchaseOrders]);
 
-  const scopedOrders = useMemo(() => orders, [orders]);
+  const scopedOrders = useMemo(() => {
+    let list = orders;
+
+    if (activeTab === 'created') {
+      list = list.filter(o => mapBackendStatusToDisplay(o.status) === 'PO Created');
+    } else if (activeTab === 'wip') {
+      list = list.filter(o => mapBackendStatusToDisplay(o.status) === 'Work in Progress');
+    } else if (activeTab === 'delivery') {
+      list = list.filter(o => mapBackendStatusToDisplay(o.status) === 'On Delivery');
+    } else if (activeTab === 'received') {
+      list = list.filter(o => isReceivedBackendStatus(o.status) || mapBackendStatusToDisplay(o.status) === 'Received');
+    }
+
+    if (specialFilter) {
+      const attentionValue = ATTENTION_UI_TO_BACKEND[specialFilter];
+      list = list.filter(o => normalizeAttention(o.attention) === attentionValue);
+    }
+
+    return list;
+  }, [orders, activeTab, specialFilter]);
 
   const filterOptions = useMemo(() => {
     const uniq = (arr: (string | null | undefined)[]) =>
@@ -621,7 +742,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         (o.purchaseRequisition ?? '').toLowerCase().includes(q) ||
         (o.shortText ?? '').toLowerCase().includes(q) ||
         (o.nameOfSupplier ?? '').toLowerCase().includes(q) ||
-        (o.material ?? '').toLowerCase().includes(q)
+        (o.material ?? '').toLowerCase().includes(q) ||
+        (o.qtyOrder ?? '').toString().toLowerCase().includes(q) ||
+        (o.etaDate ?? '').toLowerCase().includes(q) ||
+        (o.reEtaDate ?? '').toLowerCase().includes(q)
       );
     }
 
@@ -674,26 +798,33 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     return orders.filter(o => normalizeAttention(o.attention) === 2).length;
   }, [cardSummary, orders]);
 
-  const {
-    pageOrders,
-    totalOrders,
-    totalPages,
-    startIndex,
-    endIndex,
-  } = useMemo(() => {
-    const total = filteredOrders.length;
-    const pages = Math.max(1, Math.ceil(total / itemsPerPage) || 1);
-    const start = (currentPage - 1) * itemsPerPage;
-    const end = start + itemsPerPage;
+  const receivedCount = useMemo(() => {
+    if (summary) {
+      return (summary.POPartiallyReceived ?? 0) + (summary.POFullyReceived ?? 0);
+    }
 
-    return {
-      pageOrders: filteredOrders.slice(start, end),
-      totalOrders: total,
-      totalPages: pages,
-      startIndex: start,
-      endIndex: end,
-    };
-  }, [filteredOrders, currentPage, itemsPerPage]);
+    return orders.filter(o => isReceivedBackendStatus(o.status)).length;
+  }, [summary, orders]);
+
+  const isServerPagination = pagination !== null;
+
+  const totalOrders = isServerPagination
+    ? pagination.totalFiltered
+    : filteredOrders.length;
+
+  const totalPages = isServerPagination
+    ? Math.max(1, pagination.totalPages)
+    : Math.max(1, Math.ceil(filteredOrders.length / itemsPerPage) || 1);
+
+  const pageOrders = isServerPagination
+    ? filteredOrders
+    : filteredOrders.slice(
+        (currentPage - 1) * itemsPerPage,
+        currentPage * itemsPerPage
+      );
+
+  const startIndex = totalOrders === 0 ? 0 : (currentPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + pageOrders.length, totalOrders);
 
   const hasActiveFilters = useMemo(() => !!(
     (filterStatus && filterStatus !== 'all') ||
@@ -808,7 +939,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       setUpdateRemarks('');
 
       await fetchCardSummary();
-      await fetchPurchaseOrders(activeTab, currentAttentionParam);
+      await fetchPurchaseOrders(activeTab, currentAttentionParam, currentPage, itemsPerPage);
     } catch (err: any) {
       console.error('[PO] submit delivery update failed', err);
       toast.error(err?.message || 'Failed to submit update');
@@ -823,6 +954,8 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     fetchPurchaseOrders,
     activeTab,
     currentAttentionParam,
+    currentPage,
+    itemsPerPage,
   ]);
 
   const clearFilters = useCallback(() => {
@@ -895,69 +1028,144 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     }
 
     setUploading(true);
+    setUploadProgress(0);
+    setUploadStatusText('Preparing upload...');
 
     try {
       const formData = new FormData();
       formData.append('file', uploadFile);
 
       const token = getAuthToken();
-      const headers: HeadersInit = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      const res = await fetch(API.IMPORT_PO(), {
-        method: 'POST',
-        headers,
-        body: formData,
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', API.IMPORT_PO(), true);
+
+        if (token) {
+          xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        }
+
+        xhr.upload.onloadstart = () => {
+          setUploadProgress(0);
+          setUploadStatusText('Starting upload...');
+        };
+
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const rawPercent = Math.round((event.loaded / event.total) * 100);
+            const percent = clampUploadProgress(rawPercent);
+            setUploadProgress(percent);
+            setUploadStatusText(`Uploading... ${percent}%`);
+          } else {
+            setUploadStatusText('Uploading...');
+          }
+        };
+
+        xhr.onreadystatechange = () => {
+          if (xhr.readyState === XMLHttpRequest.HEADERS_RECEIVED) {
+            setUploadProgress(99);
+            setUploadStatusText('Processing file on server...');
+          }
+        };
+
+        xhr.onerror = () => {
+          reject(new Error('Network error while uploading file'));
+        };
+
+        xhr.ontimeout = () => {
+          reject(new Error('Upload timeout'));
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            setUploadProgress(100);
+            setUploadStatusText('Upload completed');
+            resolve();
+            return;
+          }
+
+          let msg = `Upload failed (HTTP ${xhr.status})`;
+
+          try {
+            const json = JSON.parse(xhr.responseText);
+            if (json?.message || json?.Message || json?.error) {
+              msg = json.message || json.Message || json.error;
+            }
+          } catch {
+            if (xhr.responseText) {
+              msg = xhr.responseText;
+            }
+          }
+
+          reject(new Error(msg));
+        };
+
+        xhr.send(formData);
       });
 
-      if (!res.ok) {
-        let msg = `Upload failed (HTTP ${res.status})`;
-
-        try {
-          const text = await res.text();
-          const json = (() => {
-            try { return JSON.parse(text); } catch { return null; }
-          })();
-
-          if (json?.message || json?.Message || json?.error) {
-            msg = json.message || json.Message || json.error;
-          }
-        } catch {}
-
-        throw new Error(msg);
-      }
-
-      await res.json();
       toast.success('Purchase order data imported successfully');
 
+      setUploadProgress(100);
+      setUploadStatusText('Upload completed');
+
+      await new Promise((resolve) => setTimeout(resolve, 400));
+
+      setUploadStatusText('Refreshing data...');
+
       await fetchCardSummary();
-      await fetchPurchaseOrders(activeTab, currentAttentionParam);
+      await fetchPurchaseOrders(activeTab, currentAttentionParam, currentPage, itemsPerPage);
 
       setIsUploadDialogOpen(false);
-      setUploadFile(null);
+      resetUploadState();
     } catch (err: any) {
       console.error('[PO] import failed', err);
       toast.error(err?.message || 'Failed to import purchase order data');
+      setUploadStatusText('');
     } finally {
       setUploading(false);
     }
-  }, [uploadFile, fetchPurchaseOrders, fetchCardSummary, activeTab, currentAttentionParam]);
+  }, [
+    uploadFile,
+    fetchPurchaseOrders,
+    fetchCardSummary,
+    activeTab,
+    currentAttentionParam,
+    currentPage,
+    itemsPerPage,
+    resetUploadState,
+  ]);
 
   const handleDownloadTemplate = useCallback(() => {
     try {
       const me2nHeaders = [
-        'Purchase Requisition', 'Item of requisition', 'Purchasing Document', 'Item', 'Document Date',
-        'Delivery date', 'Purchasing Doc. Type', 'Purchasing Group', 'Short Text', 'Material',
-        'Name of Supplier', 'Quantity Received', 'Still to be delivered (qty)', 'Plant', 'Storage location'
+        'Purchase Requisition',
+        'Item of requisition',
+        'Purchasing Document',
+        'Item',
+        'Document Date',
+        'Delivery date',
+        'Purchasing Doc. Type',
+        'Purchasing Group',
+        'Short Text',
+        'Material',
+        'Qty Order',
+        'Name of Supplier',
+        'Quantity Received',
+        'Still to be delivered (qty)',
+        'Plant',
+        'Storage location',
+      ];
+
+      const zmm013rHeaders = [
+        'Purchase Order',
+        'Purchase Requisition',
+        'Purchase Order Item',
+        'GR Created Date',
       ];
 
       const me5aHeaders = [
         'Order', 'Changed On', 'Purchase order', 'Purchase Requisition', 'Item of requisition',
         'Material', 'Purchase Order Date', 'Created by'
-      ];
-
-      const zmm013rHeaders = [
-        'Purchase Order', 'Purchase Requisition', 'Purchase Order Item', 'GR Created Date'
       ];
 
       const wb = XLSX.utils.book_new();
@@ -982,8 +1190,8 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     try {
       const orderedKeys: ColumnKey[] = [
         'purchaseRequisition', 'itemOfRequisition', 'purchasingDocument', 'item', 'documentDate',
-        'deliveryDate', 'purchasingDocType', 'purchasingGroup', 'shortText', 'material',
-        'nameOfSupplier', 'quantityReceived', 'stillToBeDelivered', 'plant', 'storageLocation',
+        'deliveryDate', 'etaDate', 'purchasingDocType', 'purchasingGroup', 'shortText', 'material',
+        'qtyOrder', 'nameOfSupplier', 'quantityReceived', 'stillToBeDelivered', 'plant', 'storageLocation',
         'order', 'changedOn', 'grCreatedDate', 'remarks', 'reEtaDate', 'attention',
       ];
 
@@ -1051,11 +1259,13 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       mk('purchasingDocument', (o) => <span className="font-medium">{o.purchasingDocument}</span>),
       mk('item', (o) => o.item),
       mk('documentDate', (o) => <span className="text-sm text-gray-600">{o.documentDate}</span>),
-      mk('deliveryDate', (o) => <span className="text-sm text-gray-600">{o.deliveryDate}</span>),
+      mk('deliveryDate', (o) => <span className="text-sm text-gray-600">{o.deliveryDate || '-'}</span>),
+      mk('etaDate', (o) => <span className="text-sm text-gray-600">{o.etaDate || '-'}</span>),
       mk('purchasingDocType', (o) => o.purchasingDocType),
       mk('purchasingGroup', (o) => o.purchasingGroup),
       mk('shortText', (o) => <span className="max-w-xs truncate block">{o.shortText}</span>),
       mk('material', (o) => <span className="text-sm text-gray-600">{o.material}</span>),
+      mk('qtyOrder', (o) => <span className="text-right block">{o.qtyOrder || '-'}</span>),
       mk('nameOfSupplier', (o) => o.nameOfSupplier),
       mk('quantityReceived', (o) => <span className="text-right block">{o.quantityReceived}</span>),
       mk('stillToBeDelivered', (o) => <span className="text-right block">{o.stillToBeDelivered}</span>),
@@ -1351,22 +1561,14 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
             <Card className="flex-1 p-4">
               <div className="flex items-center gap-2 mb-2">
-                <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(245, 158, 11, 0.1)' }}>
-                  <CheckCircle2 className="h-4 w-4" style={{ color: '#F59E0B' }} />
-                </div>
-                <div className="text-gray-600 text-sm">Partially Received</div>
-              </div>
-              <div className="text-3xl" style={{ color: '#F59E0B' }}>{summary?.POPartiallyReceived ?? 0}</div>
-            </Card>
-
-            <Card className="flex-1 p-4">
-              <div className="flex items-center gap-2 mb-2">
                 <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(106, 167, 93, 0.1)' }}>
                   <CheckCircle2 className="h-4 w-4" style={{ color: '#6AA75D' }} />
                 </div>
-                <div className="text-gray-600 text-sm">Fully Received</div>
+                <div className="text-gray-600 text-sm">Received</div>
               </div>
-              <div className="text-3xl" style={{ color: '#6AA75D' }}>{summary?.POFullyReceived ?? 0}</div>
+              <div className="text-3xl" style={{ color: '#6AA75D' }}>
+                {receivedCount}
+              </div>
             </Card>
           </div>
 
@@ -1378,7 +1580,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
               </div>
 
               <p className="text-sm text-gray-600 mb-4">
-                These orders have an ETA date within 2 days. Please provide updates on their delivery status.
+                These orders have a Re-ETA Date within 2 days. Please provide updates on their delivery status.
               </p>
 
               <div className="overflow-x-auto">
@@ -1387,8 +1589,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                     <TableRow>
                       <TableHead>Purchasing Document</TableHead>
                       <TableHead>Short Text</TableHead>
+                      <TableHead>ETA Date</TableHead>
                       <TableHead>Re-ETA Date</TableHead>
-                      <TableHead>Days Until ETA</TableHead>
+                      <TableHead>Days Until Re-ETA</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Action</TableHead>
                     </TableRow>
@@ -1404,6 +1607,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         <TableRow key={`${getOrderKey(o)}-${idx}`}>
                           <TableCell className="font-medium">{o.purchasingDocument}</TableCell>
                           <TableCell>{o.shortText}</TableCell>
+                          <TableCell>{o.etaDate || '-'}</TableCell>
                           <TableCell>{o.reEtaDate || '-'}</TableCell>
                           <TableCell>
                             {diffDays === null ? (
@@ -1448,8 +1652,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                 <TabsTrigger value="created">PO Created</TabsTrigger>
                 <TabsTrigger value="wip">Work in Progress</TabsTrigger>
                 <TabsTrigger value="delivery">On Delivery</TabsTrigger>
-                <TabsTrigger value="partially">Partially Received</TabsTrigger>
-                <TabsTrigger value="delivered">Fully Received</TabsTrigger>
+                <TabsTrigger value="received">Received</TabsTrigger>
               </TabsList>
 
               <div className="flex gap-2">
@@ -1540,8 +1743,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                             <SelectItem value="PO Created">PO Created</SelectItem>
                             <SelectItem value="Work in Progress">Work in Progress</SelectItem>
                             <SelectItem value="On Delivery">On Delivery</SelectItem>
-                            <SelectItem value="Partially Received">Partially Received</SelectItem>
-                            <SelectItem value="Fully Received">Fully Received</SelectItem>
+                            <SelectItem value="Received">Received</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -1631,8 +1833,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             <TabsContent value="created">{renderTable()}</TabsContent>
             <TabsContent value="wip">{renderTable()}</TabsContent>
             <TabsContent value="delivery">{renderTable()}</TabsContent>
-            <TabsContent value="partially">{renderTable()}</TabsContent>
-            <TabsContent value="delivered">{renderTable()}</TabsContent>
+            <TabsContent value="received">{renderTable()}</TabsContent>
           </Tabs>
 
           <Dialog open={isUpdateDialogOpen} onOpenChange={setIsUpdateDialogOpen}>
@@ -1682,8 +1883,18 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           </div>
 
                           <div>
+                            <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">ETA Date</p>
+                            <p className="text-sm">{orderToUpdate.etaDate || 'N/A'}</p>
+                          </div>
+
+                          <div>
                             <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Re-ETA Date</p>
                             <p className="text-sm">{orderToUpdate.reEtaDate || 'N/A'}</p>
+                          </div>
+
+                          <div>
+                            <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Qty Order</p>
+                            <p className="text-sm">{orderToUpdate.qtyOrder || 'N/A'}</p>
                           </div>
 
                           <div>
@@ -1735,9 +1946,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             onOpenChange={(open) => {
               setIsUploadDialogOpen(open);
               if (!open) {
-                setUploadFile(null);
-                setIsDragOver(false);
-                if (fileInputRef.current) fileInputRef.current.value = '';
+                resetUploadState();
               }
             }}
           >
@@ -1753,21 +1962,27 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                 <Label>Excel File (.xlsx / .xls)</Label>
 
                 <div
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={() => !uploading && fileInputRef.current?.click()}
                   onDragOver={(e) => {
+                    if (uploading) return;
                     e.preventDefault();
                     e.stopPropagation();
                     setIsDragOver(true);
                   }}
                   onDragLeave={(e) => {
+                    if (uploading) return;
                     e.preventDefault();
                     e.stopPropagation();
                     setIsDragOver(false);
                   }}
-                  onDrop={handleDrop}
+                  onDrop={(e) => {
+                    if (uploading) return;
+                    handleDrop(e);
+                  }}
                   className={[
-                    'border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition',
+                    'border-2 border-dashed rounded-lg p-6 text-center transition',
                     'flex flex-col items-center justify-center gap-2',
+                    uploading ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer',
                     isDragOver
                       ? 'border-[#014357] bg-slate-50'
                       : 'border-slate-300 bg-slate-50/40 hover:border-[#014357]/70 hover:bg-slate-50',
@@ -1809,6 +2024,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       variant="ghost"
                       size="icon"
                       className="h-6 w-6"
+                      disabled={uploading}
                       onClick={() => {
                         setUploadFile(null);
                         if (fileInputRef.current) fileInputRef.current.value = '';
@@ -1816,6 +2032,27 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                     >
                       <X className="h-3 w-3" />
                     </Button>
+                  </div>
+                )}
+
+                {uploading && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-gray-600">{uploadStatusText || 'Uploading...'}</span>
+                      <span className="font-medium" style={{ color: '#014357' }}>
+                        {uploadProgress}%
+                      </span>
+                    </div>
+
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
+                      <div
+                        className="h-full rounded-full transition-all duration-300"
+                        style={{
+                          width: `${uploadProgress}%`,
+                          backgroundColor: '#014357',
+                        }}
+                      />
+                    </div>
                   </div>
                 )}
               </div>
@@ -1833,7 +2070,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   style={{ backgroundColor: '#014357' }}
                   className="text-white hover:opacity-90"
                   onClick={handleSubmitUploadPO}
-                  disabled={uploading}
+                  disabled={uploading || !uploadFile}
                 >
                   {uploading ? 'Uploading...' : 'Upload'}
                 </Button>
