@@ -39,7 +39,21 @@ namespace EXPOAPI.Controllers
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+<<<<<<< Updated upstream
         public async Task<IActionResult> Summary([FromQuery] string? status,int? Attraction, CancellationToken ct)
+=======
+        public async Task<IActionResult> Summary(
+     [FromQuery] string? status,
+     [FromQuery] int? attention,
+     [FromQuery] string? vendorName,
+     [FromQuery] string? plant,
+     [FromQuery] string? storageLocation,
+     [FromQuery] string? purchasingGroup,
+     [FromQuery] string? purchasingDocType,
+     [FromQuery] int? pageNumber,
+     [FromQuery] int? pageSize,
+     CancellationToken ct)
+>>>>>>> Stashed changes
         {
             var spParams = new Dictionary<string, object?>();
 
@@ -64,7 +78,61 @@ namespace EXPOAPI.Controllers
                     return BadRequestResponse("invalid attention value. Allowed values: 1 (Need Update), 2 (Overdue)");
                 }
 
+<<<<<<< Updated upstream
                 spParams["Attention"] = Attraction.Value; // ✅ matches SP param name
+=======
+                spParams["Attention"] = attention.Value;
+            }
+
+            if (!string.IsNullOrWhiteSpace(vendorName))
+            {
+                spParams["VendorName"] = vendorName.Trim();
+            }
+
+            if (!string.IsNullOrWhiteSpace(plant))
+            {
+                spParams["Plant"] = plant.Trim();
+            }
+
+            if (!string.IsNullOrWhiteSpace(storageLocation))
+            {
+                spParams["StorageLocation"] = storageLocation.Trim();
+            }
+
+            if (!string.IsNullOrWhiteSpace(purchasingGroup))
+            {
+                spParams["PurchasingGroup"] = purchasingGroup.Trim();
+            }
+
+            if (!string.IsNullOrWhiteSpace(purchasingDocType))
+            {
+                spParams["PurchasingDocType"] = purchasingDocType.Trim();
+            }
+
+            if (pageNumber.HasValue)
+            {
+                if (pageNumber.Value < 1)
+                {
+                    return BadRequestResponse("invalid pageNumber. Minimum value is 1.");
+                }
+
+                spParams["PageNumber"] = pageNumber.Value;
+            }
+
+            if (pageSize.HasValue)
+            {
+                if (pageSize.Value < 1)
+                {
+                    return BadRequestResponse("invalid pageSize. Minimum value is 1.");
+                }
+
+                if (pageSize.Value > 1000)
+                {
+                    return BadRequestResponse("invalid pageSize. Maximum value is 1000.");
+                }
+
+                spParams["PageSize"] = pageSize.Value;
+>>>>>>> Stashed changes
             }
 
             try
@@ -75,6 +143,63 @@ namespace EXPOAPI.Controllers
             catch (Exception ex)
             {
                 return ServerErrorResponse($"failed to fetch purchase order summary: {ex.Message}");
+            }
+        }
+
+        [HttpGet("master")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> Master(
+    [FromQuery] string? status,
+    [FromQuery] int? attention,
+    [FromQuery] string? vendorName,
+    CancellationToken ct)
+        {
+            string? mappedStatus = null;
+
+            if (!string.IsNullOrWhiteSpace(status))
+            {
+                var key = status.Trim();
+
+                if (!StatusMap.TryGetValue(key, out var mapped))
+                {
+                    return BadRequestResponse(
+                        "invalid status value. Allowed values: submitted, workInProgress, onDelivery, partiallyReceived, fullyReceived"
+                    );
+                }
+
+                mappedStatus = mapped;
+            }
+
+            if (attention.HasValue)
+            {
+                if (attention.Value != 1 && attention.Value != 2)
+                {
+                    return BadRequestResponse(
+                        "invalid attention value. Allowed values: 1 (Need Update), 2 (Overdue)"
+                    );
+                }
+            }
+
+            try
+            {
+                var data = await _po.GetPurchaseOrderMasterAsync(
+                    mappedStatus,
+                    attention,
+                    string.IsNullOrWhiteSpace(vendorName) ? null : vendorName.Trim(),
+                    ct
+                );
+
+                return OkResponse("purchase order master retrieved", data);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return ServerErrorResponse($"failed to fetch purchase order master: {ex.Message}");
             }
         }
 
