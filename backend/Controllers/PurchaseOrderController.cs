@@ -194,18 +194,17 @@ namespace EXPOAPI.Controllers
         public async Task<IActionResult> Detail([FromRoute] string poid, CancellationToken ct)
         {
             if (string.IsNullOrWhiteSpace(poid))
-            {
                 return BadRequestResponse("POID is required");
-            }
 
             try
             {
-                var (statusFlow, reEtaRequests) = await _po.GetPurchaseOrderDetailAsync(poid.Trim(), ct);
+                var (statusFlow, reEtaRequests, poDetail) = await _po.GetPurchaseOrderDetailAsync(poid, ct);
 
                 return OkResponse("purchase order detail retrieved", new
                 {
                     StatusFlow = statusFlow,
-                    ReEtaRequests = reEtaRequests
+                    ReEtaRequests = reEtaRequests,
+                    PoDetail = poDetail
                 });
             }
             catch (OperationCanceledException)

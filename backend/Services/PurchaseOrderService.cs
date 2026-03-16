@@ -232,11 +232,21 @@ namespace EXPOAPI.Services
         // ------------------------------------------------------------
         // PurchaseOrderDetail_SP -> 2 result sets: statusFlow + reEtaRequests
         // ------------------------------------------------------------
-        public async Task<(List<Dictionary<string, object?>> StatusFlow, List<Dictionary<string, object?>> ReEtaRequests)>
-            GetPurchaseOrderDetailAsync(string poid, CancellationToken ct = default)
+        public async Task<(
+       List<Dictionary<string, object?>> StatusFlow,
+       List<Dictionary<string, object?>> ReEtaRequests,
+       Dictionary<string, object?>? PoDetail
+   )> GetPurchaseOrderDetailAsync(string poid, CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(poid))
-                return (new List<Dictionary<string, object?>>(), new List<Dictionary<string, object?>>());
+            {
+                return
+                (
+                    new List<Dictionary<string, object?>>(),
+                    new List<Dictionary<string, object?>>(),
+                    null
+                );
+            }
 
             using var cn = _db.CreateMain();
 
@@ -249,15 +259,29 @@ namespace EXPOAPI.Services
                     cancellationToken: ct
                 ));
 
-                var statusFlow = (await grid.ReadAsync<dynamic>()).Select(ToDict).ToList();
-                var reEtaRequests = (await grid.ReadAsync<dynamic>()).Select(ToDict).ToList();
+                var statusFlow = (await grid.ReadAsync<dynamic>())
+                    .Select(ToDict)
+                    .ToList();
 
-                return (statusFlow, reEtaRequests);
+                var reEtaRequests = (await grid.ReadAsync<dynamic>())
+                    .Select(ToDict)
+                    .ToList();
+
+                var poDetailRaw = await grid.ReadFirstOrDefaultAsync<dynamic>();
+                var poDetail = poDetailRaw is null ? null : ToDict(poDetailRaw);
+
+                return (statusFlow, reEtaRequests, poDetail);
             }
-            catch (OperationCanceledException) { throw; }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (SqlException ex)
             {
-                throw new InvalidOperationException($"DB error executing {SP_PO_DETAIL}: {ex.Message}", ex);
+                throw new InvalidOperationException(
+                    $"DB error executing {SP_PO_DETAIL}: {ex.Message}",
+                    ex
+                );
             }
         }
 
