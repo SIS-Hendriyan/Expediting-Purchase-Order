@@ -2,7 +2,15 @@
 {
     public interface IPurchaseOrderService
     {
-        Task<Dictionary<string, object?>> GetPurchaseOrdersAsync(Dictionary<string, object?>? parameters = null, CancellationToken ct = default);
+        Task<Dictionary<string, object?>> GetPurchaseOrderSummaryAsync(Dictionary<string, object?>? parameters = null, CancellationToken ct = default);
+        Task<Dictionary<string, object?>> GetPurchaseOrderMasterAsync(
+         string? status = null,
+         int? attention = null,
+         string? vendorName = null,
+         CancellationToken ct = default
+     );
+
+        //Task<Dictionary<string, object?>> GetPurchaseOrdersAsync(Dictionary<string, object?>? parameters = null, CancellationToken ct = default);
 
         Task<Dictionary<string, object?>> GetPoDashboardSummaryAsync(
             DateTime? startDate = null,
@@ -63,7 +71,7 @@
            int pageSize = 50,
            bool eligibleOnly = true,
            CancellationToken ct = default);
-    
+
 
         Task<Dictionary<string, object?>> GetPoDashboardMasterfiltersAsync(CancellationToken ct = default);
 

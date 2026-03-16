@@ -18,7 +18,6 @@ namespace EXPOAPI.Controllers
         private readonly IPurchaseOrderService _po;
         private readonly IPurchaseOrderImportService _import;
 
-        // status mapping sama seperti Python
         private static readonly Dictionary<string, string> StatusMap = new(StringComparer.OrdinalIgnoreCase)
         {
             ["submitted"] = "Submitted",
@@ -28,7 +27,9 @@ namespace EXPOAPI.Controllers
             ["fullyReceived"] = "Fully Received",
         };
 
-        public PurchaseOrderController(IPurchaseOrderService po, IPurchaseOrderImportService import)
+        public PurchaseOrderController(
+            IPurchaseOrderService po,
+            IPurchaseOrderImportService import)
         {
             _po = po ?? throw new ArgumentNullException(nameof(po));
             _import = import ?? throw new ArgumentNullException(nameof(import));
@@ -40,32 +41,34 @@ namespace EXPOAPI.Controllers
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> Summary(
-    [FromQuery] string? status,
-    [FromQuery] int? attention,
-    [FromQuery] string? vendorName,
-    [FromQuery] int? pageNumber,
-    [FromQuery] int? pageSize,
-    CancellationToken ct)
+            [FromQuery] string? status,
+            [FromQuery] int? attention,
+            [FromQuery] string? vendorName,
+            [FromQuery] string? plant,
+            [FromQuery] string? storageLocation,
+            [FromQuery] string? purchasingGroup,
+            [FromQuery] string? purchasingDocType,
+            [FromQuery] int? pageNumber,
+            [FromQuery] int? pageSize,
+            CancellationToken ct)
         {
             var spParams = new Dictionary<string, object?>();
 
             if (!string.IsNullOrWhiteSpace(status))
             {
-                var key = status.Trim();
-
-                if (!StatusMap.TryGetValue(key, out var mapped))
+                if (!TryMapStatus(status, out var mappedStatus))
                 {
                     return BadRequestResponse(
-                        "invalid status value. Allowed values: submitted, workInProgress, onDelivery, fullyReceived"
+                        "invalid status value. Allowed values: submitted, workInProgress, onDelivery, partiallyReceived, fullyReceived"
                     );
                 }
 
-                spParams["Status"] = mapped;
+                spParams["Status"] = mappedStatus;
             }
 
             if (attention.HasValue)
             {
-                if (attention.Value != 1 && attention.Value != 2)
+                if (!IsValidAttention(attention.Value))
                 {
                     return BadRequestResponse(
                         "invalid attention value. Allowed values: 1 (Need Update), 2 (Overdue)"
@@ -76,9 +79,19 @@ namespace EXPOAPI.Controllers
             }
 
             if (!string.IsNullOrWhiteSpace(vendorName))
-            {
                 spParams["VendorName"] = vendorName.Trim();
-            }
+
+            if (!string.IsNullOrWhiteSpace(plant))
+                spParams["Plant"] = plant.Trim();
+
+            if (!string.IsNullOrWhiteSpace(storageLocation))
+                spParams["StorageLocation"] = storageLocation.Trim();
+
+            if (!string.IsNullOrWhiteSpace(purchasingGroup))
+                spParams["PurchasingGroup"] = purchasingGroup.Trim();
+
+            if (!string.IsNullOrWhiteSpace(purchasingDocType))
+                spParams["PurchasingDocType"] = purchasingDocType.Trim();
 
             if (pageNumber.HasValue)
             {
@@ -107,7 +120,7 @@ namespace EXPOAPI.Controllers
 
             try
             {
-                var data = await _po.GetPurchaseOrdersAsync(spParams, ct);
+                var data = await _po.GetPurchaseOrderSummaryAsync(spParams, ct);
                 return OkResponse("purchase order summary retrieved", data);
             }
             catch (OperationCanceledException)
@@ -120,6 +133,59 @@ namespace EXPOAPI.Controllers
             }
         }
 
+        // GET /api/purchase-order/master
+        [HttpGet("master")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> Master(
+            [FromQuery] string? status,
+            [FromQuery] int? attention,
+            [FromQuery] string? vendorName,
+            CancellationToken ct)
+        {
+            string? mappedStatus = null;
+
+            if (!string.IsNullOrWhiteSpace(status))
+            {
+                if (!TryMapStatus(status, out var statusValue))
+                {
+                    return BadRequestResponse(
+                        "invalid status value. Allowed values: submitted, workInProgress, onDelivery, partiallyReceived, fullyReceived"
+                    );
+                }
+
+                mappedStatus = statusValue;
+            }
+
+            if (attention.HasValue && !IsValidAttention(attention.Value))
+            {
+                return BadRequestResponse(
+                    "invalid attention value. Allowed values: 1 (Need Update), 2 (Overdue)"
+                );
+            }
+
+            try
+            {
+                var data = await _po.GetPurchaseOrderMasterAsync(
+                    mappedStatus,
+                    attention,
+                    Normalize(vendorName),
+                    ct
+                );
+
+                return OkResponse("purchase order master retrieved", data);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return ServerErrorResponse($"failed to fetch purchase order master: {ex.Message}");
+            }
+        }
+
         // GET /api/purchase-order/{poid}/detail
         [HttpGet("{poid}/detail")]
         [ProducesResponseType(StatusCodes.Status200OK)]
@@ -128,17 +194,18 @@ namespace EXPOAPI.Controllers
         public async Task<IActionResult> Detail([FromRoute] string poid, CancellationToken ct)
         {
             if (string.IsNullOrWhiteSpace(poid))
+            {
                 return BadRequestResponse("POID is required");
+            }
 
             try
             {
-                var (statusFlow, reEtaRequests, poDetail) = await _po.GetPurchaseOrderDetailAsync(poid, ct);
+                var (statusFlow, reEtaRequests) = await _po.GetPurchaseOrderDetailAsync(poid.Trim(), ct);
 
                 return OkResponse("purchase order detail retrieved", new
                 {
                     StatusFlow = statusFlow,
-                    ReEtaRequests = reEtaRequests,
-                    PoDetail = poDetail
+                    ReEtaRequests = reEtaRequests
                 });
             }
             catch (OperationCanceledException)
@@ -150,8 +217,11 @@ namespace EXPOAPI.Controllers
                 return ServerErrorResponse($"failed to fetch purchase order detail: {ex.Message}");
             }
         }
+
         // GET /api/purchase-order/items
         [HttpGet("items")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> Items(
             [FromQuery] string? poNumber,
             [FromQuery] string? status,
@@ -165,12 +235,30 @@ namespace EXPOAPI.Controllers
         {
             try
             {
-                var data = await _po.GetPurchaseOrderItemsAsync(poNumber, status, attention, vendor, q, page, pageSize, eligibleOnly, ct);
+                var data = await _po.GetPurchaseOrderItemsAsync(
+                    poNumber,
+                    status,
+                    attention,
+                    vendor,
+                    q,
+                    page,
+                    pageSize,
+                    eligibleOnly,
+                    ct
+                );
+
                 return Ok(ApiResponse.Ok("purchase order items retrieved", data, 200));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
-                return StatusCode(500, ApiResponse.Fail($"failed to fetch purchase order items: {ex.Message}", 500, null));
+                return StatusCode(
+                    StatusCodes.Status500InternalServerError,
+                    ApiResponse.Fail($"failed to fetch purchase order items: {ex.Message}", 500, null)
+                );
             }
         }
 
@@ -180,12 +268,16 @@ namespace EXPOAPI.Controllers
         [ProducesResponseType(StatusCodes.Status201Created)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> Import([FromForm] PurchaseOrderImportRequest request, CancellationToken ct)
+        public async Task<IActionResult> Import(
+            [FromForm] PurchaseOrderImportRequest request,
+            CancellationToken ct)
         {
             var file = request?.File;
 
             if (file == null || file.Length == 0)
+            {
                 return BadRequestResponse("file is required");
+            }
 
             try
             {
@@ -200,6 +292,10 @@ namespace EXPOAPI.Controllers
             {
                 return BadRequestResponse(ex.Message);
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 return ServerErrorResponse($"failed to import purchase order data: {ex.Message}");
@@ -207,22 +303,40 @@ namespace EXPOAPI.Controllers
         }
 
         // =========================================================
-        // Response helpers (responseCode ikut HTTP status)
+        // Helpers
         // =========================================================
+        private static bool TryMapStatus(string rawStatus, out string mappedStatus)
+        {
+            mappedStatus = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(rawStatus))
+                return false;
+
+            return StatusMap.TryGetValue(rawStatus.Trim(), out mappedStatus!);
+        }
+
+        private static bool IsValidAttention(int attention)
+            => attention == 1 || attention == 2;
+
+        private static string? Normalize(string? value)
+            => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
         private IActionResult OkResponse(string message, object? data)
-            => Ok(ApiResponse.Ok(message, data, 200));
+            => Ok(ApiResponse.Ok(message, data, StatusCodes.Status200OK));
 
         private IActionResult CreatedResponse(string message, object? data)
-            => StatusCode(StatusCodes.Status201Created, ApiResponse.Ok(message, data, 201));
+            => StatusCode(StatusCodes.Status201Created, ApiResponse.Ok(message, data, StatusCodes.Status201Created));
 
         private IActionResult BadRequestResponse(string message, object? data = null)
-            => BadRequest(ApiResponse.Fail(message, 400, data));
+            => BadRequest(ApiResponse.Fail(message, StatusCodes.Status400BadRequest, data));
 
         private IActionResult ServerErrorResponse(string message, object? data = null)
-            => StatusCode(StatusCodes.Status500InternalServerError, ApiResponse.Fail(message, 500, data));
+            => StatusCode(
+                StatusCodes.Status500InternalServerError,
+                ApiResponse.Fail(message, StatusCodes.Status500InternalServerError, data)
+            );
     }
 
-    // DTO untuk Swagger multipart/form-data
     public sealed class PurchaseOrderImportRequest
     {
         [FromForm(Name = "file")]
