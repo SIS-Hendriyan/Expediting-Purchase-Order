@@ -18,6 +18,7 @@ export const API = {
     ACCESSVENDOR: (id: number | string) => `${CONFIG.apiBaseUrl}/api/vendor/${id}/access`, // POST
     IMPORT_PO: () => `${CONFIG.apiBaseUrl}/api/purchase-order/import`,
     DETAILPO: (poid: number | string) => `${CONFIG.apiBaseUrl}/api/purchase-order/${poid}/detail`,
+    MASTERPO: () => `${CONFIG.apiBaseUrl}/api/purchase-order/master`,
     // Re-ETA
 REETA_LIST: () => `${CONFIG.apiBaseUrl}/api/re-eta/requests`,
 REETA_DETAIL: (id: number | string) => `${CONFIG.apiBaseUrl}/api/re-eta/requests/${id}`,
@@ -47,4 +48,7 @@ PO_ITEMS: () => `${CONFIG.apiBaseUrl}/api/purchase-order/items`,
     `${CONFIG.apiBaseUrl}/api/dashboard/master-filters`,
 
   POSTATUS_UPSERT: () => `${CONFIG.apiBaseUrl}/api/PoStatus/upsert`,
+  POSTATUS_DETAIL: (idPoItem: number | string) => `${CONFIG.apiBaseUrl}/api/PoStatus/${idPoItem}`,
+POSTATUS_LIST: () => `${CONFIG.apiBaseUrl}/api/PoStatus`,
+POSTATUS_ON_DELIVERY: () => `${CONFIG.apiBaseUrl}/api/PoStatus/on-delivery`,
 };

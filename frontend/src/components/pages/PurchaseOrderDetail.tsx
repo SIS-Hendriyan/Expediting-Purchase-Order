@@ -3,6 +3,7 @@ import { format } from 'date-fns';
 import {
   AlertCircle,
   ArrowLeft,
+  ArrowRight,
   Calendar,
   Download,
   FileText,
@@ -39,6 +40,7 @@ interface PurchaseOrderDetailProps {
   user: User;
   orderId: string;
   onBack: () => void;
+  onRefreshPurchaseOrders?: () => Promise<void> | void;
 }
 
 type FlowStatus =
@@ -110,12 +112,15 @@ type PoDetail = {
   Material?: string | null;
   ['Document Date']?: string | null;
   ['Delivery date']?: string | null;
+  DeliveryDate?: string | null;
   ['Purchasing Doc. Type']?: string | null;
   ['Purchasing Group']?: string | null;
   MaterialDescription?: string | null;
   VendorName?: string | null;
   ['Quantity Received']?: string | number | null;
   StillToBeDeliveredQty?: string | number | null;
+  ['Qty Order']?: string | number | null;
+  QtyOrder?: string | number | null;
   Plant?: string | null;
   ['Storage location']?: string | null;
   ['Changed On']?: string | null;
@@ -132,6 +137,11 @@ type PoDetail = {
   WIPRemark?: string | null;
   AWB?: string | null;
   ['Delivery Update']?: string | null;
+
+  AWBFileName?: string | null;
+  AWBContentType?: string | null;
+  AWBBase64Data?: string | null;
+  FinalActualDeliveryDate?: string | null;
 };
 
 type DetailData = {
@@ -153,8 +163,26 @@ type StatusCardData = {
   etaDate: Date | null;
   etaDays: string;
   remarks: string;
+  reEtaDate: Date | null;
 };
 
+type StatusRelatedInformationProps = {
+  status: FlowStatus;
+  poDetail: PoDetail | null;
+  onDownloadAwbFile?: () => void;
+};
+
+type StatusFlowHistoryProps = {
+  status: FlowStatus;
+  statusHistory: Record<string, string>;
+};
+
+type ValidationNoticeProps = {
+  title: string;
+  description: string;
+  actionLabel?: string;
+  onAction?: () => void;
+};
 
 // ===================== Constants =====================
 const FLOW_ORDER: FlowStatus[] = [
@@ -167,6 +195,16 @@ const FLOW_ORDER: FlowStatus[] = [
 
 const STATUS_LINE_TOP = 24;
 
+const ETA_DELIVERY_DATE_ERROR =
+  'The ETA date cannot be later than the PO delivery date. Please create a Reschedule ETA request first.';
+
+const warningPalette = {
+  border: '#F59E0B',
+  background: '#FFF7ED',
+  text: '#9A3412',
+  icon: '#D97706',
+};
+
 // ===================== Auth =====================
 const getAuthToken = (): string => {
   const local = localStorage.getItem('accessToken');
@@ -178,6 +216,13 @@ const buildAuthHeaders = (): HeadersInit => {
   const token = getAuthToken();
   return {
     'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+};
+
+const buildMultipartAuthHeaders = (): HeadersInit => {
+  const token = getAuthToken();
+  return {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 };
@@ -208,6 +253,12 @@ const toIsoDateTime = (v?: Date | null): string | null => {
   return v.toISOString();
 };
 
+const toNumberOrZero = (value: unknown): number => {
+  if (value === null || value === undefined || value === '') return 0;
+  const n = Number(value);
+  return Number.isNaN(n) ? 0 : n;
+};
+
 const formatDate = (dateString: string): string => {
   const d = new Date(dateString);
   if (Number.isNaN(d.getTime())) return '-';
@@ -224,6 +275,31 @@ const formatDateTime = (dateTimeString: string): string => {
     hour: '2-digit',
     minute: '2-digit',
   });
+};
+
+const getOrdinalSuffix = (day: number): string => {
+  if (day >= 11 && day <= 13) return 'th';
+
+  switch (day % 10) {
+    case 1:
+      return 'st';
+    case 2:
+      return 'nd';
+    case 3:
+      return 'rd';
+    default:
+      return 'th';
+  }
+};
+
+const formatDateWithOrdinal = (value?: string | number | Date | null): string => {
+  if (!value) return '-';
+
+  const d = value instanceof Date ? value : parseServerDate(value as any);
+  if (!d || Number.isNaN(d.getTime())) return '-';
+
+  const day = d.getDate();
+  return `${d.toLocaleDateString('en-US', { month: 'long' })} ${day}${getOrdinalSuffix(day)}, ${d.getFullYear()}`;
 };
 
 const mapFlowStatus = (backendStatus?: string | null): FlowStatus | null => {
@@ -498,20 +574,126 @@ const resolveStatusCardData = (poDetail: PoDetail | null): StatusCardData => {
   const etaDate = parseServerDate(poDetail?.CurrentEta) ?? null;
   const etaDays = trim(poDetail?.CurrentETADays);
   const remarks = trim(poDetail?.['WIP Remark'] ?? poDetail?.WIPRemark) || '-';
+  const reEtaDate = parseServerDate(poDetail?.DeliveryDate ?? poDetail?.['Delivery date']) ?? null;
 
   return {
     etd,
     etaDate,
     etaDays,
     remarks,
+    reEtaDate,
   };
 };
 
-// ===================== UI =====================
-type StatusFlowHistoryProps = {
-  status: FlowStatus;
-  statusHistory: Record<string, string>;
+const getBase64MimeType = (base64?: string | null): string => {
+  const raw = trim(base64);
+  if (!raw) return 'application/octet-stream';
+
+  const match = raw.match(/^data:(.*?);base64,/i);
+  if (match?.[1]) return match[1];
+
+  if (raw.startsWith('JVBER')) return 'application/pdf';
+  if (raw.startsWith('/9j/')) return 'image/jpeg';
+  if (raw.startsWith('iVBOR')) return 'image/png';
+  if (raw.startsWith('UklGR')) return 'image/webp';
+
+  return 'application/octet-stream';
 };
+
+const base64ToBlob = (base64: string, contentType?: string | null): Blob | null => {
+  const raw = trim(base64);
+  if (!raw) return null;
+
+  const normalized = raw.startsWith('data:')
+    ? raw
+    : `data:${trim(contentType) || getBase64MimeType(raw)};base64,${raw}`;
+
+  const parts = normalized.split(',');
+  if (parts.length < 2) return null;
+
+  const mimeMatch = parts[0].match(/data:(.*?);base64/i);
+  const mime = mimeMatch?.[1] || trim(contentType) || 'application/octet-stream';
+
+  try {
+    const byteString = atob(parts[1]);
+    const byteNumbers = new Array(byteString.length);
+
+    for (let i = 0; i < byteString.length; i++) {
+      byteNumbers[i] = byteString.charCodeAt(i);
+    }
+
+    return new Blob([new Uint8Array(byteNumbers)], { type: mime });
+  } catch {
+    return null;
+  }
+};
+
+const downloadBase64File = (base64: string, fileName: string, contentType?: string | null) => {
+  const blob = base64ToBlob(base64, contentType);
+  if (!blob) return;
+
+  const blobUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+};
+
+// ===================== UI =====================
+function ValidationNotice({
+  title,
+  description,
+  actionLabel,
+  onAction,
+}: ValidationNoticeProps) {
+  return (
+    <Alert
+      className="mt-2 rounded-xl border px-4 py-3"
+      style={{
+        borderColor: warningPalette.border,
+        backgroundColor: warningPalette.background,
+      }}
+    >
+      <AlertCircle
+        className="mt-0.5 h-4 w-4 flex-shrink-0"
+        style={{ color: warningPalette.icon }}
+      />
+
+      <AlertDescription className="w-full justify-items-stretch gap-3">
+        <div className="flex w-full flex-col gap-3">
+          <div className="flex w-full min-w-0 items-start gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold" style={{ color: warningPalette.text }}>
+                {title}
+              </p>
+              <p className="mt-0.5 text-sm leading-6" style={{ color: warningPalette.text }}>
+                {description}
+              </p>
+            </div>
+          </div>
+
+          {actionLabel && onAction && (
+            <div className="w-full text-right">
+              <button
+                type="button"
+                onClick={onAction}
+                className="inline-flex items-center gap-2 text-sm font-semibold underline underline-offset-4 transition-opacity hover:opacity-80"
+                style={{ color: '#B45309' }}
+              >
+                <span>{actionLabel}</span>
+                <ArrowRight className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+        </div>
+      </AlertDescription>
+    </Alert>
+  );
+}
 
 function StatusFlowHistory({ status, statusHistory }: StatusFlowHistoryProps) {
   const n = FLOW_ORDER.length;
@@ -608,22 +790,19 @@ function StatusFlowHistory({ status, statusHistory }: StatusFlowHistoryProps) {
       </div>
     </Card>
   );
-}type StatusRelatedInformationProps = {
-  status: FlowStatus;
-  poDetail: PoDetail | null;
-};
+}
 
 function StatusRelatedInformation({
   status,
   poDetail,
+  onDownloadAwbFile,
 }: StatusRelatedInformationProps) {
-  const { etd, etaDate, etaDays, remarks } = useMemo(
+  const { etd, etaDate, etaDays, remarks, reEtaDate } = useMemo(
     () => resolveStatusCardData(poDetail),
     [poDetail],
   );
 
-  const topStatus: FlowStatus =
-    status === 'On Delivery' ? 'Work in Progress' : status;
+  const topStatus: FlowStatus = status === 'On Delivery' ? 'Work in Progress' : status;
 
   const topStatusColor = getStatusColor(topStatus);
   const onDeliveryColor = getStatusColor('On Delivery');
@@ -632,6 +811,33 @@ function StatusRelatedInformation({
   const OnDeliveryIcon = getStatusIcon('On Delivery');
 
   const awb = trim(poDetail?.AWB) || '-';
+  const actualDeliveryDate = parseServerDate(poDetail?.FinalActualDeliveryDate) ?? null;
+  const awbFileName = trim(poDetail?.AWBFileName) || 'AWB Document';
+  const hasAwbFile = !!trim(poDetail?.AWBBase64Data);
+
+  const handleViewAwbFile = useCallback(() => {
+    const base64 = trim(poDetail?.AWBBase64Data);
+    if (!base64) {
+      toast.error('AWB file not found.');
+      return;
+    }
+
+    const blob = base64ToBlob(base64, poDetail?.AWBContentType);
+    if (!blob) {
+      toast.error('Failed to open AWB file.');
+      return;
+    }
+
+    const blobUrl = URL.createObjectURL(blob);
+
+    try {
+      window.open(blobUrl, '_blank');
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    } catch {
+      URL.revokeObjectURL(blobUrl);
+      toast.error('Failed to open file in a new tab.');
+    }
+  }, [poDetail]);
 
   return (
     <Card className="rounded-2xl border border-gray-200 p-6 shadow-sm">
@@ -639,38 +845,37 @@ function StatusRelatedInformation({
         Status-Related Information
       </h2>
 
-      <div className=" flex items-center gap-3">
+      <div className="flex items-center gap-3">
         <TopIcon className="h-5 w-5" style={{ color: topStatusColor }} />
-        <h3 className="text-[20px] " style={{ color: topStatusColor }}>
+        <h3 className="text-[20px]" style={{ color: topStatusColor }}>
           {topStatus}
         </h3>
       </div>
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         <div>
-          <Label className="block text-sm text-gray-500">
-            ETD (Estimated Date of Delivery)
-          </Label>
-          <p className="text-[18px]  text-black">
-            {etd ? format(etd, 'MMM dd, yyyy') : '-'}
-          </p>
+          <Label className="block text-sm text-gray-500">ETD (Estimated Date of Delivery)</Label>
+          <p className="text-[18px] text-black">{etd ? format(etd, 'MMM dd, yyyy') : '-'}</p>
         </div>
 
         <div>
           <Label className="block text-sm text-gray-500">ETA</Label>
-          <p className="text-[18px]  text-black">
-            {etaDate
-              ? `${format(etaDate, 'MMM dd, yyyy')}${etaDays ? ` (${etaDays} days)` : ''}`
-              : '-'}
+          <p className="text-[18px] text-black">
+            {etaDate ? `${format(etaDate, 'MMM dd, yyyy')}${etaDays ? ` (${etaDays} days)` : ''}` : '-'}
           </p>
         </div>
 
-        <div className="md:col-span-2">
+        <div>
           <Label className="block text-sm text-gray-500">Remarks</Label>
-          <p className="text-[18px]  text-black">
-            {remarks}
-          </p>
+          <p className="text-[18px] text-black">{remarks}</p>
         </div>
+
+        {status === 'Work in Progress' && (
+          <div>
+            <Label className="block text-sm text-gray-500">Re ETA Date</Label>
+            <p className="text-[18px] text-black">{reEtaDate ? format(reEtaDate, 'MMM dd, yyyy') : '-'}</p>
+          </div>
+        )}
       </div>
 
       {status === 'On Delivery' && (
@@ -679,28 +884,63 @@ function StatusRelatedInformation({
 
           <div className="flex items-center gap-2">
             <OnDeliveryIcon className="h-5 w-5" style={{ color: onDeliveryColor }} />
-            <h3 className="text-[20px] " style={{ color: onDeliveryColor }}>
+            <h3 className="text-[20px]" style={{ color: onDeliveryColor }}>
               On Delivery
             </h3>
           </div>
 
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             <div>
-              <Label className="block text-sm text-gray-500">
-                AWB (Air Waybill)
-              </Label>
-              <p className="text-[18px]  text-black">
-                {awb}
+              <Label className="block text-sm text-gray-500">Air way bill</Label>
+              <p className="text-[18px] text-black">{awb}</p>
+            </div>
+
+            <div>
+              <Label className="block text-sm text-gray-500">Actual Delivery Date</Label>
+              <p className="text-[18px] text-black">
+                {actualDeliveryDate ? format(actualDeliveryDate, 'MMM dd, yyyy') : '-'}
               </p>
             </div>
           </div>
+
+          {hasAwbFile && (
+            <Card className="mt-6 rounded-xl border border-gray-200 p-4 shadow-sm">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2">
+                  <FileText className="h-5 w-5" style={{ color: '#014357' }} />
+                  <div>
+                    <p className="text-sm text-gray-500">AWB Document</p>
+                    <p className="text-base text-black">{awbFileName}</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button type="button" variant="outline" onClick={handleViewAwbFile}>
+                    <FileText className="mr-2 h-4 w-4" />
+                    View File
+                  </Button>
+
+                  <Button type="button" variant="outline" onClick={onDownloadAwbFile}>
+                    <Download className="mr-2 h-4 w-4" />
+                    Download
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          )}
         </>
       )}
     </Card>
   );
 }
+
 // ===================== Component =====================
-export function PurchaseOrderDetail({ user, orderId, onBack }: PurchaseOrderDetailProps) {
+export function PurchaseOrderDetail({
+  user,
+  orderId,
+  onBack,
+  onRefreshPurchaseOrders,
+}: PurchaseOrderDetailProps) {
   const [statusFlowRows, setStatusFlowRows] = useState<ApiStatusFlowRow[]>([]);
   const [reEtaRequestsRaw, setReEtaRequestsRaw] = useState<any[]>([]);
   const [poDetail, setPoDetail] = useState<PoDetail | null>(null);
@@ -716,6 +956,12 @@ export function PurchaseOrderDetail({ user, orderId, onBack }: PurchaseOrderDeta
   const [etaDays, setEtaDays] = useState('');
   const [awb, setAwb] = useState('');
   const [hasFilledUpdate, setHasFilledUpdate] = useState(false);
+
+  const [actualDeliveryDate, setActualDeliveryDate] = useState<Date | undefined>(undefined);
+  const [leadtimeDelivery, setLeadtimeDelivery] = useState('');
+  const [quantity, setQuantity] = useState('');
+  const [awbFile, setAwbFile] = useState<File | null>(null);
+  const [awbFileInputKey, setAwbFileInputKey] = useState(0);
 
   const [rescheduleDialogOpen, setRescheduleDialogOpen] = useState(false);
   const [newETADays, setNewETADays] = useState('');
@@ -754,7 +1000,6 @@ export function PurchaseOrderDetail({ user, orderId, onBack }: PurchaseOrderDeta
 
         const json = (await res.json()) as DetailApiResponse;
         const data = (json?.Data ?? json?.data) as DetailData | undefined;
-
         const flow = Array.isArray(data?.StatusFlow) ? data.StatusFlow : [];
         const reqs = Array.isArray(data?.ReEtaRequests) ? data.ReEtaRequests : [];
         const detail = (data?.PoDetail ?? data?.Order ?? null) as PoDetail | null;
@@ -808,6 +1053,29 @@ export function PurchaseOrderDetail({ user, orderId, onBack }: PurchaseOrderDeta
     return new Date(etd.getTime() + days * 24 * 60 * 60 * 1000);
   }, [etd, etaDays]);
 
+  const deliveryDate = useMemo(() => {
+    return parseServerDate(poDetail?.DeliveryDate ?? poDetail?.['Delivery date']);
+  }, [poDetail]);
+
+  const isEtaBeyondDeliveryDate = useMemo(() => {
+    if (status !== 'PO Submitted') return false;
+    if (!calculatedEtaDate || !deliveryDate) return false;
+
+    const etaOnly = new Date(
+      calculatedEtaDate.getFullYear(),
+      calculatedEtaDate.getMonth(),
+      calculatedEtaDate.getDate(),
+    );
+
+    const deliveryOnly = new Date(
+      deliveryDate.getFullYear(),
+      deliveryDate.getMonth(),
+      deliveryDate.getDate(),
+    );
+
+    return etaOnly.getTime() > deliveryOnly.getTime();
+  }, [status, calculatedEtaDate, deliveryDate]);
+
   const currentEtaFromPoDetail = useMemo(() => {
     return safeDateOnly(poDetail?.CurrentEta ?? poDetail?.ETA);
   }, [poDetail]);
@@ -833,6 +1101,45 @@ export function PurchaseOrderDetail({ user, orderId, onBack }: PurchaseOrderDeta
       .sort((a, b) => (b.requestDate || '').localeCompare(a.requestDate || ''));
   }, [reEtaRequestsRaw]);
 
+  const orderQuantity = useMemo(() => {
+    return toNumberOrZero(poDetail?.['Qty Order'] ?? poDetail?.QtyOrder);
+  }, [poDetail]);
+
+  const calculatedLeadtimeDeliveryDate = useMemo(() => {
+    const days = parseInt(leadtimeDelivery, 10);
+    if (!actualDeliveryDate || !leadtimeDelivery || Number.isNaN(days) || days <= 0) return null;
+
+    return new Date(actualDeliveryDate.getTime() + days * 24 * 60 * 60 * 1000);
+  }, [actualDeliveryDate, leadtimeDelivery]);
+
+  const enteredQuantity = useMemo(() => {
+    return quantity === '' ? null : Number(quantity);
+  }, [quantity]);
+
+  const isQuantityMismatch = useMemo(() => {
+    if (quantity === '') return false;
+    if (enteredQuantity === null || Number.isNaN(enteredQuantity)) return false;
+    return enteredQuantity !== orderQuantity;
+  }, [quantity, enteredQuantity, orderQuantity]);
+
+  const isCalculatedDeliveryDateBeyondPoDeliveryDate = useMemo(() => {
+    if (!calculatedLeadtimeDeliveryDate || !deliveryDate) return false;
+
+    const calcOnly = new Date(
+      calculatedLeadtimeDeliveryDate.getFullYear(),
+      calculatedLeadtimeDeliveryDate.getMonth(),
+      calculatedLeadtimeDeliveryDate.getDate(),
+    );
+
+    const poOnly = new Date(
+      deliveryDate.getFullYear(),
+      deliveryDate.getMonth(),
+      deliveryDate.getDate(),
+    );
+
+    return calcOnly.getTime() > poOnly.getTime();
+  }, [calculatedLeadtimeDeliveryDate, deliveryDate]);
+
   const handleOpenRescheduleDialog = useCallback(() => {
     setRescheduleDialogOpen(true);
     setNewETADays('');
@@ -843,6 +1150,38 @@ export function PurchaseOrderDetail({ user, orderId, onBack }: PurchaseOrderDeta
     setRescheduleDialogOpen(false);
     setNewETADays('');
     setRescheduleReason('');
+  }, []);
+
+  const handleBack = useCallback(async () => {
+    try {
+      await onRefreshPurchaseOrders?.();
+    } finally {
+      onBack();
+    }
+  }, [onBack, onRefreshPurchaseOrders]);
+
+  const goToRescheduleEtaPage = useCallback(() => {
+    window.location.href = '/reschedule-eta';
+  }, []);
+
+  const handleAwbFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+
+    if (!file) {
+      setAwbFile(null);
+      return;
+    }
+
+    const allowedTypes = ['application/pdf', 'image/png', 'image/jpg', 'image/jpeg'];
+
+    if (!allowedTypes.includes(file.type)) {
+      toast.error('Only PDF, PNG, JPG, and JPEG files are allowed for the AWB document.');
+      e.target.value = '';
+      setAwbFile(null);
+      return;
+    }
+
+    setAwbFile(file);
   }, []);
 
   const calculateNewETADate = useCallback((): string | null => {
@@ -876,6 +1215,27 @@ export function PurchaseOrderDetail({ user, orderId, onBack }: PurchaseOrderDeta
     return data;
   }, []);
 
+  const submitOnDeliveryUpdate = useCallback(async (formData: FormData) => {
+    const res = await fetch(API.POSTATUS_ON_DELIVERY(), {
+      method: 'POST',
+      headers: buildMultipartAuthHeaders(),
+      body: formData,
+    });
+
+    let data: any = null;
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
+
+    if (!res.ok) {
+      throw new Error(data?.message || data?.Message || data?.title || 'Failed to update delivery information');
+    }
+
+    return data;
+  }, []);
+
   const submitReEtaCreate = useCallback(async (payload: Record<string, unknown>) => {
     const res = await fetch(API.REETA_CREATE(), {
       method: 'POST',
@@ -900,23 +1260,28 @@ export function PurchaseOrderDetail({ user, orderId, onBack }: PurchaseOrderDeta
   const handleSubmitOrderInformation = useCallback(async () => {
     try {
       if (!idPoItem) {
-        toast.error('ID PO Item not found');
+        toast.error('ID PO Item not found.');
         return;
       }
 
       if (!etd) {
-        toast.error('Please select an ETD date');
+        toast.error('Please select an ETD date.');
         return;
       }
 
       const days = parseInt(etaDays, 10);
       if (!etaDays || Number.isNaN(days) || days <= 0) {
-        toast.error('Please enter a valid ETA in days');
+        toast.error('Please enter a valid leadtime delivery.');
         return;
       }
 
       if (!remarks.trim()) {
-        toast.error('Please enter remarks');
+        toast.error('Please enter remarks.');
+        return;
+      }
+
+      if (status === 'PO Submitted' && isEtaBeyondDeliveryDate) {
+        toast.error(ETA_DELIVERY_DATE_ERROR);
         return;
       }
 
@@ -929,54 +1294,120 @@ export function PurchaseOrderDetail({ user, orderId, onBack }: PurchaseOrderDeta
         WIPRemark: remarks.trim(),
       });
 
-      toast.success('Order information updated successfully');
+      toast.success('Order information updated successfully.');
       setHasFilledUpdate(true);
       await fetchDetail();
     } catch (error: any) {
-      toast.error(error?.message || 'Failed to update order information');
+      toast.error(error?.message || 'Failed to update order information.');
     } finally {
       setSubmittingPoStatus(false);
     }
-  }, [idPoItem, etd, etaDays, remarks, submitPoStatusUpdate, fetchDetail]);
+  }, [
+    idPoItem,
+    etd,
+    etaDays,
+    remarks,
+    status,
+    isEtaBeyondDeliveryDate,
+    submitPoStatusUpdate,
+    fetchDetail,
+  ]);
 
   const handleSubmitAwb = useCallback(async () => {
     try {
       if (!idPoItem) {
-        toast.error('ID PO Item not found');
+        toast.error('ID PO Item not found.');
         return;
       }
 
       if (!awb.trim()) {
-        toast.error('Please enter AWB number');
+        toast.error('Please enter an AWB number.');
+        return;
+      }
+
+      if (!actualDeliveryDate) {
+        toast.error('Please select an actual delivery date.');
+        return;
+      }
+
+      const leadtime = parseInt(leadtimeDelivery, 10);
+      if (!leadtimeDelivery || Number.isNaN(leadtime) || leadtime <= 0) {
+        toast.error('Please enter a valid leadtime delivery.');
+        return;
+      }
+
+      const qty = parseFloat(quantity);
+      if (quantity === '' || Number.isNaN(qty) || qty < 0) {
+        toast.error('Please enter a valid quantity.');
+        return;
+      }
+
+      if (qty !== orderQuantity) {
+        toast.error('The entered quantity must match the ordered quantity.');
+        return;
+      }
+
+      if (isCalculatedDeliveryDateBeyondPoDeliveryDate) {
+        toast.error(
+          'The calculated delivery date is later than the PO delivery date. Please create a Reschedule ETA request first.',
+        );
+        return;
+      }
+
+      if (!awbFile) {
+        toast.error('Please upload the AWB document.');
         return;
       }
 
       setSubmittingPoStatus(true);
 
-      await submitPoStatusUpdate({
-        IDPOItem: idPoItem,
-        AWB: awb.trim(),
-      });
+      const formData = new FormData();
+      formData.append('ID_PO_Item', idPoItem);
+      formData.append('AWB', awb.trim());
+      formData.append('ActualDeliveryDate', toIsoDateTime(actualDeliveryDate) || '');
+      formData.append('LeadtimeDelivery', String(leadtime));
+      formData.append('Quantity', String(qty));
+      formData.append('File', awbFile);
 
-      toast.success('AWB information updated successfully');
+      await submitOnDeliveryUpdate(formData);
+
+      toast.success('Delivery information updated successfully.');
       setHasFilledUpdate(true);
+
+      setActualDeliveryDate(undefined);
+      setLeadtimeDelivery('');
+      setQuantity('');
+      setAwbFile(null);
+      setAwbFileInputKey((prev) => prev + 1);
+
       await fetchDetail();
     } catch (error: any) {
-      toast.error(error?.message || 'Failed to update AWB information');
+      toast.error(error?.message || 'Failed to update delivery information.');
     } finally {
       setSubmittingPoStatus(false);
     }
-  }, [idPoItem, awb, submitPoStatusUpdate, fetchDetail]);
+  }, [
+    idPoItem,
+    awb,
+    actualDeliveryDate,
+    leadtimeDelivery,
+    quantity,
+    orderQuantity,
+    isCalculatedDeliveryDateBeyondPoDeliveryDate,
+    awbFile,
+    submitOnDeliveryUpdate,
+    fetchDetail,
+  ]);
 
   const handleSubmitReschedule = useCallback(async () => {
     try {
       if (!idPoItem) {
-        toast.error('ID PO Item not found');
+        toast.error('ID PO Item not found.');
         return;
       }
 
       if (!effectiveCurrentEta) {
-        toast.error('Current ETA is not set');
+        toast.error('Current ETA is not set.');
         return;
       }
 
@@ -984,17 +1415,17 @@ export function PurchaseOrderDetail({ user, orderId, onBack }: PurchaseOrderDeta
       const curDays = parseInt(etaDays, 10);
 
       if (!newETADays || Number.isNaN(newDays) || newDays <= 0) {
-        toast.error('Please enter a valid new ETA in days');
+        toast.error('Please enter a valid new ETA in days.');
         return;
       }
 
       if (!Number.isNaN(curDays) && curDays > 0 && newDays <= curDays) {
-        toast.error('New ETA days must be greater than current ETA days');
+        toast.error('New ETA days must be greater than the current ETA days.');
         return;
       }
 
       if (!rescheduleReason.trim()) {
-        toast.error('Please provide a reason for rescheduling');
+        toast.error('Please provide a reason for rescheduling.');
         return;
       }
 
@@ -1007,11 +1438,11 @@ export function PurchaseOrderDetail({ user, orderId, onBack }: PurchaseOrderDeta
         Reason: rescheduleReason.trim(),
       });
 
-      toast.success('Reschedule request submitted successfully');
+      toast.success('Reschedule request submitted successfully.');
       handleCloseRescheduleDialog();
       await fetchDetail();
     } catch (error: any) {
-      toast.error(error?.message || 'Failed to submit reschedule request');
+      toast.error(error?.message || 'Failed to submit reschedule request.');
     } finally {
       setSubmittingReschedule(false);
     }
@@ -1035,10 +1466,45 @@ export function PurchaseOrderDetail({ user, orderId, onBack }: PurchaseOrderDeta
     toast.success(`Downloading ${file.name}...`);
   }, []);
 
+  const handleDownloadAwbBase64File = useCallback(() => {
+    const base64 = trim(poDetail?.AWBBase64Data);
+    if (!base64) {
+      toast.error('AWB file not found.');
+      return;
+    }
+
+    const mime = trim(poDetail?.AWBContentType) || getBase64MimeType(base64);
+    const extension =
+      mime === 'application/pdf'
+        ? 'pdf'
+        : mime === 'image/png'
+        ? 'png'
+        : mime === 'image/jpeg' || mime === 'image/jpg'
+        ? 'jpg'
+        : 'bin';
+
+    const fileName =
+      trim(poDetail?.AWBFileName) ||
+      `${trim(poDetail?.['Purchasing Document']) || 'AWB'}-AWB.${extension}`;
+
+    downloadBase64File(base64, fileName, poDetail?.AWBContentType);
+  }, [poDetail]);
+
+  const handleClickSubmitInformation = useCallback(() => {
+    if (submittingPoStatus) return;
+
+    if (isEtaBeyondDeliveryDate) {
+      toast.error(ETA_DELIVERY_DATE_ERROR);
+      return;
+    }
+
+    handleSubmitOrderInformation();
+  }, [submittingPoStatus, isEtaBeyondDeliveryDate, handleSubmitOrderInformation]);
+
   return (
     <div className="p-4 sm:p-6 lg:p-8">
       <div className="mb-6 sm:mb-8">
-        <Button variant="ghost" onClick={onBack} className="mb-4">
+        <Button variant="ghost" onClick={handleBack} className="mb-4">
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back to Purchase Orders
         </Button>
@@ -1069,7 +1535,7 @@ export function PurchaseOrderDetail({ user, orderId, onBack }: PurchaseOrderDeta
         >
           <AlertCircle className="h-4 w-4" style={{ color: '#ED832D' }} />
           <AlertDescription>
-            This order&apos;s ETA is in 2 days or less. Please provide an update on the delivery status.
+            This order’s ETA is in 2 days or less. Please provide an update on the delivery status.
           </AlertDescription>
         </Alert>
       )}
@@ -1084,9 +1550,13 @@ export function PurchaseOrderDetail({ user, orderId, onBack }: PurchaseOrderDeta
       <div className="space-y-6">
         <StatusFlowHistory status={status} statusHistory={statusHistory} />
 
-       {status !== 'PO Submitted' && (
-  <StatusRelatedInformation status={status} poDetail={poDetail} />
-)}
+        {status !== 'PO Submitted' && (
+          <StatusRelatedInformation
+            status={status}
+            poDetail={poDetail}
+            onDownloadAwbFile={handleDownloadAwbBase64File}
+          />
+        )}
 
         {user.role === 'vendor' && (
           <>
@@ -1096,27 +1566,39 @@ export function PurchaseOrderDetail({ user, orderId, onBack }: PurchaseOrderDeta
                   Update Order Information
                 </h2>
 
+                <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <Label className="mb-1 block text-sm text-gray-500">Delivery Date</Label>
+                  <p className="text-[18px] text-black">
+                    {formatDateWithOrdinal(poDetail?.DeliveryDate ?? poDetail?.['Delivery date'])}
+                  </p>
+                </div>
+
                 <div className="space-y-4">
                   <div>
-                    <Label htmlFor="vendor-etd">
-                      ETD (Estimated Date of Delivery) <span className="text-red-500">*</span>
-                    </Label>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button variant="outline" className="mt-1 w-full justify-start text-left" type="button">
-                          <Calendar className="mr-2 h-4 w-4" />
-                          {etd ? format(etd, 'PPP') : <span>Pick a date</span>}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0">
-                        <CalendarComponent mode="single" selected={etd} onSelect={setEtd} initialFocus />
-                      </PopoverContent>
-                    </Popover>
-                  </div>
+  <Label htmlFor="vendor-etd">
+    ETD (Estimate Time of Delivery) <span className="text-red-500">*</span>
+  </Label>
+  <Popover>
+    <PopoverTrigger asChild>
+      <Button variant="outline" className="mt-1 w-full justify-start text-left" type="button">
+        <Calendar className="mr-2 h-4 w-4" />
+        {etd ? format(etd, 'PPP') : <span>Pick a date</span>}
+      </Button>
+    </PopoverTrigger>
+    <PopoverContent className="w-auto p-0">
+      <CalendarComponent
+        mode="single"
+        selected={etd}
+        onSelect={setEtd}
+        initialFocus
+      />
+    </PopoverContent>
+  </Popover>
+</div>
 
                   <div>
                     <Label htmlFor="vendor-eta-days">
-                      ETA (in days from ETD) <span className="text-red-500">*</span>
+                      Leadtime Delivery <span className="text-red-500">*</span>
                     </Label>
                     <Input
                       id="vendor-eta-days"
@@ -1136,6 +1618,15 @@ export function PurchaseOrderDetail({ user, orderId, onBack }: PurchaseOrderDeta
                         </p>
                       </div>
                     )}
+
+                    {isEtaBeyondDeliveryDate && (
+                      <ValidationNotice
+                        title="ETA exceeds the PO delivery date"
+                        description="The ETA date cannot be later than the PO delivery date. Please create a Reschedule ETA request before continuing."
+                        actionLabel="Create Reschedule ETA Request"
+                        onAction={goToRescheduleEtaPage}
+                      />
+                    )}
                   </div>
 
                   <div>
@@ -1153,10 +1644,16 @@ export function PurchaseOrderDetail({ user, orderId, onBack }: PurchaseOrderDeta
                   </div>
 
                   <Button
+                    type="button"
+                    aria-disabled={submittingPoStatus || isEtaBeyondDeliveryDate}
                     className="w-full"
-                    style={{ backgroundColor: '#014357' }}
-                    disabled={submittingPoStatus}
-                    onClick={handleSubmitOrderInformation}
+                    style={{
+                      backgroundColor: submittingPoStatus || isEtaBeyondDeliveryDate ? '#94A3B8' : '#014357',
+                      color: 'white',
+                      cursor: submittingPoStatus || isEtaBeyondDeliveryDate ? 'not-allowed' : 'pointer',
+                      opacity: submittingPoStatus || isEtaBeyondDeliveryDate ? 0.7 : 1,
+                    }}
+                    onClick={handleClickSubmitInformation}
                   >
                     {submittingPoStatus ? 'Submitting...' : 'Submit Information'}
                   </Button>
@@ -1171,6 +1668,27 @@ export function PurchaseOrderDetail({ user, orderId, onBack }: PurchaseOrderDeta
                 </h2>
 
                 <div className="space-y-4">
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                    <Label className="mb-1 block text-sm text-gray-500">Order Quantity</Label>
+                    <p className="text-[18px] text-black">{orderQuantity}</p>
+                  </div>
+
+                  {isQuantityMismatch && (
+                    <ValidationNotice
+                      title="Quantity does not match"
+                      description="The entered quantity must match the ordered quantity before this delivery update can be submitted."
+                    />
+                  )}
+
+                  {isCalculatedDeliveryDateBeyondPoDeliveryDate && (
+                    <ValidationNotice
+                      title="Delivery update cannot be submitted"
+                      description="The calculated delivery date is later than the PO delivery date. Please create a Reschedule ETA request before continuing."
+                      actionLabel="Go to RE ETA Request"
+                      onAction={goToRescheduleEtaPage}
+                    />
+                  )}
+
                   <div>
                     <Label htmlFor="vendor-awb">
                       AWB (Air Waybill) <span className="text-red-500">*</span>
@@ -1185,13 +1703,104 @@ export function PurchaseOrderDetail({ user, orderId, onBack }: PurchaseOrderDeta
                     />
                   </div>
 
+                  <div>
+  <Label htmlFor="actual-delivery-date">
+    Actual Delivery Date <span className="text-red-500">*</span>
+  </Label>
+  <Popover>
+    <PopoverTrigger asChild>
+      <Button variant="outline" className="mt-1 w-full justify-start text-left" type="button">
+        <Calendar className="mr-2 h-4 w-4" />
+        {actualDeliveryDate ? format(actualDeliveryDate, 'PPP') : <span>Pick a date</span>}
+      </Button>
+    </PopoverTrigger>
+    <PopoverContent className="w-auto p-0">
+      <CalendarComponent
+        mode="single"
+        selected={actualDeliveryDate}
+        onSelect={setActualDeliveryDate}
+        initialFocus
+      />
+    </PopoverContent>
+  </Popover>
+</div>
+
+                  <div>
+                    <Label htmlFor="leadtime-delivery">
+                      Leadtime Delivery <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="leadtime-delivery"
+                      type="number"
+                      min={1}
+                      value={leadtimeDelivery}
+                      onChange={(e) => setLeadtimeDelivery(e.target.value)}
+                      placeholder="Number of days"
+                      className="mt-1"
+                    />
+
+                    {calculatedLeadtimeDeliveryDate && (
+                      <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                        <p className="text-sm text-gray-600">Calculated Delivery Date:</p>
+                        <p className="text-lg" style={{ color: '#014357' }}>
+                          {format(calculatedLeadtimeDeliveryDate, 'PPP')}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <Label htmlFor="delivery-quantity">
+                      Quantity <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="delivery-quantity"
+                      type="number"
+                      min={0}
+                      value={quantity}
+                      onChange={(e) => setQuantity(e.target.value)}
+                      placeholder="Enter delivered quantity"
+                      className="mt-1"
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="awb-document">
+                      Upload Document AWB <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      key={awbFileInputKey}
+                      id="awb-document"
+                      type="file"
+                      accept=".pdf,.png,.jpg,.jpeg"
+                      onChange={handleAwbFileChange}
+                      className="mt-1"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">
+                      Allowed file types: PDF, PNG, JPG, JPEG
+                    </p>
+
+                    {awbFile && (
+                      <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                        <p className="text-sm text-gray-700">{awbFile.name}</p>
+                      </div>
+                    )}
+                  </div>
+
                   <Button
                     className="w-full"
-                    style={{ backgroundColor: '#014357' }}
-                    disabled={submittingPoStatus}
+                    style={{
+                      backgroundColor:
+                        submittingPoStatus || isQuantityMismatch || isCalculatedDeliveryDateBeyondPoDeliveryDate
+                          ? '#94A3B8'
+                          : '#014357',
+                    }}
+                    disabled={
+                      submittingPoStatus || isQuantityMismatch || isCalculatedDeliveryDateBeyondPoDeliveryDate
+                    }
                     onClick={handleSubmitAwb}
                   >
-                    {submittingPoStatus ? 'Submitting...' : 'Submit AWB'}
+                    {submittingPoStatus ? 'Submitting...' : 'Submit Delivery Information'}
                   </Button>
                 </div>
               </Card>
