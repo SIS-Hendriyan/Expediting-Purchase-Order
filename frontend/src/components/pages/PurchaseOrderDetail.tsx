@@ -2030,7 +2030,7 @@ export function PurchaseOrderDetail({
                 id="rescheduleReason"
                 value={rescheduleReason}
                 onChange={(e) => setRescheduleReason(e.target.value)}
-                placeholder="Provide a detailed reason for the reschedule request..."
+                placeholder="Provide a detailed reason for the reschedule request...."
                 className="mt-1"
                 rows={4}
               />

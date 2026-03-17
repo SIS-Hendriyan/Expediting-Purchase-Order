@@ -1154,7 +1154,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
     setUploading(true);
     setUploadProgress(0);
-    setUploadStatusText('Preparing upload...');
+    setUploadStatusText('Preparing upload....');
 
     try {
       const formData = new FormData();
@@ -1596,7 +1596,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             )}
           </div>
 
-          <div className="grid grid-cols-1 gap-4 mb-4">
+          {/* <div className="grid grid-cols-1 gap-4 mb-4">
             <Card
               className={[
                 'p-4 shadow-[0_2px_4px_rgba(220,38,38,0.25)] border-0 cursor-pointer transition-all w-full',
