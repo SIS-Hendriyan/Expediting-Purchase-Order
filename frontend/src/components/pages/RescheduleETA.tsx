@@ -1162,7 +1162,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                 <TableHead>Item</TableHead>
                 {user.role === "admin" && <TableHead>Vendor</TableHead>}
                 <TableHead>Current ETA</TableHead>
-                <TableHead>Requested ETA</TableHead>
+                <TableHead>NEW ETA</TableHead>
                 <TableHead>Request Date</TableHead>
                 <TableHead>
                   <div className="flex items-center gap-1">
