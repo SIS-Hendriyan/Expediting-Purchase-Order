@@ -1154,7 +1154,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
     setUploading(true);
     setUploadProgress(0);
-    setUploadStatusText('Preparing upload...');
+    setUploadStatusText('Preparing upload....');
 
     try {
       const formData = new FormData();
