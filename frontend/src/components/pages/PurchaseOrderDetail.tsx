@@ -5,8 +5,12 @@ import {
   ArrowLeft,
   ArrowRight,
   Calendar,
+  CalendarDays,
+  CheckCircle2,
+  Clock,
   Download,
   FileText,
+  Info,
   Package,
   PackageCheck,
   Truck,
@@ -32,6 +36,7 @@ import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { Textarea } from '../ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import type { User } from './Login';
 
 // ===================== Types =====================
@@ -125,6 +130,7 @@ type PoDetail = {
   WIPRemark?: string | null;
   AWB?: string | null;
   ['Delivery Update']?: string | null;
+  LeadtimeDelivery?: string | number | null;
 
   AWBFileName?: string | null;
   AWBContentType?: string | null;
@@ -157,6 +163,7 @@ type StatusCardData = {
 type StatusRelatedInformationProps = {
   status: FlowStatus;
   poDetail: PoDetail | null;
+  latestApprovedReEtaDate?: string | null;
   onDownloadAwbFile?: () => void;
 };
 
@@ -179,6 +186,10 @@ type FileActionCardProps = {
   onDownload: (file: ReEtaFile) => void;
 };
 
+type RequiredDeliveryDateCardProps = {
+  deliveryDateValue?: string | null;
+};
+
 // ===================== Constants =====================
 const FLOW_ORDER: FlowStatus[] = [
   'PO Submitted',
@@ -190,7 +201,13 @@ const FLOW_ORDER: FlowStatus[] = [
 const STATUS_LINE_TOP = 24;
 
 const ETA_DELIVERY_DATE_ERROR =
-  'The ETA date cannot be later than the PO delivery date. Please create a Reschedule ETA request first.';
+  'ETA exceeds the delivery date. Please submit a Reschedule ETA Request again before proceeding.';
+
+const WIP_REETA_REQUIRED_ERROR =
+  'New ETA exceeds the required delivery date. Please submit a Re-ETA request again before proceeding.';
+
+const WAITING_REETA_APPROVAL_MESSAGE =
+  'Waiting for Re-ETA approval. Please wait until the request is reviewed before proceeding.';
 
 const warningPalette = {
   border: '#F59E0B',
@@ -227,6 +244,21 @@ const parseServerDate = (value?: string | number | null): Date | undefined => {
   if (!s) return undefined;
   const d = new Date(s);
   return Number.isNaN(d.getTime()) ? undefined : d;
+};
+
+const startOfDay = (date: Date): Date => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+const addDaysDateOnly = (date: Date, days: number): Date => {
+  const base = startOfDay(date);
+  const result = new Date(base);
+  result.setDate(result.getDate() + days);
+  return result;
+};
+
+const diffDaysDateOnly = (later: Date, earlier: Date): number => {
+  const laterOnly = startOfDay(later);
+  const earlierOnly = startOfDay(earlier);
+  return Math.ceil((laterOnly.getTime() - earlierOnly.getTime()) / (1000 * 60 * 60 * 24));
 };
 
 const safeDateOnly = (v: unknown): string | null => {
@@ -270,31 +302,6 @@ const formatDateTime = (dateTimeString: string): string => {
     hour: '2-digit',
     minute: '2-digit',
   });
-};
-
-const getOrdinalSuffix = (day: number): string => {
-  if (day >= 11 && day <= 13) return 'th';
-
-  switch (day % 10) {
-    case 1:
-      return 'st';
-    case 2:
-      return 'nd';
-    case 3:
-      return 'rd';
-    default:
-      return 'th';
-  }
-};
-
-const formatDateWithOrdinal = (value?: string | number | Date | null): string => {
-  if (!value) return '-';
-
-  const d = value instanceof Date ? value : parseServerDate(value as any);
-  if (!d || Number.isNaN(d.getTime())) return '-';
-
-  const day = d.getDate();
-  return `${d.toLocaleDateString('en-US', { month: 'long' })} ${day}${getOrdinalSuffix(day)}, ${d.getFullYear()}`;
 };
 
 const mapFlowStatus = (backendStatus?: string | null): FlowStatus | null => {
@@ -369,6 +376,38 @@ const normalizeRescheduleStatus = (raw: unknown): 'Pending' | 'Approved' | 'Reje
   if (u === 'REJECTED') return 'Rejected';
 
   return s;
+};
+
+const getReEtaRequestedAt = (row: any): Date | null => {
+  const value =
+    row?.RequestedAt ??
+    row?.requestDate ??
+    row?.RequestDate ??
+    row?.CreatedAt ??
+    row?.CREATED_AT ??
+    row?.UpdatedAt ??
+    row?.UPDATED_AT ??
+    null;
+
+  const parsed = parseServerDate(value);
+  return parsed ?? null;
+};
+
+const getLatestApprovedReEta = (rows: any[]): any | null => {
+  const approvedRows = rows.filter((row) => {
+    const status = normalizeRescheduleStatus(
+      row?.['Reschedule Status'] ?? row?.RescheduleStatus ?? row?.status ?? row?.Status,
+    );
+    return status === 'Approved';
+  });
+
+  if (!approvedRows.length) return null;
+
+  return [...approvedRows].sort((a, b) => {
+    const aTime = getReEtaRequestedAt(a)?.getTime() ?? 0;
+    const bTime = getReEtaRequestedAt(b)?.getTime() ?? 0;
+    return bTime - aTime;
+  })[0];
 };
 
 const safeId = (v: unknown, fallback: string) => {
@@ -513,7 +552,7 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
       r?.FeedbackSize,
       'Waiting File',
     ) ||
-    ((status !== 'Approved' && status !== 'Rejected') ? feedbackFile : null);
+    (status !== 'Approved' && status !== 'Rejected' ? feedbackFile : null);
 
   return {
     id,
@@ -574,6 +613,18 @@ const diffDaysFromNow = (date: Date): number => {
   return Math.ceil((target.getTime() - startToday.getTime()) / (1000 * 60 * 60 * 24));
 };
 
+const getDaysUntilDelivery = (value?: string | null): number | null => {
+  const target = parseServerDate(value);
+  if (!target) return null;
+
+  const today = new Date();
+  const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const startTarget = new Date(target.getFullYear(), target.getMonth(), target.getDate());
+
+  const diffMs = startTarget.getTime() - startToday.getTime();
+  return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+};
+
 const buildStatusHistory = (rows: ApiStatusFlowRow[]): Record<string, string> => {
   const map: Record<string, string> = {};
   for (const row of rows) {
@@ -607,20 +658,22 @@ const getInitialServerEtaDays = (detail: PoDetail | null, serverEtd?: Date): str
 
   const serverCurrentEta = parseServerDate(detail?.CurrentEta ?? detail?.ETA);
   if (serverEtd && serverCurrentEta) {
-    const diffMs = serverCurrentEta.getTime() - serverEtd.getTime();
-    const diff = Math.round(diffMs / (1000 * 60 * 60 * 24));
+    const diff = diffDaysDateOnly(serverCurrentEta, serverEtd);
     if (diff > 0) return String(diff);
   }
 
   return '';
 };
 
-const resolveStatusCardData = (poDetail: PoDetail | null): StatusCardData => {
+const resolveStatusCardData = (
+  poDetail: PoDetail | null,
+  latestApprovedReEtaDate?: string | null,
+): StatusCardData => {
   const etd = parseServerDate(poDetail?.CurrentETD) ?? null;
   const etaDate = parseServerDate(poDetail?.CurrentEta) ?? null;
   const etaDays = trim(poDetail?.CurrentETADays);
   const remarks = trim(poDetail?.['WIP Remark'] ?? poDetail?.WIPRemark) || '-';
-  const reEtaDate = parseServerDate(poDetail?.DeliveryDate ?? poDetail?.['Delivery date']) ?? null;
+  const reEtaDate = parseServerDate(latestApprovedReEtaDate) ?? null;
 
   return {
     etd,
@@ -689,7 +742,7 @@ const downloadBase64File = (base64: string, fileName: string, contentType?: stri
   setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
 };
 
-// ===================== UI =====================
+// ===================== Small UI Parts =====================
 function ValidationNotice({
   title,
   description,
@@ -735,6 +788,79 @@ function ValidationNotice({
         </div>
       </AlertDescription>
     </Alert>
+  );
+}
+
+function RequiredDeliveryDateCard({ deliveryDateValue }: RequiredDeliveryDateCardProps) {
+  const deliveryDate = parseServerDate(deliveryDateValue);
+  const daysLeft = getDaysUntilDelivery(deliveryDateValue);
+
+  const isOverdue = typeof daysLeft === 'number' && daysLeft < 0;
+  const isUrgent = typeof daysLeft === 'number' && daysLeft >= 0 && daysLeft <= 7;
+
+  return (
+    <div
+      className="mb-4 m-[0px] flex items-start gap-3 rounded-lg p-4"
+      style={{
+        backgroundColor: 'rgba(1, 67, 87, 0.05)',
+        border: '1px solid rgba(1, 67, 87, 0.12)',
+      }}
+    >
+      <div
+        className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+        style={{ backgroundColor: '#014357' }}
+      >
+        <CalendarDays className="h-5 w-5 text-white" />
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex items-center gap-2">
+          <Label className="text-sm" style={{ color: '#014357' }}>
+            Required Delivery Date
+          </Label>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" className="inline-flex">
+                <Info className="h-3.5 w-3.5 text-gray-400" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="max-w-[220px] text-xs">
+                This is the buyer&apos;s requested delivery date. Please plan your ETD and ETA accordingly.
+              </p>
+            </TooltipContent>
+          </Tooltip>
+        </div>
+
+        <p className="text-lg font-medium" style={{ color: '#014357' }}>
+          {deliveryDate ? format(deliveryDate, 'EEEE, MMMM dd, yyyy') : '-'}
+        </p>
+
+        {typeof daysLeft === 'number' && (
+          <div className="mt-1 flex items-center gap-1.5">
+            <Clock
+              className="h-3.5 w-3.5"
+              style={{
+                color: isOverdue ? '#DC2626' : isUrgent ? '#ED832D' : '#6AA75D',
+              }}
+            />
+            <span
+              className="text-sm"
+              style={{
+                color: isOverdue ? '#DC2626' : isUrgent ? '#ED832D' : '#6AA75D',
+              }}
+            >
+              {isOverdue
+                ? `${Math.abs(daysLeft)} days overdue`
+                : daysLeft === 0
+                ? 'Delivery due today'
+                : `${daysLeft} days remaining`}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -838,25 +964,44 @@ function StatusFlowHistory({ status, statusHistory }: StatusFlowHistoryProps) {
 function StatusRelatedInformation({
   status,
   poDetail,
+  latestApprovedReEtaDate,
   onDownloadAwbFile,
 }: StatusRelatedInformationProps) {
   const { etd, etaDate, etaDays, remarks, reEtaDate } = useMemo(
-    () => resolveStatusCardData(poDetail),
-    [poDetail],
+    () => resolveStatusCardData(poDetail, latestApprovedReEtaDate),
+    [poDetail, latestApprovedReEtaDate],
   );
 
-  const topStatus: FlowStatus = status === 'On Delivery' ? 'Work in Progress' : status;
-
-  const topStatusColor = getStatusColor(topStatus);
+  const workInProgressColor = getStatusColor('Work in Progress');
   const onDeliveryColor = getStatusColor('On Delivery');
+  const receivedColor = getStatusColor('Fully Received');
 
-  const TopIcon = getStatusIcon(topStatus);
+  const WorkInProgressIcon = getStatusIcon('Work in Progress');
   const OnDeliveryIcon = getStatusIcon('On Delivery');
+  const ReceivedIcon = getStatusIcon('Fully Received');
 
   const awb = trim(poDetail?.AWB) || '-';
   const actualDeliveryDate = parseServerDate(poDetail?.FinalActualDeliveryDate) ?? null;
+  const receivedAt = parseServerDate(poDetail?.['GR Created Date']) ?? null;
+
   const awbFileName = trim(poDetail?.AWBFileName) || 'AWB Document';
   const hasAwbFile = !!trim(poDetail?.AWBBase64Data);
+
+  const onDeliveryQuantity = toNumberOrZero(poDetail?.['Qty Order'] ?? poDetail?.QtyOrder);
+  const onDeliveryLeadtimeNumber = toNumberOrZero(poDetail?.LeadtimeDelivery);
+  const onDeliveryLeadtimeText = onDeliveryLeadtimeNumber > 0 ? `${onDeliveryLeadtimeNumber} days` : '-';
+
+  const onDeliveryNewEta = useMemo(() => {
+    if (!actualDeliveryDate || onDeliveryLeadtimeNumber <= 0) return null;
+    return addDaysDateOnly(actualDeliveryDate, onDeliveryLeadtimeNumber);
+  }, [actualDeliveryDate, onDeliveryLeadtimeNumber]);
+
+  const showWorkInProgressSection =
+    status === 'Work in Progress' || status === 'On Delivery' || status === 'Fully Received';
+
+  const showOnDeliverySection = status === 'On Delivery' || status === 'Fully Received';
+
+  const showReceivedSection = status === 'Fully Received';
 
   const handleViewAwbFile = useCallback(() => {
     const base64 = trim(poDetail?.AWBBase64Data);
@@ -883,45 +1028,47 @@ function StatusRelatedInformation({
   }, [poDetail]);
 
   return (
-    <Card className="rounded-2xl border border-gray-200 p-6 shadow-sm">
+    <Card className="rounded-xl border border-gray-200 p-6 shadow-sm">
       <h2 className="mb-5 text-lg font-semibold" style={{ color: '#014357' }}>
         Status-Related Information
       </h2>
 
-      <div className="flex items-center gap-3">
-        <TopIcon className="h-5 w-5" style={{ color: topStatusColor }} />
-        <h3 className="text-[20px]" style={{ color: topStatusColor }}>
-          {topStatus}
-        </h3>
-      </div>
-
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        <div>
-          <Label className="block text-sm text-gray-500">ETD (Estimated Date of Delivery)</Label>
-          <p className="text-[18px] text-black">{etd ? format(etd, 'MMM dd, yyyy') : '-'}</p>
-        </div>
-
-        <div>
-          <Label className="block text-sm text-gray-500">ETA</Label>
-          <p className="text-[18px] text-black">
-            {etaDate ? `${format(etaDate, 'MMM dd, yyyy')}${etaDays ? ` (${etaDays} days)` : ''}` : '-'}
-          </p>
-        </div>
-
-        <div>
-          <Label className="block text-sm text-gray-500">Remarks</Label>
-          <p className="text-[18px] text-black">{remarks}</p>
-        </div>
-
-        {status === 'Work in Progress' && (
-          <div>
-            <Label className="block text-sm text-gray-500">Re ETA Date</Label>
-            <p className="text-[18px] text-black">{reEtaDate ? format(reEtaDate, 'MMM dd, yyyy') : '-'}</p>
+      {showWorkInProgressSection && (
+        <>
+          <div className="flex items-center gap-3">
+            <WorkInProgressIcon className="h-5 w-5" style={{ color: workInProgressColor }} />
+            <h3 className="text-[20px]" style={{ color: workInProgressColor }}>
+              Work in Progress
+            </h3>
           </div>
-        )}
-      </div>
 
-      {status === 'On Delivery' && (
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+            <div>
+              <Label className="block text-sm text-gray-500">ETD (Estimated Date of Delivery)</Label>
+              <p className="text-[18px] text-black">{etd ? format(etd, 'MMM dd, yyyy') : '-'}</p>
+            </div>
+
+            <div>
+              <Label className="block text-sm text-gray-500">ETA</Label>
+              <p className="text-[18px] text-black">
+                {etaDate ? `${format(etaDate, 'MMM dd, yyyy')}${etaDays ? ` (${etaDays} days)` : ''}` : '-'}
+              </p>
+            </div>
+
+            <div>
+              <Label className="block text-sm text-gray-500">Remarks</Label>
+              <p className="text-[18px] text-black">{remarks}</p>
+            </div>
+
+            <div>
+              <Label className="block text-sm text-gray-500">Delivery Date</Label>
+              <p className="text-[18px] text-black">{reEtaDate ? format(reEtaDate, 'MMM dd, yyyy') : '-'}</p>
+            </div>
+          </div>
+        </>
+      )}
+
+      {showOnDeliverySection && (
         <>
           <hr className="my-6 border-gray-200" />
 
@@ -942,6 +1089,23 @@ function StatusRelatedInformation({
               <Label className="block text-sm text-gray-500">Actual Delivery Date</Label>
               <p className="text-[18px] text-black">
                 {actualDeliveryDate ? format(actualDeliveryDate, 'MMM dd, yyyy') : '-'}
+              </p>
+            </div>
+
+            <div>
+              <Label className="block text-sm text-gray-500">Quantity</Label>
+              <p className="text-[18px] text-black">{onDeliveryQuantity || '-'}</p>
+            </div>
+
+            <div>
+              <Label className="block text-sm text-gray-500">Lead Time Delivery</Label>
+              <p className="text-[18px] text-black">{onDeliveryLeadtimeText}</p>
+            </div>
+
+            <div>
+              <Label className="block text-sm text-gray-500">New ETA</Label>
+              <p className="text-[18px] text-black">
+                {onDeliveryNewEta ? format(onDeliveryNewEta, 'MMM dd, yyyy') : '-'}
               </p>
             </div>
           </div>
@@ -971,6 +1135,28 @@ function StatusRelatedInformation({
               </div>
             </Card>
           )}
+        </>
+      )}
+
+      {showReceivedSection && (
+        <>
+          <hr className="my-6 border-gray-200" />
+
+          <div className="flex items-center gap-2">
+            <ReceivedIcon className="h-5 w-5" style={{ color: receivedColor }} />
+            <h3 className="text-[20px]" style={{ color: receivedColor }}>
+              Received / Fully Received
+            </h3>
+          </div>
+
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+            <div>
+              <Label className="block text-sm text-gray-500">GR Created AT</Label>
+              <p className="text-[18px] text-black">
+                {receivedAt ? format(receivedAt, 'MMM dd, yyyy') : '-'}
+              </p>
+            </div>
+          </div>
         </>
       )}
     </Card>
@@ -1071,6 +1257,8 @@ export function PurchaseOrderDetail({
         const reqs = Array.isArray(data?.ReEtaRequests) ? data.ReEtaRequests : [];
         const detail = (data?.PoDetail ?? data?.Order ?? null) as PoDetail | null;
 
+        console.log(data);
+
         setStatusFlowRows(flow);
         setReEtaRequestsRaw(reqs);
         setPoDetail(detail);
@@ -1113,60 +1301,67 @@ export function PurchaseOrderDetail({
   const statusHistory = useMemo(() => buildStatusHistory(statusFlowRows), [statusFlowRows]);
 
   const idPoItem = useMemo(() => extractIdPoItem(poDetail, statusFlowRows), [poDetail, statusFlowRows]);
+const latestApprovedReEta = useMemo(() => {
+  return getLatestApprovedReEta(reEtaRequestsRaw);
+}, [reEtaRequestsRaw]);
+
+const latestApprovedReEtaDate = useMemo(() => {
+  const fallbackDeliveryDate = poDetail?.DeliveryDate ?? poDetail?.['Delivery date'] ?? null;
+
+  if (reEtaRequestsRaw.length === 0) return fallbackDeliveryDate;
+
+  return latestApprovedReEta?.NewETA ?? latestApprovedReEta?.newETA ?? fallbackDeliveryDate;
+}, [latestApprovedReEta, poDetail, reEtaRequestsRaw]);
+
+  const poDeliveryDateValue = useMemo(() => {
+    const approvedNewEta = latestApprovedReEtaDate;
+    return approvedNewEta ?? poDetail?.DeliveryDate ?? poDetail?.['Delivery date'] ?? null;
+  }, [latestApprovedReEtaDate, poDetail]);
 
   const deliveryDate = useMemo(() => {
-    return parseServerDate(poDetail?.DeliveryDate ?? poDetail?.['Delivery date']);
-  }, [poDetail]);
+    return parseServerDate(poDeliveryDateValue);
+  }, [poDeliveryDateValue]);
+
+  const currentEtaForReschedule = useMemo(() => {
+    return safeDateOnly(poDeliveryDateValue);
+  }, [poDeliveryDateValue]);
 
   const calculatedEtaDate = useMemo(() => {
     const days = parseInt(etaDays, 10);
     if (!etd || !etaDays || Number.isNaN(days) || days <= 0) return null;
-    return new Date(etd.getTime() + days * 24 * 60 * 60 * 1000);
+    return addDaysDateOnly(etd, days);
   }, [etd, etaDays]);
 
   const isEtaBeyondDeliveryDate = useMemo(() => {
     if (status !== 'PO Submitted') return false;
     if (!calculatedEtaDate || !deliveryDate) return false;
-
-    const etaOnly = new Date(
-      calculatedEtaDate.getFullYear(),
-      calculatedEtaDate.getMonth(),
-      calculatedEtaDate.getDate(),
-    );
-
-    const deliveryOnly = new Date(
-      deliveryDate.getFullYear(),
-      deliveryDate.getMonth(),
-      deliveryDate.getDate(),
-    );
-
-    return etaOnly.getTime() > deliveryOnly.getTime();
+    return startOfDay(calculatedEtaDate).getTime() > startOfDay(deliveryDate).getTime();
   }, [status, calculatedEtaDate, deliveryDate]);
 
-  const currentEtaFromPoDetail = useMemo(() => {
-    return safeDateOnly(poDetail?.CurrentEta ?? poDetail?.ETA);
-  }, [poDetail]);
-
-  const etaDate = useMemo(() => {
-    return calculatedEtaDate ? format(calculatedEtaDate, 'yyyy-MM-dd') : '';
-  }, [calculatedEtaDate]);
-
-  const effectiveCurrentEta = useMemo(() => {
-    return currentEtaFromPoDetail || etaDate || null;
-  }, [currentEtaFromPoDetail, etaDate]);
-
   const needsVendorUpdate = useMemo(() => {
-    const currentEta = parseServerDate(effectiveCurrentEta);
+    const currentEta = parseServerDate(currentEtaForReschedule);
     if (status !== 'On Delivery') return false;
     if (!currentEta) return false;
     return diffDaysFromNow(currentEta) <= 2;
-  }, [status, effectiveCurrentEta]);
+  }, [status, currentEtaForReschedule]);
 
   const rescheduleRequests = useMemo(() => {
     return reEtaRequestsRaw
       .map((r, i) => normalizeReEtaRequest(r, i))
       .sort((a, b) => (b.requestDate || '').localeCompare(a.requestDate || ''));
   }, [reEtaRequestsRaw]);
+
+  const hasPendingReEtaApproval = useMemo(() => {
+    return rescheduleRequests.some((request) => request.status === 'Pending');
+  }, [rescheduleRequests]);
+
+  const isPoSubmittedBlockedByEta = useMemo(() => {
+    return isEtaBeyondDeliveryDate;
+  }, [isEtaBeyondDeliveryDate]);
+
+  const isPoSubmittedSubmitDisabled = useMemo(() => {
+    return isPoSubmittedBlockedByEta || hasPendingReEtaApproval;
+  }, [isPoSubmittedBlockedByEta, hasPendingReEtaApproval]);
 
   const orderQuantity = useMemo(() => {
     return toNumberOrZero(poDetail?.['Qty Order'] ?? poDetail?.QtyOrder);
@@ -1175,8 +1370,7 @@ export function PurchaseOrderDetail({
   const calculatedLeadtimeDeliveryDate = useMemo(() => {
     const days = parseInt(leadtimeDelivery, 10);
     if (!actualDeliveryDate || !leadtimeDelivery || Number.isNaN(days) || days <= 0) return null;
-
-    return new Date(actualDeliveryDate.getTime() + days * 24 * 60 * 60 * 1000);
+    return addDaysDateOnly(actualDeliveryDate, days);
   }, [actualDeliveryDate, leadtimeDelivery]);
 
   const enteredQuantity = useMemo(() => {
@@ -1191,20 +1385,7 @@ export function PurchaseOrderDetail({
 
   const isCalculatedDeliveryDateBeyondPoDeliveryDate = useMemo(() => {
     if (!calculatedLeadtimeDeliveryDate || !deliveryDate) return false;
-
-    const calcOnly = new Date(
-      calculatedLeadtimeDeliveryDate.getFullYear(),
-      calculatedLeadtimeDeliveryDate.getMonth(),
-      calculatedLeadtimeDeliveryDate.getDate(),
-    );
-
-    const poOnly = new Date(
-      deliveryDate.getFullYear(),
-      deliveryDate.getMonth(),
-      deliveryDate.getDate(),
-    );
-
-    return calcOnly.getTime() > poOnly.getTime();
+    return startOfDay(calculatedLeadtimeDeliveryDate).getTime() > startOfDay(deliveryDate).getTime();
   }, [calculatedLeadtimeDeliveryDate, deliveryDate]);
 
   const handleOpenRescheduleDialog = useCallback(() => {
@@ -1253,8 +1434,8 @@ export function PurchaseOrderDetail({
     const days = parseInt(newETADays, 10);
     if (Number.isNaN(days) || days <= 0) return null;
 
-    const next = new Date(etd.getTime() + days * 24 * 60 * 60 * 1000);
-    return Number.isNaN(next.getTime()) ? null : next.toISOString().split('T')[0];
+    const next = addDaysDateOnly(etd, days);
+    return Number.isNaN(next.getTime()) ? null : format(next, 'yyyy-MM-dd');
   }, [etd, newETADays]);
 
   const submitPoStatusUpdate = useCallback(async (payload: Record<string, unknown>) => {
@@ -1322,6 +1503,11 @@ export function PurchaseOrderDetail({
 
   const handleSubmitOrderInformation = useCallback(async () => {
     try {
+      if (hasPendingReEtaApproval) {
+        toast.error(WAITING_REETA_APPROVAL_MESSAGE);
+        return;
+      }
+
       if (!idPoItem) {
         toast.error('ID PO Item not found.');
         return;
@@ -1366,6 +1552,7 @@ export function PurchaseOrderDetail({
       setSubmittingPoStatus(false);
     }
   }, [
+    hasPendingReEtaApproval,
     idPoItem,
     etd,
     etaDays,
@@ -1378,6 +1565,11 @@ export function PurchaseOrderDetail({
 
   const handleSubmitAwb = useCallback(async () => {
     try {
+      if (hasPendingReEtaApproval) {
+        toast.error(WAITING_REETA_APPROVAL_MESSAGE);
+        return;
+      }
+
       if (!idPoItem) {
         toast.error('ID PO Item not found.');
         return;
@@ -1411,9 +1603,7 @@ export function PurchaseOrderDetail({
       }
 
       if (isCalculatedDeliveryDateBeyondPoDeliveryDate) {
-        toast.error(
-          'The calculated delivery date is later than the PO delivery date. Please create a Reschedule ETA request first.',
-        );
+        toast.error(WIP_REETA_REQUIRED_ERROR);
         return;
       }
 
@@ -1450,6 +1640,7 @@ export function PurchaseOrderDetail({
       setSubmittingPoStatus(false);
     }
   }, [
+    hasPendingReEtaApproval,
     idPoItem,
     awb,
     actualDeliveryDate,
@@ -1469,8 +1660,8 @@ export function PurchaseOrderDetail({
         return;
       }
 
-      if (!effectiveCurrentEta) {
-        toast.error('Current ETA is not set.');
+      if (!currentEtaForReschedule) {
+        toast.error('Required delivery date is not set.');
         return;
       }
 
@@ -1495,7 +1686,7 @@ export function PurchaseOrderDetail({
       setSubmittingReschedule(true);
 
       await submitReEtaCreate({
-        CurrentEta: effectiveCurrentEta,
+        CurrentEta: currentEtaForReschedule,
         IdPoItem: idPoItem,
         ProposedETADays: newDays,
         Reason: rescheduleReason.trim(),
@@ -1511,7 +1702,7 @@ export function PurchaseOrderDetail({
     }
   }, [
     idPoItem,
-    effectiveCurrentEta,
+    currentEtaForReschedule,
     newETADays,
     etaDays,
     rescheduleReason,
@@ -1550,10 +1741,10 @@ export function PurchaseOrderDetail({
       mime === 'application/pdf'
         ? 'pdf'
         : mime === 'image/png'
-        ? 'png'
-        : mime === 'image/jpeg' || mime === 'image/jpg'
-        ? 'jpg'
-        : 'bin';
+          ? 'png'
+          : mime === 'image/jpeg' || mime === 'image/jpg'
+            ? 'jpg'
+            : 'bin';
 
     const fileName =
       trim(poDetail?.AWBFileName) ||
@@ -1565,13 +1756,18 @@ export function PurchaseOrderDetail({
   const handleClickSubmitInformation = useCallback(() => {
     if (submittingPoStatus) return;
 
+    if (hasPendingReEtaApproval) {
+      toast.error(WAITING_REETA_APPROVAL_MESSAGE);
+      return;
+    }
+
     if (isEtaBeyondDeliveryDate) {
       toast.error(ETA_DELIVERY_DATE_ERROR);
       return;
     }
 
     handleSubmitOrderInformation();
-  }, [submittingPoStatus, isEtaBeyondDeliveryDate, handleSubmitOrderInformation]);
+  }, [submittingPoStatus, hasPendingReEtaApproval, isEtaBeyondDeliveryDate, handleSubmitOrderInformation]);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
@@ -1586,7 +1782,9 @@ export function PurchaseOrderDetail({
             <h1 className="mb-2" style={{ color: '#014357' }}>
               Purchase Order Details
             </h1>
-            <p className="text-gray-600">PO #{poDetail?.['Purchasing Document'] || orderId}</p>
+            <p className="text-gray-600">
+              PO #{poDetail?.['Purchasing Document'] || orderId} - {poDetail?.Item || ''}
+            </p>
             {loading && <p className="mt-1 text-xs text-gray-500">Loading detail...</p>}
             {loadError && <p className="mt-1 text-xs text-red-600">{loadError}</p>}
           </div>
@@ -1630,250 +1828,455 @@ export function PurchaseOrderDetail({
           <StatusRelatedInformation
             status={status}
             poDetail={poDetail}
+            latestApprovedReEtaDate={latestApprovedReEtaDate}
             onDownloadAwbFile={handleDownloadAwbBase64File}
           />
         )}
 
         {user.role === 'vendor' && (
           <>
-            {status === 'PO Submitted' && (
-              <Card className="p-6">
-                <h2 className="mb-4" style={{ color: '#014357' }}>
-                  Update Order Information
-                </h2>
+            {status === 'PO Submitted' &&
+              (() => {
+                const etaExceedsDelivery =
+                  !!etd &&
+                  !!etaDays &&
+                  parseInt(etaDays, 10) > 0 &&
+                  !!deliveryDate &&
+                  addDaysDateOnly(etd, parseInt(etaDays, 10)).getTime() > startOfDay(deliveryDate).getTime();
 
-                <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
-                  <Label className="mb-1 block text-sm text-gray-500">Delivery Date</Label>
-                  <p className="text-[18px] text-black">
-                    {formatDateWithOrdinal(poDetail?.DeliveryDate ?? poDetail?.['Delivery date'])}
-                  </p>
-                </div>
+                const etaExceededDays =
+                  calculatedEtaDate && deliveryDate
+                    ? diffDaysDateOnly(calculatedEtaDate, deliveryDate)
+                    : null;
 
-                <div className="space-y-4">
-                  <div>
-                    <Label htmlFor="vendor-etd">
-                      ETD (Estimate Time of Delivery) <span className="text-red-500">*</span>
-                    </Label>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button variant="outline" className="mt-1 w-full justify-start text-left" type="button">
-                          <Calendar className="mr-2 h-4 w-4" />
-                          {etd ? format(etd, 'PPP') : <span>Pick a date</span>}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0">
-                        <CalendarComponent mode="single" selected={etd} onSelect={setEtd} initialFocus />
-                      </PopoverContent>
-                    </Popover>
-                  </div>
+                return (
+                  <Card className="p-6">
+                    <h2 className="mb-4" style={{ color: '#014357' }}>
+                      Update Order Information
+                    </h2>
 
-                  <div>
-                    <Label htmlFor="vendor-eta-days">
-                      Leadtime Delivery <span className="text-red-500">*</span>
-                    </Label>
-                    <Input
-                      id="vendor-eta-days"
-                      type="number"
-                      min={1}
-                      value={etaDays}
-                      onChange={(e) => setEtaDays(e.target.value)}
-                      placeholder="Number of days"
-                      className="mt-1"
-                    />
+                    <RequiredDeliveryDateCard deliveryDateValue={poDeliveryDateValue} />
 
-                    {calculatedEtaDate && (
-                      <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
-                        <p className="text-sm text-gray-600">ETA Date:</p>
-                        <p className="text-lg" style={{ color: '#014357' }}>
-                          {format(calculatedEtaDate, 'PPP')}
-                        </p>
+                    <div className="space-y-4">
+                      <div>
+                        <Label htmlFor="vendor-etd">
+                          ETD (Estimate Time of Delivery) <span className="text-red-500">*</span>
+                        </Label>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button variant="outline" className="mt-1 w-full justify-start text-left" type="button">
+                              <Calendar className="mr-2 h-4 w-4" />
+                              {etd ? format(etd, 'PPP') : <span>Pick a date</span>}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0">
+                            <CalendarComponent mode="single" selected={etd} onSelect={setEtd} initialFocus />
+                          </PopoverContent>
+                        </Popover>
                       </div>
-                    )}
 
-                    {isEtaBeyondDeliveryDate && (
-                      <ValidationNotice
-                        title="ETA exceeds the PO delivery date"
-                        description="The ETA date cannot be later than the PO delivery date. Please create a Reschedule ETA request before continuing."
-                        actionLabel="Create Reschedule ETA Request"
-                        onAction={handleOpenRescheduleDialog}
-                      />
-                    )}
-                  </div>
-
-                  <div>
-                    <Label htmlFor="vendor-remarks">
-                      Remarks <span className="text-red-500">*</span>
-                    </Label>
-                    <Textarea
-                      id="vendor-remarks"
-                      value={remarks}
-                      onChange={(e) => setRemarks(e.target.value)}
-                      placeholder="Enter remarks about the order..."
-                      className="mt-1"
-                      rows={4}
-                    />
-                  </div>
-
-                  <Button
-                    type="button"
-                    aria-disabled={submittingPoStatus || isEtaBeyondDeliveryDate}
-                    className="w-full"
-                    style={{
-                      backgroundColor: submittingPoStatus || isEtaBeyondDeliveryDate ? '#94A3B8' : '#014357',
-                      color: 'white',
-                      cursor: submittingPoStatus || isEtaBeyondDeliveryDate ? 'not-allowed' : 'pointer',
-                      opacity: submittingPoStatus || isEtaBeyondDeliveryDate ? 0.7 : 1,
-                    }}
-                    onClick={handleClickSubmitInformation}
-                  >
-                    {submittingPoStatus ? 'Submitting...' : 'Submit Information'}
-                  </Button>
-                </div>
-              </Card>
-            )}
-
-            {status === 'Work in Progress' && (
-              <Card className="p-6">
-                <h2 className="mb-4" style={{ color: '#014357' }}>
-                  Update Delivery Information
-                </h2>
-
-                <div className="space-y-4">
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                    <Label className="mb-1 block text-sm text-gray-500">Order Quantity</Label>
-                    <p className="text-[18px] text-black">{orderQuantity}</p>
-                  </div>
-
-                  {isQuantityMismatch && (
-                    <ValidationNotice
-                      title="Quantity does not match"
-                      description="The entered quantity must match the ordered quantity before this delivery update can be submitted."
-                    />
-                  )}
-
-                  {isCalculatedDeliveryDateBeyondPoDeliveryDate && (
-                    <ValidationNotice
-                      title="Delivery update cannot be submitted"
-                      description="The calculated delivery date is later than the PO delivery date. Please create a Reschedule ETA request before continuing."
-                      actionLabel="Go to RE ETA Request"
-                      onAction={handleOpenRescheduleDialog}
-                    />
-                  )}
-
-                  <div>
-                    <Label htmlFor="vendor-awb">
-                      AWB (Air Waybill) <span className="text-red-500">*</span>
-                    </Label>
-                    <Input
-                      id="vendor-awb"
-                      type="text"
-                      value={awb}
-                      onChange={(e) => setAwb(e.target.value)}
-                      placeholder="Enter AWB number (e.g., AWB-2024-001234567)"
-                      className="mt-1"
-                    />
-                  </div>
-
-                  <div>
-                    <Label htmlFor="actual-delivery-date">
-                      Actual Delivery Date <span className="text-red-500">*</span>
-                    </Label>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button variant="outline" className="mt-1 w-full justify-start text-left" type="button">
-                          <Calendar className="mr-2 h-4 w-4" />
-                          {actualDeliveryDate ? format(actualDeliveryDate, 'PPP') : <span>Pick a date</span>}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0">
-                        <CalendarComponent
-                          mode="single"
-                          selected={actualDeliveryDate}
-                          onSelect={setActualDeliveryDate}
-                          initialFocus
+                      <div>
+                        <Label htmlFor="vendor-eta-days">
+                          Leadtime Delivery <span className="text-red-500">*</span>
+                        </Label>
+                        <Input
+                          id="vendor-eta-days"
+                          type="number"
+                          min={1}
+                          value={etaDays}
+                          onChange={(e) => setEtaDays(e.target.value)}
+                          placeholder="Number of days"
+                          className="mt-1"
                         />
-                      </PopoverContent>
-                    </Popover>
-                  </div>
 
-                  <div>
-                    <Label htmlFor="leadtime-delivery">
-                      Leadtime Delivery <span className="text-red-500">*</span>
-                    </Label>
-                    <Input
-                      id="leadtime-delivery"
-                      type="number"
-                      min={1}
-                      value={leadtimeDelivery}
-                      onChange={(e) => setLeadtimeDelivery(e.target.value)}
-                      placeholder="Number of days"
-                      className="mt-1"
-                    />
+                        {calculatedEtaDate && (
+                          <div
+                            className="mt-3 rounded-lg border border-gray-200 p-3"
+                            style={{ backgroundColor: 'rgba(106, 167, 93, 0.06)' }}
+                          >
+                            <div className="flex items-center gap-2">
+                              <CheckCircle2 className="h-4 w-4" style={{ color: '#6AA75D' }} />
+                              <div>
+                                <p className="text-xs text-gray-500">Calculated ETA Date</p>
+                                <p style={{ color: '#014357' }}>{format(calculatedEtaDate, 'PPP')}</p>
+                              </div>
+                            </div>
 
-                    {calculatedLeadtimeDeliveryDate && (
-                      <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
-                        <p className="text-sm text-gray-600">Calculated Delivery Date:</p>
-                        <p className="text-lg" style={{ color: '#014357' }}>
-                          {format(calculatedLeadtimeDeliveryDate, 'PPP')}
-                        </p>
+                            {etaExceedsDelivery && etd && deliveryDate && etaExceededDays !== null && etaExceededDays > 0 && (
+                              <div className="mt-2 flex items-center gap-1.5 border-t border-gray-200 pt-2">
+                                <AlertCircle className="h-3.5 w-3.5" style={{ color: '#ED832D' }} />
+                                <p className="text-xs" style={{ color: '#ED832D' }}>
+                                  This exceeds the required delivery date by {etaExceededDays} days
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
 
-                  <div>
-                    <Label htmlFor="delivery-quantity">
-                      Quantity <span className="text-red-500">*</span>
-                    </Label>
-                    <Input
-                      id="delivery-quantity"
-                      type="number"
-                      min={0}
-                      value={quantity}
-                      onChange={(e) => setQuantity(e.target.value)}
-                      placeholder="Enter delivered quantity"
-                      className="mt-1"
-                    />
-                  </div>
-
-                  <div>
-                    <Label htmlFor="awb-document">
-                      Upload Document AWB <span className="text-red-500">*</span>
-                    </Label>
-                    <Input
-                      key={awbFileInputKey}
-                      id="awb-document"
-                      type="file"
-                      accept=".pdf,.png,.jpg,.jpeg"
-                      onChange={handleAwbFileChange}
-                      className="mt-1"
-                    />
-                    <p className="mt-1 text-xs text-gray-500">Allowed file types: PDF, PNG, JPG, JPEG</p>
-
-                    {awbFile && (
-                      <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
-                        <p className="text-sm text-gray-700">{awbFile.name}</p>
+                      <div>
+                        <Label htmlFor="vendor-remarks">
+                          Remarks <span className="text-red-500">*</span>
+                        </Label>
+                        <Textarea
+                          id="vendor-remarks"
+                          value={remarks}
+                          onChange={(e) => setRemarks(e.target.value)}
+                          placeholder="Enter remarks about the order..."
+                          className="mt-1"
+                          rows={4}
+                        />
                       </div>
-                    )}
-                  </div>
 
-                  <Button
-                    className="w-full"
-                    style={{
-                      backgroundColor:
-                        submittingPoStatus || isQuantityMismatch || isCalculatedDeliveryDateBeyondPoDeliveryDate
-                          ? '#94A3B8'
-                          : '#014357',
-                    }}
-                    disabled={
-                      submittingPoStatus || isQuantityMismatch || isCalculatedDeliveryDateBeyondPoDeliveryDate
-                    }
-                    onClick={handleSubmitAwb}
-                  >
-                    {submittingPoStatus ? 'Submitting...' : 'Submit Delivery Information'}
-                  </Button>
-                </div>
-              </Card>
-            )}
+                      {etaExceedsDelivery && (
+                        <div
+                          className="flex items-start gap-3 rounded-lg p-3"
+                          style={{
+                            backgroundColor: 'rgba(220, 38, 38, 0.06)',
+                            border: '1px solid rgba(220, 38, 38, 0.15)',
+                          }}
+                        >
+                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: '#DC2626' }} />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm text-gray-700">
+                              ETA exceeds the delivery date. Please{' '}
+                              <button
+                                type="button"
+                                className="btn-underlined-text inline cursor-pointer border-none bg-transparent p-0"
+                                style={{ color: '#014357' }}
+                                onClick={handleOpenRescheduleDialog}
+                              >
+                                submit a Reschedule ETA Request again
+                              </button>{' '}
+                              before proceeding.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {hasPendingReEtaApproval && (
+                        <div
+                          className="flex items-start gap-3 rounded-lg p-3"
+                          style={{
+                            backgroundColor: 'rgba(220, 38, 38, 0.06)',
+                            border: '1px solid rgba(220, 38, 38, 0.15)',
+                          }}
+                        >
+                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: '#DC2626' }} />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm text-gray-700">{WAITING_REETA_APPROVAL_MESSAGE}</p>
+                          </div>
+                        </div>
+                      )}
+
+                      <Button
+                        type="button"
+                        className="w-full"
+                        style={{
+                          backgroundColor: isPoSubmittedSubmitDisabled || submittingPoStatus ? '#94A3B8' : '#014357',
+                          color: 'white',
+                          cursor: isPoSubmittedSubmitDisabled || submittingPoStatus ? 'not-allowed' : 'pointer',
+                          opacity: isPoSubmittedSubmitDisabled || submittingPoStatus ? 0.7 : 1,
+                        }}
+                        disabled={isPoSubmittedSubmitDisabled || submittingPoStatus}
+                        onClick={handleClickSubmitInformation}
+                      >
+                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                        {submittingPoStatus ? 'Submitting...' : 'Submit & Move to Work in Progress'}
+                      </Button>
+                    </div>
+                  </Card>
+                );
+              })()}
+
+            {status === 'Work in Progress' &&
+              (() => {
+                const previousEta = parseServerDate(poDetail?.CurrentEta ?? poDetail?.ETA) ?? null;
+                const previousEtaLabel = previousEta ? format(previousEta, 'MMM dd, yyyy') : '-';
+
+                const newCalculatedEta = calculatedLeadtimeDeliveryDate;
+
+                const etaDifference =
+                  previousEta && newCalculatedEta
+                    ? diffDaysDateOnly(newCalculatedEta, previousEta)
+                    : null;
+
+                const isBlocked =
+                  submittingPoStatus ||
+                  isQuantityMismatch ||
+                  isCalculatedDeliveryDateBeyondPoDeliveryDate ||
+                  hasPendingReEtaApproval;
+
+                const etaExceededDays =
+                  newCalculatedEta && deliveryDate
+                    ? diffDaysDateOnly(newCalculatedEta, deliveryDate)
+                    : null;
+
+                return (
+                  <Card className="p-6">
+                    <h2 className="mb-0" style={{ color: '#014357' }}>
+                      Update Delivery Information
+                    </h2>
+                    <p className="m-[0px] text-sm text-gray-500">
+                      Provide delivery details to mark this order as On Delivery.
+                    </p>
+
+                    <div
+                      className="m-[0px] mt-2 grid grid-cols-1 gap-4 rounded-lg p-4 sm:grid-cols-2"
+                      style={{
+                        backgroundColor: 'rgba(1, 67, 87, 0.04)',
+                        border: '1px solid rgba(1, 67, 87, 0.1)',
+                      }}
+                    >
+                      <div>
+                        <Label className="mb-1 block text-xs uppercase tracking-wide text-gray-400">
+                          Order Quantity
+                        </Label>
+                        <p style={{ color: '#014357' }}>{orderQuantity} units</p>
+                      </div>
+
+                      <div>
+                        <Label className="mb-1 block text-xs uppercase tracking-wide text-gray-400">
+                          ETA (from previous step)
+                        </Label>
+                        <p style={{ color: '#014357' }}>{previousEtaLabel}</p>
+                      </div>
+                    </div>
+
+                    <div className="mt-1 grid grid-cols-1 gap-6 sm:grid-cols-2">
+                      <div className="space-y-5">
+                        <div>
+                          <Label htmlFor="delivery-quantity">
+                            Quantity <span className="text-red-500">*</span>
+                          </Label>
+                          <Input
+                            id="delivery-quantity"
+                            type="number"
+                            min={0}
+                            value={quantity}
+                            onChange={(e) => setQuantity(e.target.value)}
+                            onWheel={(e) => (e.target as HTMLInputElement).blur()}
+                            placeholder={`Must be exactly ${orderQuantity}`}
+                            className="mt-1.5"
+                          />
+                        </div>
+
+                        <div className="mt-4">
+                          <Label htmlFor="vendor-awb">
+                            AWB (Air Waybill) <span className="text-red-500">*</span>
+                          </Label>
+                          <Input
+                            id="vendor-awb"
+                            type="text"
+                            value={awb}
+                            onChange={(e) => setAwb(e.target.value)}
+                            placeholder="e.g., AWB-2026-001234567"
+                            className="mt-1.5"
+                          />
+                        </div>
+
+                        <div className="mt-4">
+                          <Label htmlFor="awb-document">
+                            AWB Document <span className="text-red-500">*</span>
+                          </Label>
+
+                          <div className="mt-1.5">
+                            <label
+                              htmlFor="awb-document"
+                              className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-gray-300 px-3 py-2 transition-colors hover:border-gray-400 hover:bg-gray-50"
+                            >
+                              <FileText className="h-4 w-4 text-gray-400" />
+                              <span className="text-sm text-gray-500">
+                                {awbFile ? awbFile.name : 'Upload file'}
+                              </span>
+                            </label>
+
+                            <input
+                              key={awbFileInputKey}
+                              id="awb-document"
+                              type="file"
+                              className="hidden"
+                              accept=".pdf,.png,.jpg,.jpeg"
+                              onChange={handleAwbFileChange}
+                            />
+                          </div>
+
+                          <p className="mt-1 text-xs text-gray-500">Allowed file types: PDF, PNG, JPG, JPEG</p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-5">
+                        <div>
+                          <Label htmlFor="actual-delivery-date">
+                            Actual Delivery Date <span className="text-red-500">*</span>
+                          </Label>
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="outline"
+                                className="mt-1.5 w-full justify-start text-left"
+                                type="button"
+                              >
+                                <Calendar className="mr-2 h-4 w-4 text-gray-400" />
+                                {actualDeliveryDate ? (
+                                  format(actualDeliveryDate, 'PPP')
+                                ) : (
+                                  <span className="text-gray-400">Select date</span>
+                                )}
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0">
+                              <CalendarComponent
+                                mode="single"
+                                selected={actualDeliveryDate}
+                                onSelect={setActualDeliveryDate}
+                                initialFocus
+                              />
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+
+                        <div className="mb-6 mt-4">
+                          <Label htmlFor="leadtime-delivery">
+                            Leadtime Delivery (days) <span className="text-red-500">*</span>
+                          </Label>
+                          <Input
+                            id="leadtime-delivery"
+                            type="number"
+                            min={1}
+                            value={leadtimeDelivery}
+                            onChange={(e) => setLeadtimeDelivery(e.target.value)}
+                            onWheel={(e) => (e.target as HTMLInputElement).blur()}
+                            placeholder="e.g., 5"
+                            className="mt-1.5"
+                          />
+                        </div>
+
+                        {newCalculatedEta && (
+                          <div
+                            className="flex items-center justify-between rounded-lg px-3 py-4"
+                            style={{
+                              backgroundColor:
+                                etaDifference !== null && etaDifference > 0
+                                  ? 'rgba(237, 131, 45, 0.06)'
+                                  : 'rgba(106, 167, 93, 0.06)',
+                              border: `1px solid ${
+                                etaDifference !== null && etaDifference > 0
+                                  ? 'rgba(237, 131, 45, 0.15)'
+                                  : 'rgba(106, 167, 93, 0.15)'
+                              }`,
+                            }}
+                          >
+                            <div className="flex items-center gap-2">
+                              <CalendarDays
+                                className="h-4 w-4"
+                                style={{
+                                  color:
+                                    etaDifference !== null && etaDifference > 0 ? '#ED832D' : '#6AA75D',
+                                }}
+                              />
+                              <span className="text-sm text-gray-600">New ETA</span>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm" style={{ color: '#014357' }}>
+                                {format(newCalculatedEta, 'MMM dd, yyyy')}
+                              </span>
+
+                              {etaDifference !== null && etaDifference !== 0 && (
+                                <Badge
+                                  className="px-1.5 py-0.5 text-xs"
+                                  style={{
+                                    backgroundColor:
+                                      etaDifference > 0
+                                        ? 'rgba(237, 131, 45, 0.12)'
+                                        : 'rgba(106, 167, 93, 0.12)',
+                                    color: etaDifference > 0 ? '#ED832D' : '#6AA75D',
+                                    border: 'none',
+                                  }}
+                                >
+                                  {etaDifference > 0
+                                    ? `+${etaDifference}d vs previous`
+                                    : `${Math.abs(etaDifference)}d earlier`}
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mt-4">
+                      {isQuantityMismatch && (
+                        <div
+                          className="mb-4 flex items-start gap-3 rounded-lg p-3"
+                          style={{
+                            backgroundColor: 'rgba(220, 38, 38, 0.06)',
+                            border: '1px solid rgba(220, 38, 38, 0.15)',
+                          }}
+                        >
+                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: '#DC2626' }} />
+                          <p className="text-sm text-gray-700">
+                            Quantity must be exactly{' '}
+                            <span style={{ color: '#014357' }}>{orderQuantity} units</span> to match the order
+                            quantity.
+                          </p>
+                        </div>
+                      )}
+
+                      {isCalculatedDeliveryDateBeyondPoDeliveryDate && (
+                        <div
+                          className="mb-4 flex items-start gap-3 rounded-lg p-3"
+                          style={{
+                            backgroundColor: 'rgba(220, 38, 38, 0.06)',
+                            border: '1px solid rgba(220, 38, 38, 0.15)',
+                          }}
+                        >
+                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: '#DC2626' }} />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm text-gray-700">
+                              New ETA exceeds the required delivery date
+                              {etaExceededDays && etaExceededDays > 0 ? ` by ${etaExceededDays} days` : ''}. Please{' '}
+                              <button
+                                className="btn-underlined-text inline cursor-pointer border-none bg-transparent p-0 underline"
+                                style={{ color: '#014357' }}
+                                onClick={handleOpenRescheduleDialog}
+                                type="button"
+                              >
+                                submit a Re-ETA request again
+                              </button>{' '}
+                              before updating the delivery status.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {hasPendingReEtaApproval && (
+                        <div
+                          className="mb-4 flex items-start gap-3 rounded-lg p-3"
+                          style={{
+                            backgroundColor: 'rgba(220, 38, 38, 0.06)',
+                            border: '1px solid rgba(220, 38, 38, 0.15)',
+                          }}
+                        >
+                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: '#DC2626' }} />
+                          <p className="text-sm text-gray-700">{WAITING_REETA_APPROVAL_MESSAGE}</p>
+                        </div>
+                      )}
+
+                      <Button
+                        className="w-full text-white"
+                        style={{ backgroundColor: isBlocked ? '#9CA3AF' : '#014357' }}
+                        disabled={isBlocked}
+                        onClick={handleSubmitAwb}
+                      >
+                        <Truck className="mr-2 h-4 w-4" />
+                        {submittingPoStatus ? 'Submitting...' : 'Submit & Mark On Delivery'}
+                      </Button>
+                    </div>
+                  </Card>
+                );
+              })()}
           </>
         )}
 
@@ -1997,8 +2400,7 @@ export function PurchaseOrderDetail({
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
               <Label className="mb-2 block text-sm text-gray-600">Current ETA</Label>
               <p className="text-lg" style={{ color: '#014357' }}>
-                {effectiveCurrentEta ? formatDate(effectiveCurrentEta) : 'Not set'}
-                {etaDays ? ` (${etaDays} days from ETD)` : ''}
+                {currentEtaForReschedule ? formatDate(currentEtaForReschedule) : 'Not set'}
               </p>
             </div>
 

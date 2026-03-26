@@ -157,6 +157,7 @@ const STATUS_TAB_TO_PARAM: Partial<Record<Exclude<StatusTab, 'all'>, string>> = 
   created: 'submitted',
   wip: 'workInProgress',
   delivery: 'onDelivery',
+  received: 'received',
 };
 
 const ATTENTION_UI_TO_BACKEND: Record<Exclude<AttentionFilter, null>, 1 | 2> = {
@@ -322,7 +323,6 @@ const mapBackendStatusToDisplay = (status: string): string => {
       return status || '-';
   }
 };
-
 const mapDisplayStatusToBackend = (status: string): string | null => {
   const normalized = (status || '').trim().toLowerCase();
 
@@ -330,16 +330,12 @@ const mapDisplayStatusToBackend = (status: string): string | null => {
     case 'po submitted':
     case 'submitted':
       return 'submitted';
-
     case 'work in progress':
       return 'workInProgress';
-
     case 'on delivery':
       return 'onDelivery';
-
     case 'received':
-      return null;
-
+      return 'received'; // jangan null
     default:
       return null;
   }
@@ -663,7 +659,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         : null;
 
     const effectiveStatusParam = filterStatusParam ?? tabStatusParam;
-
+    console.log('effectiveStatusParam ',effectiveStatusParam );
     if (effectiveStatusParam) {
       url.searchParams.set('status', effectiveStatusParam);
     }
@@ -1596,33 +1592,11 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             )}
           </div>
 
-          {/* <div className="grid grid-cols-1 gap-4 mb-4">
-            <Card
-              className={[
-                'p-4 shadow-[0_2px_4px_rgba(220,38,38,0.25)] border-0 cursor-pointer transition-all w-full',
-                specialFilter === 'overdue' ? 'ring-2 ring-[#DC2626]' : ''
-              ].join(' ')}
-              style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)' }}
-              onClick={() => handleToggleAttentionCard('overdue')}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-white shadow-sm">
-                    <AlertTriangle className="h-4 w-4" style={{ color: '#DC2626' }} />
-                  </div>
-                  <div className="text-gray-900 text-sm" style={{ fontWeight: 600 }}>Overdue</div>
-                </div>
-                <div className="text-2xl font-bold" style={{ color: '#DC2626', fontWeight: 800 }}>
-                  {overdueCount}
-                </div>
-              </div>
-            </Card>
-          </div> */}
           <div className="grid grid-cols-1 gap-4 mb-4">
   <Card
     className={[
       'p-4 shadow-[0_2px_4px_rgba(220,38,38,0.25)] border-0 cursor-pointer transition-all w-full',
-      specialFilter === 'overdue' ? 'ring-2 ring-[#DC2626]' : ''
+      specialFilter === 'overdue' ? 'overdue-active' : ''
     ].join(' ')}
     style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)' }}
     onClick={() => handleToggleAttentionCard('overdue')}
