@@ -25,6 +25,7 @@ namespace EXPOAPI.Controllers
             ["onDelivery"] = "On Delivery",
             ["partiallyReceived"] = "Partially Received",
             ["fullyReceived"] = "Fully Received",
+            ["received"] = "Received",
         };
 
         public PurchaseOrderController(
