@@ -18,7 +18,7 @@ import {
 import { toast } from 'sonner';
 
 import { API } from '../../config';
-import { getAccessToken } from '../../utils/authSession';
+import { getAccessToken, redirectToLoginExpired } from '../../utils/authSession';
 import { Alert, AlertDescription } from '../ui/alert';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -236,6 +236,17 @@ const buildMultipartAuthHeaders = (): HeadersInit => {
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
+const fetchWithAuth = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const res = await fetch(input, init);
+
+  if (res.status === 401) {
+    redirectToLoginExpired();
+    throw new Error('Session expired');
+  }
+
+  return res;
+};
+
 // ===================== Helpers =====================
 const trim = (v: unknown): string => (v === null || v === undefined ? '' : String(v).trim());
 
@@ -396,7 +407,7 @@ const getReEtaRequestedAt = (row: any): Date | null => {
 const getLatestApprovedReEta = (rows: any[]): any | null => {
   const approvedRows = rows.filter((row) => {
     const status = normalizeRescheduleStatus(
-      row?.['Reschedule Status'] ?? row?.RescheduleStatus ?? row?.status ?? row?.Status,
+      row?.['Reschedule Status'] ?? row?.RescheduleStatus ?? row?.status ?? row?.Status
     );
     return status === 'Approved';
   });
@@ -420,7 +431,7 @@ const pickBase64File = (
   base64Data: unknown,
   contentType?: unknown,
   size?: unknown,
-  fallbackName = 'File',
+  fallbackName = 'File'
 ): ReEtaFile | null => {
   const base64 = trim(base64Data);
   if (!base64) return null;
@@ -428,8 +439,7 @@ const pickBase64File = (
   const name = trim(fileName) || fallbackName;
   const mime = trim(contentType) || null;
 
-  const numericSize =
-    size === null || size === undefined || size === '' ? null : Number(size);
+  const numericSize = size === null || size === undefined || size === '' ? null : Number(size);
 
   return {
     name,
@@ -452,22 +462,22 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
       r?.ID ??
       r?.RequestID ??
       r?.RequestNo,
-    `RSR-${String(idx + 1).padStart(3, '0')}`,
+    `RSR-${String(idx + 1).padStart(3, '0')}`
   );
 
   const status = normalizeRescheduleStatus(
-    r?.['Reschedule Status'] ?? r?.RescheduleStatus ?? r?.status ?? r?.Status,
+    r?.['Reschedule Status'] ?? r?.RescheduleStatus ?? r?.status ?? r?.Status
   );
 
   const oldETA = safeDateOnly(r?.OldETA ?? r?.oldETA);
   const newETA = safeDateOnly(r?.NewETA ?? r?.newETA);
 
   const requestDate = safeDateOnly(
-    r?.RequestedAt ?? r?.requestDate ?? r?.RequestDate ?? r?.CreatedAt ?? r?.CREATED_AT,
+    r?.RequestedAt ?? r?.requestDate ?? r?.RequestDate ?? r?.CreatedAt ?? r?.CREATED_AT
   );
 
   const responseDate = safeDateOnly(
-    r?.UpdatedAt ?? r?.UPDATED_AT ?? r?.ResponseAt ?? r?.responseDate ?? r?.ResponseDate,
+    r?.UpdatedAt ?? r?.UPDATED_AT ?? r?.ResponseAt ?? r?.responseDate ?? r?.ResponseDate
   );
 
   const requestedBy =
@@ -482,7 +492,7 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
         r?.remarks ??
         r?.Remarks ??
         r?.Note ??
-        r?.note,
+        r?.note
     ) || '-';
 
   const proposedETADays = trim(r?.ProposedETADays ?? r?.['Proposed ETA']) || '-';
@@ -493,7 +503,7 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
       r?.EvidenceBase64Data,
       r?.EvidenceContentType,
       r?.EvidenceSize,
-      'Evidence File',
+      'Evidence File'
     ) || null;
 
   const feedbackFile =
@@ -502,7 +512,7 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
       r?.FeedbackBase64Data,
       r?.FeedbackContentType,
       r?.FeedbackSize,
-      'Feedback File',
+      'Feedback File'
     ) || null;
 
   const vendorRespFile =
@@ -511,7 +521,7 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
       r?.VendorRespBase64Data,
       r?.VendorRespContentType,
       r?.VendorRespSize,
-      'Vendor Response File',
+      'Vendor Response File'
     ) || null;
 
   const approvalFile =
@@ -520,9 +530,8 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
       r?.ApprovalFile,
       r?.FeedbackContentType,
       r?.FeedbackSize,
-      'Approval File',
-    ) ||
-    (status === 'Approved' ? feedbackFile : null);
+      'Approval File'
+    ) || (status === 'Approved' ? feedbackFile : null);
 
   const rejectionFile =
     pickBase64File(
@@ -530,9 +539,8 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
       r?.RejectionFile,
       r?.FeedbackContentType,
       r?.FeedbackSize,
-      'Rejection File',
-    ) ||
-    (status === 'Rejected' ? feedbackFile : null);
+      'Rejection File'
+    ) || (status === 'Rejected' ? feedbackFile : null);
 
   const confirmationFile =
     pickBase64File(
@@ -540,9 +548,8 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
       r?.ConfirmationFile,
       r?.VendorRespContentType,
       r?.VendorRespSize,
-      'Confirmation File',
-    ) ||
-    (status === 'Rejected' ? vendorRespFile : null);
+      'Confirmation File'
+    ) || (status === 'Rejected' ? vendorRespFile : null);
 
   const waitingFile =
     pickBase64File(
@@ -550,9 +557,8 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
       r?.WaitingFile,
       r?.FeedbackContentType,
       r?.FeedbackSize,
-      'Waiting File',
-    ) ||
-    (status !== 'Approved' && status !== 'Rejected' ? feedbackFile : null);
+      'Waiting File'
+    ) || (status !== 'Approved' && status !== 'Rejected' ? feedbackFile : null);
 
   return {
     id,
@@ -583,7 +589,7 @@ const extractIdPoItem = (detail: PoDetail | null, flowRows: ApiStatusFlowRow[]):
       detail?.idPoItem ??
       detail?.POIDItem ??
       detail?.POItemID ??
-      detail?.POID,
+      detail?.POID
   );
 
   if (fromDetail) return fromDetail;
@@ -593,7 +599,7 @@ const extractIdPoItem = (detail: PoDetail | null, flowRows: ApiStatusFlowRow[]):
       trim(r?.['ID PO Item']) ||
       trim(r?.IDPOItem) ||
       trim(r?.IdPoItem) ||
-      (trim(r?.['Purchasing Document']) && trim(r?.Item)),
+      (trim(r?.['Purchasing Document']) && trim(r?.Item))
   );
 
   const direct = trim(fromFlow?.['ID PO Item'] ?? fromFlow?.IDPOItem ?? fromFlow?.IdPoItem);
@@ -648,7 +654,9 @@ const getLastValidStatus = (rows: ApiStatusFlowRow[]): FlowStatus => {
 const getInitialServerEtd = (detail: PoDetail | null, rows: ApiStatusFlowRow[]): Date | undefined => {
   return (
     parseServerDate(detail?.CurrentETD ?? detail?.ETD) ??
-    parseServerDate(rows.find((r) => mapFlowStatus(r.Status) === 'PO Submitted')?.StatusAt ?? undefined)
+    parseServerDate(
+      rows.find((r) => mapFlowStatus(r.Status) === 'PO Submitted')?.StatusAt ?? undefined
+    )
   );
 };
 
@@ -667,7 +675,7 @@ const getInitialServerEtaDays = (detail: PoDetail | null, serverEtd?: Date): str
 
 const resolveStatusCardData = (
   poDetail: PoDetail | null,
-  latestApprovedReEtaDate?: string | null,
+  latestApprovedReEtaDate?: string | null
 ): StatusCardData => {
   const etd = parseServerDate(poDetail?.CurrentETD) ?? null;
   const etaDate = parseServerDate(poDetail?.CurrentEta) ?? null;
@@ -854,8 +862,8 @@ function RequiredDeliveryDateCard({ deliveryDateValue }: RequiredDeliveryDateCar
               {isOverdue
                 ? `${Math.abs(daysLeft)} days overdue`
                 : daysLeft === 0
-                ? 'Delivery due today'
-                : `${daysLeft} days remaining`}
+                  ? 'Delivery due today'
+                  : `${daysLeft} days remaining`}
             </span>
           </div>
         )}
@@ -885,7 +893,7 @@ function StatusFlowHistory({ status, statusHistory }: StatusFlowHistoryProps) {
 
   const isActiveByTimestamp = useCallback(
     (statusName: FlowStatus) => !!statusHistory[statusName],
-    [statusHistory],
+    [statusHistory]
   );
 
   return (
@@ -969,7 +977,7 @@ function StatusRelatedInformation({
 }: StatusRelatedInformationProps) {
   const { etd, etaDate, etaDays, remarks, reEtaDate } = useMemo(
     () => resolveStatusCardData(poDetail, latestApprovedReEtaDate),
-    [poDetail, latestApprovedReEtaDate],
+    [poDetail, latestApprovedReEtaDate]
   );
 
   const workInProgressColor = getStatusColor('Work in Progress');
@@ -1226,7 +1234,7 @@ export function PurchaseOrderDetail({
       setLoadError(null);
 
       try {
-        const res = await fetch(API.DETAILPO(orderId), {
+        const res = await fetchWithAuth(API.DETAILPO(orderId), {
           method: 'GET',
           headers: buildAuthHeaders(),
           signal,
@@ -1257,8 +1265,6 @@ export function PurchaseOrderDetail({
         const reqs = Array.isArray(data?.ReEtaRequests) ? data.ReEtaRequests : [];
         const detail = (data?.PoDetail ?? data?.Order ?? null) as PoDetail | null;
 
-        console.log(data);
-
         setStatusFlowRows(flow);
         setReEtaRequestsRaw(reqs);
         setPoDetail(detail);
@@ -1274,6 +1280,10 @@ export function PurchaseOrderDetail({
         setAwb((prev) => prev || serverAwb);
         setEtaDays((prev) => prev || serverEtaDays);
       } catch (e: any) {
+        if (e?.message === 'Session expired') {
+          return;
+        }
+
         const isAbort = e?.name === 'AbortError';
 
         setStatusFlowRows([]);
@@ -1286,14 +1296,14 @@ export function PurchaseOrderDetail({
         setLoading(false);
       }
     },
-    [orderId],
+    [orderId]
   );
 
   useEffect(() => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 60_000);
 
-    fetchDetail(controller.signal).finally(() => clearTimeout(timeout));
+    void fetchDetail(controller.signal).finally(() => clearTimeout(timeout));
 
     return () => controller.abort();
   }, [fetchDetail]);
@@ -1301,17 +1311,18 @@ export function PurchaseOrderDetail({
   const statusHistory = useMemo(() => buildStatusHistory(statusFlowRows), [statusFlowRows]);
 
   const idPoItem = useMemo(() => extractIdPoItem(poDetail, statusFlowRows), [poDetail, statusFlowRows]);
-const latestApprovedReEta = useMemo(() => {
-  return getLatestApprovedReEta(reEtaRequestsRaw);
-}, [reEtaRequestsRaw]);
 
-const latestApprovedReEtaDate = useMemo(() => {
-  const fallbackDeliveryDate = poDetail?.DeliveryDate ?? poDetail?.['Delivery date'] ?? null;
+  const latestApprovedReEta = useMemo(() => {
+    return getLatestApprovedReEta(reEtaRequestsRaw);
+  }, [reEtaRequestsRaw]);
 
-  if (reEtaRequestsRaw.length === 0) return fallbackDeliveryDate;
+  const latestApprovedReEtaDate = useMemo(() => {
+    const fallbackDeliveryDate = poDetail?.DeliveryDate ?? poDetail?.['Delivery date'] ?? null;
 
-  return latestApprovedReEta?.NewETA ?? latestApprovedReEta?.newETA ?? fallbackDeliveryDate;
-}, [latestApprovedReEta, poDetail, reEtaRequestsRaw]);
+    if (reEtaRequestsRaw.length === 0) return fallbackDeliveryDate;
+
+    return latestApprovedReEta?.NewETA ?? latestApprovedReEta?.newETA ?? fallbackDeliveryDate;
+  }, [latestApprovedReEta, poDetail, reEtaRequestsRaw]);
 
   const poDeliveryDateValue = useMemo(() => {
     const approvedNewEta = latestApprovedReEtaDate;
@@ -1439,7 +1450,7 @@ const latestApprovedReEtaDate = useMemo(() => {
   }, [etd, newETADays]);
 
   const submitPoStatusUpdate = useCallback(async (payload: Record<string, unknown>) => {
-    const res = await fetch(API.POSTATUS_UPSERT(), {
+    const res = await fetchWithAuth(API.POSTATUS_UPSERT(), {
       method: 'POST',
       headers: buildAuthHeaders(),
       body: JSON.stringify(payload),
@@ -1460,7 +1471,7 @@ const latestApprovedReEtaDate = useMemo(() => {
   }, []);
 
   const submitOnDeliveryUpdate = useCallback(async (formData: FormData) => {
-    const res = await fetch(API.POSTATUS_ON_DELIVERY(), {
+    const res = await fetchWithAuth(API.POSTATUS_ON_DELIVERY(), {
       method: 'POST',
       headers: buildMultipartAuthHeaders(),
       body: formData,
@@ -1481,7 +1492,7 @@ const latestApprovedReEtaDate = useMemo(() => {
   }, []);
 
   const submitReEtaCreate = useCallback(async (payload: Record<string, unknown>) => {
-    const res = await fetch(API.REETA_CREATE(), {
+    const res = await fetchWithAuth(API.REETA_CREATE(), {
       method: 'POST',
       headers: buildAuthHeaders(),
       body: JSON.stringify(payload),
@@ -1495,7 +1506,9 @@ const latestApprovedReEtaDate = useMemo(() => {
     }
 
     if (!res.ok) {
-      throw new Error(data?.message || data?.Message || data?.title || 'Failed to create reschedule ETA request');
+      throw new Error(
+        data?.message || data?.Message || data?.title || 'Failed to create reschedule ETA request'
+      );
     }
 
     return data;
@@ -1547,7 +1560,9 @@ const latestApprovedReEtaDate = useMemo(() => {
       setHasFilledUpdate(true);
       await fetchDetail();
     } catch (error: any) {
-      toast.error(error?.message || 'Failed to update order information.');
+      if (error?.message !== 'Session expired') {
+        toast.error(error?.message || 'Failed to update order information.');
+      }
     } finally {
       setSubmittingPoStatus(false);
     }
@@ -1635,7 +1650,9 @@ const latestApprovedReEtaDate = useMemo(() => {
 
       await fetchDetail();
     } catch (error: any) {
-      toast.error(error?.message || 'Failed to update delivery information.');
+      if (error?.message !== 'Session expired') {
+        toast.error(error?.message || 'Failed to update delivery information.');
+      }
     } finally {
       setSubmittingPoStatus(false);
     }
@@ -1696,7 +1713,9 @@ const latestApprovedReEtaDate = useMemo(() => {
       handleCloseRescheduleDialog();
       await fetchDetail();
     } catch (error: any) {
-      toast.error(error?.message || 'Failed to submit reschedule request.');
+      if (error?.message !== 'Session expired') {
+        toast.error(error?.message || 'Failed to submit reschedule request.');
+      }
     } finally {
       setSubmittingReschedule(false);
     }
@@ -1721,7 +1740,7 @@ const latestApprovedReEtaDate = useMemo(() => {
       downloadBase64File(
         file.base64Data,
         file.name || 'document',
-        file.contentType || 'application/octet-stream',
+        file.contentType || 'application/octet-stream'
       );
       return;
     }
@@ -1747,8 +1766,7 @@ const latestApprovedReEtaDate = useMemo(() => {
             : 'bin';
 
     const fileName =
-      trim(poDetail?.AWBFileName) ||
-      `${trim(poDetail?.['Purchasing Document']) || 'AWB'}-AWB.${extension}`;
+      trim(poDetail?.AWBFileName) || `${trim(poDetail?.['Purchasing Document']) || 'AWB'}-AWB.${extension}`;
 
     downloadBase64File(base64, fileName, poDetail?.AWBContentType);
   }, [poDetail]);
@@ -1766,7 +1784,7 @@ const latestApprovedReEtaDate = useMemo(() => {
       return;
     }
 
-    handleSubmitOrderInformation();
+    void handleSubmitOrderInformation();
   }, [submittingPoStatus, hasPendingReEtaApproval, isEtaBeyondDeliveryDate, handleSubmitOrderInformation]);
 
   return (
@@ -1842,7 +1860,8 @@ const latestApprovedReEtaDate = useMemo(() => {
                   !!etaDays &&
                   parseInt(etaDays, 10) > 0 &&
                   !!deliveryDate &&
-                  addDaysDateOnly(etd, parseInt(etaDays, 10)).getTime() > startOfDay(deliveryDate).getTime();
+                  addDaysDateOnly(etd, parseInt(etaDays, 10)).getTime() >
+                    startOfDay(deliveryDate).getTime();
 
                 const etaExceededDays =
                   calculatedEtaDate && deliveryDate
@@ -1902,14 +1921,18 @@ const latestApprovedReEtaDate = useMemo(() => {
                               </div>
                             </div>
 
-                            {etaExceedsDelivery && etd && deliveryDate && etaExceededDays !== null && etaExceededDays > 0 && (
-                              <div className="mt-2 flex items-center gap-1.5 border-t border-gray-200 pt-2">
-                                <AlertCircle className="h-3.5 w-3.5" style={{ color: '#ED832D' }} />
-                                <p className="text-xs" style={{ color: '#ED832D' }}>
-                                  This exceeds the required delivery date by {etaExceededDays} days
-                                </p>
-                              </div>
-                            )}
+                            {etaExceedsDelivery &&
+                              etd &&
+                              deliveryDate &&
+                              etaExceededDays !== null &&
+                              etaExceededDays > 0 && (
+                                <div className="mt-2 flex items-center gap-1.5 border-t border-gray-200 pt-2">
+                                  <AlertCircle className="h-3.5 w-3.5" style={{ color: '#ED832D' }} />
+                                  <p className="text-xs" style={{ color: '#ED832D' }}>
+                                    This exceeds the required delivery date by {etaExceededDays} days
+                                  </p>
+                                </div>
+                              )}
                           </div>
                         )}
                       </div>
@@ -1997,9 +2020,7 @@ const latestApprovedReEtaDate = useMemo(() => {
                 const newCalculatedEta = calculatedLeadtimeDeliveryDate;
 
                 const etaDifference =
-                  previousEta && newCalculatedEta
-                    ? diffDaysDateOnly(newCalculatedEta, previousEta)
-                    : null;
+                  previousEta && newCalculatedEta ? diffDaysDateOnly(newCalculatedEta, previousEta) : null;
 
                 const isBlocked =
                   submittingPoStatus ||
@@ -2171,8 +2192,7 @@ const latestApprovedReEtaDate = useMemo(() => {
                               <CalendarDays
                                 className="h-4 w-4"
                                 style={{
-                                  color:
-                                    etaDifference !== null && etaDifference > 0 ? '#ED832D' : '#6AA75D',
+                                  color: etaDifference !== null && etaDifference > 0 ? '#ED832D' : '#6AA75D',
                                 }}
                               />
                               <span className="text-sm text-gray-600">New ETA</span>
@@ -2217,9 +2237,8 @@ const latestApprovedReEtaDate = useMemo(() => {
                         >
                           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: '#DC2626' }} />
                           <p className="text-sm text-gray-700">
-                            Quantity must be exactly{' '}
-                            <span style={{ color: '#014357' }}>{orderQuantity} units</span> to match the order
-                            quantity.
+                            Quantity must be exactly <span style={{ color: '#014357' }}>{orderQuantity} units</span>{' '}
+                            to match the order quantity.
                           </p>
                         </div>
                       )}

@@ -7,8 +7,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Badge } from '../ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter,
-  DialogHeader, DialogTitle, DialogTrigger
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
 } from '../ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { Checkbox } from '../ui/checkbox';
@@ -16,17 +21,36 @@ import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Textarea } from '../ui/textarea';
 import {
-  Search, Upload, Download, Filter, FileSpreadsheet, X, Columns3, Eye,
-  Package, FilePlus, Loader, Truck, CheckCircle2, AlertCircle, Pencil,
-  Clock, AlertTriangle
+  Search,
+  Upload,
+  Download,
+  Filter,
+  FileSpreadsheet,
+  X,
+  Columns3,
+  Eye,
+  Package,
+  FilePlus,
+  Loader,
+  Truck,
+  CheckCircle2,
+  AlertCircle,
+  Pencil,
+  Clock,
+  AlertTriangle,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import { ScrollArea } from '../ui/scroll-area';
 import { Separator } from '../ui/separator';
 import {
-  Pagination, PaginationContent, PaginationItem, PaginationLink,
-  PaginationNext, PaginationPrevious, PaginationEllipsis
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+  PaginationEllipsis,
 } from '../ui/pagination';
 
 import type { User } from './Login';
@@ -37,10 +61,13 @@ import {
   getAuthSession,
   getAccessToken,
   isVendorSession,
+  redirectToLoginExpired,
 } from '../../utils/authSession';
 
 // ================== Types ==================
-interface PurchaseOrderProps { user: User; }
+interface PurchaseOrderProps {
+  user: User;
+}
 
 type StatusTab = 'all' | 'created' | 'wip' | 'delivery' | 'received';
 type AttentionFilter = 'updates' | 'overdue' | null;
@@ -170,6 +197,42 @@ const ALLOWED_EXCEL_EXTENSIONS = ['.xlsx', '.xls'];
 const toArray = (v: any): any[] => (Array.isArray(v) ? v : v ? [v] : []);
 const clampUploadProgress = (value: number) => Math.max(0, Math.min(99, value));
 
+const getAuthToken = (): string => {
+  const local = localStorage.getItem('accessToken');
+  const sessionToken = getAccessToken();
+  return local || sessionToken || '';
+};
+
+const buildAuthHeaders = (): HeadersInit => {
+  const token = getAuthToken();
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+};
+
+const fetchWithAuth = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const res = await fetch(input, init);
+
+  if (res.status === 401) {
+    redirectToLoginExpired();
+    throw new Error('Session expired');
+  }
+
+  return res;
+};
+
+const parseErrorResponse = async (res: Response): Promise<string> => {
+  const text = await res.text();
+
+  try {
+    const json = text ? JSON.parse(text) : {};
+    return json.message || json.Message || json.error || json.title || `HTTP ${res.status}`;
+  } catch {
+    return text || `HTTP ${res.status}`;
+  }
+};
+
 const normalizeItemId = (it: any): OrderKey | null => {
   const v = it?.id ?? it?.ID ?? it?.Id ?? null;
   if (v === null || v === undefined || v === '') return null;
@@ -177,7 +240,7 @@ const normalizeItemId = (it: any): OrderKey | null => {
 };
 
 const getOrderKey = (o: PurchaseOrderItem): OrderKey =>
-  (o.id !== null && o.id !== undefined && o.id !== '' ? o.id : o.purchasingDocument);
+  o.id !== null && o.id !== undefined && o.id !== '' ? o.id : o.purchasingDocument;
 
 function unwrapPOPayload(json: AnyObj): {
   summary: PurchaseOrderSummary | null;
@@ -192,39 +255,37 @@ function unwrapPOPayload(json: AnyObj): {
   const paginationFromNode =
     (lvl2?.pagination ?? lvl2?.Pagination ?? null) as PurchaseOrderPagination | null;
 
-  const paginationFromSummary =
-    summary
-      ? {
-          pageNumber: Number(summary.PageNumber ?? 1),
-          pageSize: Number(summary.PageSize ?? 10),
-          totalFiltered: Number(summary.TotalFiltered ?? 0),
-          totalPages: Number(summary.TotalPages ?? 0),
-        }
-      : null;
+  const paginationFromSummary = summary
+    ? {
+        pageNumber: Number(summary.PageNumber ?? 1),
+        pageSize: Number(summary.PageSize ?? 10),
+        totalFiltered: Number(summary.TotalFiltered ?? 0),
+        totalPages: Number(summary.TotalPages ?? 0),
+      }
+    : null;
 
   const pagination = paginationFromNode ?? paginationFromSummary;
 
   const itemsRaw =
-    lvl2?.items ?? lvl2?.Items ?? lvl2?.rows ?? lvl2?.Rows ??
-    lvl2?.records ?? lvl2?.Records ?? lvl2?.dataList ?? lvl2?.DataList ??
-    lvl2?.list ?? lvl2?.List ?? [];
+    lvl2?.items ??
+    lvl2?.Items ??
+    lvl2?.rows ??
+    lvl2?.Rows ??
+    lvl2?.records ??
+    lvl2?.Records ??
+    lvl2?.dataList ??
+    lvl2?.DataList ??
+    lvl2?.list ??
+    lvl2?.List ??
+    [];
 
   const items = (Array.isArray(itemsRaw) ? itemsRaw : toArray(itemsRaw)) as PurchaseOrderItem[];
 
   const normalizedItems = items.map((x: any) => ({
     ...x,
     id: normalizeItemId(x),
-    deliveryDate:
-      x?.deliveryDate ??
-      x?.DeliveryDate ??
-      x?.['Delivery Date'] ??
-      null,
-    etaDate:
-      x?.etaDate ??
-      x?.ETADate ??
-      x?.EtaDate ??
-      x?.['ETA Date'] ??
-      null,
+    deliveryDate: x?.deliveryDate ?? x?.DeliveryDate ?? x?.['Delivery Date'] ?? null,
+    etaDate: x?.etaDate ?? x?.ETADate ?? x?.EtaDate ?? x?.['ETA Date'] ?? null,
     qtyOrder:
       x?.qtyOrder ??
       x?.QtyOrder ??
@@ -268,7 +329,9 @@ function unwrapPOMasterPayload(json: AnyObj): PurchaseOrderMasterResponse {
     listPlant: normalizeList(lvl2?.listPlant ?? lvl2?.ListPlant),
     listLocation: normalizeList(lvl2?.listLocation ?? lvl2?.ListLocation),
     listDocType: normalizeList(lvl2?.listDocType ?? lvl2?.ListDocType),
-    listPurchasingGroup: normalizeList(lvl2?.listPurchasingGroup ?? lvl2?.ListPurchasingGroup),
+    listPurchasingGroup: normalizeList(
+      lvl2?.listPurchasingGroup ?? lvl2?.ListPurchasingGroup
+    ),
   };
 }
 
@@ -290,8 +353,18 @@ const parseDdMmmYyyy = (s?: string | null): Date | null => {
   const year = Number(m[3]);
 
   const monthMap: Record<string, number> = {
-    jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
-    jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+    jan: 0,
+    feb: 1,
+    mar: 2,
+    apr: 3,
+    may: 4,
+    jun: 5,
+    jul: 6,
+    aug: 7,
+    sep: 8,
+    oct: 9,
+    nov: 10,
+    dec: 11,
   };
 
   const month = monthMap[mon];
@@ -323,6 +396,7 @@ const mapBackendStatusToDisplay = (status: string): string => {
       return status || '-';
   }
 };
+
 const mapDisplayStatusToBackend = (status: string): string | null => {
   const normalized = (status || '').trim().toLowerCase();
 
@@ -335,7 +409,7 @@ const mapDisplayStatusToBackend = (status: string): string | null => {
     case 'on delivery':
       return 'onDelivery';
     case 'received':
-      return 'received'; // jangan null
+      return 'received';
     default:
       return null;
   }
@@ -348,11 +422,16 @@ const isReceivedBackendStatus = (status: string): boolean => {
 
 const statusColor = (displayStatus: string) => {
   switch (displayStatus) {
-    case 'PO Submitted': return '#ED832D';
-    case 'Work in Progress': return '#5C8CB6';
-    case 'On Delivery': return '#008383';
-    case 'Received': return '#6AA75D';
-    default: return '#014357';
+    case 'PO Submitted':
+      return '#ED832D';
+    case 'Work in Progress':
+      return '#5C8CB6';
+    case 'On Delivery':
+      return '#008383';
+    case 'Received':
+      return '#6AA75D';
+    default:
+      return '#014357';
   }
 };
 
@@ -380,20 +459,6 @@ const syncAttractionQuery = (value: 1 | 2 | null) => {
   }
 
   window.history.replaceState({}, '', url.toString());
-};
-
-const getAuthToken = (): string => {
-  const local = localStorage.getItem('accessToken');
-  const sessionToken = getAccessToken();
-  return local || sessionToken || '';
-};
-
-const buildAuthHeaders = (): HeadersInit => {
-  const token = getAuthToken();
-  return {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
 };
 
 const vendorColumns: ColumnVis = {
@@ -510,14 +575,14 @@ const attentionBadge = (raw: AttentionRaw) => {
 
 const isExcelFile = (file: File): boolean => {
   const name = file.name.toLowerCase();
-  return ALLOWED_EXCEL_EXTENSIONS.some(ext => name.endsWith(ext));
+  return ALLOWED_EXCEL_EXTENSIONS.some((ext) => name.endsWith(ext));
 };
 
 const dedupeStrings = (arr: (string | null | undefined)[]) =>
-  Array.from(new Set(arr.filter(Boolean).map(v => String(v).trim()).filter(Boolean)));
+  Array.from(new Set(arr.filter(Boolean).map((v) => String(v).trim()).filter(Boolean)));
 
 const normalizeDisplayStatusOptions = (rows: MasterOption[]): string[] => {
-  const mapped = rows.map(x => mapBackendStatusToDisplay(x.text || x.value));
+  const mapped = rows.map((x) => mapBackendStatusToDisplay(x.text || x.value));
   return dedupeStrings(mapped);
 };
 
@@ -526,7 +591,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const [selectedOrderId, setSelectedOrderId] = useState<OrderKey | null>(null);
 
   const [activeTab, setActiveTab] = useState<StatusTab>('all');
-  const [specialFilter, setSpecialFilter] = useState<AttentionFilter>(() => getInitialAttentionFilterFromQuery());
+  const [specialFilter, setSpecialFilter] = useState<AttentionFilter>(() =>
+    getInitialAttentionFilterFromQuery()
+  );
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isFilterOpen, setIsFilterOpen] = useState(false);
@@ -582,7 +649,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
   const [submittingUpdate, setSubmittingUpdate] = useState(false);
 
-  const [visibleColumns, setVisibleColumns] = useState<ColumnVis>(() => initialColumnsForRole(user.role));
+  const [visibleColumns, setVisibleColumns] = useState<ColumnVis>(() =>
+    initialColumnsForRole(user.role)
+  );
 
   const vendorName = useMemo(() => {
     const s = getAuthSession();
@@ -590,7 +659,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   }, [user.role]);
 
   const toggleColumn = useCallback((column: ColumnKey) => {
-    setVisibleColumns(prev => ({ ...prev, [column]: !prev[column] }));
+    setVisibleColumns((prev) => ({ ...prev, [column]: !prev[column] }));
   }, []);
 
   const currentAttentionParam: 1 | 2 | null = useMemo(() => {
@@ -606,34 +675,28 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, []);
 
-  const submitPoStatusUpdate = useCallback(
-    async (payload: Record<string, unknown>) => {
-      const res = await fetch(API.POSTATUS_UPSERT(), {
-        method: 'POST',
-        headers: buildAuthHeaders(),
-        body: JSON.stringify(payload),
-      });
+  const submitPoStatusUpdate = useCallback(async (payload: Record<string, unknown>) => {
+    const res = await fetchWithAuth(API.POSTATUS_UPSERT(), {
+      method: 'POST',
+      headers: buildAuthHeaders(),
+      body: JSON.stringify(payload),
+    });
 
-      let data: any = null;
-      try {
-        data = await res.json();
-      } catch {
-        data = null;
-      }
+    let data: any = null;
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
 
-      if (!res.ok) {
-        throw new Error(
-          data?.message ||
-          data?.Message ||
-          data?.title ||
-          'Failed to update PO status'
-        );
-      }
+    if (!res.ok) {
+      throw new Error(
+        data?.message || data?.Message || data?.title || 'Failed to update PO status'
+      );
+    }
 
-      return data;
-    },
-    [],
-  );
+    return data;
+  }, []);
 
   useEffect(() => {
     if (isFilterOpen) {
@@ -641,61 +704,64 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     }
   }, [isFilterOpen, appliedFilters]);
 
-  const buildListUrl = useCallback((
-    tab: StatusTab,
-    attention: 1 | 2 | null,
-    pageNumber: number,
-    pageSize: number,
-    filters: AppliedAdvancedFilters
-  ) => {
-    const url = new URL(API.SUMMARYPO());
+  const buildListUrl = useCallback(
+    (
+      tab: StatusTab,
+      attention: 1 | 2 | null,
+      pageNumber: number,
+      pageSize: number,
+      filters: AppliedAdvancedFilters
+    ) => {
+      const url = new URL(API.SUMMARYPO());
 
-    const tabStatusParam =
-      tab === 'all' ? null : STATUS_TAB_TO_PARAM[tab as Exclude<StatusTab, 'all'>] ?? null;
+      const tabStatusParam =
+        tab === 'all' ? null : STATUS_TAB_TO_PARAM[tab as Exclude<StatusTab, 'all'>] ?? null;
 
-    const filterStatusParam =
-      filters.status && filters.status !== 'all'
-        ? mapDisplayStatusToBackend(filters.status)
-        : null;
+      const filterStatusParam =
+        filters.status && filters.status !== 'all'
+          ? mapDisplayStatusToBackend(filters.status)
+          : null;
 
-    const effectiveStatusParam = filterStatusParam ?? tabStatusParam;
-    console.log('effectiveStatusParam ',effectiveStatusParam );
-    if (effectiveStatusParam) {
-      url.searchParams.set('status', effectiveStatusParam);
-    }
+      const effectiveStatusParam = filterStatusParam ?? tabStatusParam;
 
-    if (attention === 1 || attention === 2) {
-      url.searchParams.set('attention', String(attention));
-      url.searchParams.set('attraction', String(attention));
-    }
+      if (effectiveStatusParam) {
+        url.searchParams.set('status', effectiveStatusParam);
+      }
 
-    if (user.role === 'vendor' && vendorName) {
-      url.searchParams.set('vendorName', vendorName);
-    } else if (filters.supplier && filters.supplier !== 'all') {
-      url.searchParams.set('vendorName', filters.supplier);
-    }
+      if (attention === 1 || attention === 2) {
+        url.searchParams.set('attention', String(attention));
+        url.searchParams.set('attraction', String(attention));
+      }
 
-    if (filters.plant && filters.plant !== 'all') {
-      url.searchParams.set('plant', filters.plant);
-    }
+      if (user.role === 'vendor' && vendorName) {
+        url.searchParams.set('vendorName', vendorName);
+      } else if (filters.supplier && filters.supplier !== 'all') {
+        url.searchParams.set('vendorName', filters.supplier);
+      }
 
-    if (filters.storageLocation && filters.storageLocation !== 'all') {
-      url.searchParams.set('storageLocation', filters.storageLocation);
-    }
+      if (filters.plant && filters.plant !== 'all') {
+        url.searchParams.set('plant', filters.plant);
+      }
 
-    if (filters.purchasingGroup && filters.purchasingGroup !== 'all') {
-      url.searchParams.set('purchasingGroup', filters.purchasingGroup);
-    }
+      if (filters.storageLocation && filters.storageLocation !== 'all') {
+        url.searchParams.set('storageLocation', filters.storageLocation);
+      }
 
-    if (filters.purchasingDocType && filters.purchasingDocType !== 'all') {
-      url.searchParams.set('purchasingDocType', filters.purchasingDocType);
-    }
+      if (filters.purchasingGroup && filters.purchasingGroup !== 'all') {
+        url.searchParams.set('purchasingGroup', filters.purchasingGroup);
+      }
 
-    url.searchParams.set('pageNumber', String(pageNumber));
-    url.searchParams.set('pageSize', String(pageSize));
+      if (filters.purchasingDocType && filters.purchasingDocType !== 'all') {
+        url.searchParams.set('purchasingDocType', filters.purchasingDocType);
+      }
 
-    return url;
-  }, [user.role, vendorName]);
+      url.searchParams.set('pageNumber', String(pageNumber));
+      url.searchParams.set('pageSize', String(pageSize));
+
+      return url;
+    },
+    [user.role, vendorName]
+  );
 
   const buildCardsUrl = useCallback(() => {
     const url = new URL(API.SUMMARYPO());
@@ -711,7 +777,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     const url = new URL(API.MASTERPO());
 
     const tabStatusParam =
-      activeTab === 'all' ? null : STATUS_TAB_TO_PARAM[activeTab as Exclude<StatusTab, 'all'>] ?? null;
+      activeTab === 'all'
+        ? null
+        : STATUS_TAB_TO_PARAM[activeTab as Exclude<StatusTab, 'all'>] ?? null;
 
     const filterStatusParam =
       appliedFilters.status && appliedFilters.status !== 'all'
@@ -740,92 +808,88 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const fetchCardSummary = useCallback(async () => {
     try {
       const url = buildCardsUrl();
-      const res = await fetch(url.toString(), {
+      const res = await fetchWithAuth(url.toString(), {
         method: 'GET',
         headers: buildAuthHeaders(),
       });
 
       if (!res.ok) {
-        console.error('[PO] cardSummary HTTP error', res.status);
+        const msg = await parseErrorResponse(res);
+        console.error('[PO] cardSummary HTTP error', msg);
         return;
       }
 
       const json = await res.json();
       const unwrapped = unwrapPOPayload(json);
       setCardSummary(unwrapped.summary ?? null);
-    } catch (e) {
-      console.error('[PO] cardSummary fetch failed', e);
+    } catch (e: any) {
+      if (e?.message !== 'Session expired') {
+        console.error('[PO] cardSummary fetch failed', e);
+      }
     }
   }, [buildCardsUrl]);
 
-  const fetchPurchaseOrders = useCallback(async (tab: StatusTab, attention: 1 | 2 | null, pageNumber: number, pageSize: number) => {
-    setLoading(true);
-    setLoadError(null);
+  const fetchPurchaseOrders = useCallback(
+    async (tab: StatusTab, attention: 1 | 2 | null, pageNumber: number, pageSize: number) => {
+      setLoading(true);
+      setLoadError(null);
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60_000);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60_000);
 
-    const effectiveTab: StatusTab = attention ? 'all' : tab;
-    const url = buildListUrl(effectiveTab, attention, pageNumber, pageSize, appliedFilters);
+      const effectiveTab: StatusTab = attention ? 'all' : tab;
+      const url = buildListUrl(effectiveTab, attention, pageNumber, pageSize, appliedFilters);
 
-    try {
-      const res = await fetch(url.toString(), {
-        method: 'GET',
-        headers: buildAuthHeaders(),
-        signal: controller.signal,
-      });
+      try {
+        const res = await fetchWithAuth(url.toString(), {
+          method: 'GET',
+          headers: buildAuthHeaders(),
+          signal: controller.signal,
+        });
 
-      if (!res.ok) {
-        let body: any = undefined;
-        try {
-          const text = await res.text();
-          body = (() => {
-            try { return JSON.parse(text); } catch { return text; }
-          })();
-        } catch {}
+        if (!res.ok) {
+          throw new Error(await parseErrorResponse(res));
+        }
 
-        console.error('[PO] HTTP error', res.status, body);
-        throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        const unwrapped = unwrapPOPayload(json);
+
+        setSummary(unwrapped.summary ?? null);
+        setPagination(unwrapped.pagination ?? null);
+        setOrders(Array.isArray(unwrapped.items) ? unwrapped.items : []);
+      } catch (err: any) {
+        if (err?.message === 'Session expired') {
+          return;
+        }
+
+        console.error('[PO] list fetch failed:', err);
+        const isAbort = err?.name === 'AbortError';
+
+        setLoadError(isAbort ? 'Request timeout. Please try again.' : 'Failed to load purchase orders');
+        setSummary(null);
+        setOrders([]);
+        setPagination(null);
+        toast.error(isAbort ? 'Request timeout' : err?.message || 'Failed to load purchase orders');
+      } finally {
+        clearTimeout(timeout);
+        setLoading(false);
       }
-
-      const json = await res.json();
-      const unwrapped = unwrapPOPayload(json);
-
-      setSummary(unwrapped.summary ?? null);
-      setPagination(unwrapped.pagination ?? null);
-      setOrders(Array.isArray(unwrapped.items) ? unwrapped.items : []);
-    } catch (err: any) {
-      console.error('[PO] list fetch failed:', err);
-      const isAbort = err?.name === 'AbortError';
-
-      setLoadError(isAbort ? 'Request timeout. Please try again.' : 'Failed to load purchase orders');
-      setSummary(null);
-      setOrders([]);
-      setPagination(null);
-      toast.error(isAbort ? 'Request timeout' : 'Failed to load purchase orders');
-    } finally {
-      clearTimeout(timeout);
-      setLoading(false);
-    }
-  }, [buildListUrl, appliedFilters]);
+    },
+    [buildListUrl, appliedFilters]
+  );
 
   const fetchMasterFilters = useCallback(async () => {
     setLoadingMasterFilters(true);
 
     try {
       const url = buildMasterUrl();
-      const res = await fetch(url.toString(), {
+      const res = await fetchWithAuth(url.toString(), {
         method: 'GET',
         headers: buildAuthHeaders(),
       });
 
       if (!res.ok) {
-        let msg = `HTTP ${res.status}`;
-        try {
-          const err = await res.json();
-          msg = err?.message || err?.Message || msg;
-        } catch {}
-        throw new Error(msg);
+        throw new Error(await parseErrorResponse(res));
       }
 
       const json = await res.json();
@@ -833,48 +897,52 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
       setMasterFilters(data);
     } catch (err: any) {
-      console.error('[PO] master filters fetch failed', err);
-      toast.error(err?.message || 'Failed to load filter options');
-      setMasterFilters({
-        listStatus: [],
-        listPlant: [],
-        listLocation: [],
-        listDocType: [],
-        listPurchasingGroup: [],
-      });
+      if (err?.message !== 'Session expired') {
+        console.error('[PO] master filters fetch failed', err);
+        toast.error(err?.message || 'Failed to load filter options');
+        setMasterFilters({
+          listStatus: [],
+          listPlant: [],
+          listLocation: [],
+          listDocType: [],
+          listPurchasingGroup: [],
+        });
+      }
     } finally {
       setLoadingMasterFilters(false);
     }
   }, [buildMasterUrl]);
 
   useEffect(() => {
-    fetchCardSummary();
+    void fetchCardSummary();
   }, [fetchCardSummary]);
 
   useEffect(() => {
-    fetchPurchaseOrders(activeTab, currentAttentionParam, currentPage, itemsPerPage);
+    void fetchPurchaseOrders(activeTab, currentAttentionParam, currentPage, itemsPerPage);
   }, [activeTab, currentAttentionParam, currentPage, itemsPerPage, fetchPurchaseOrders]);
 
   useEffect(() => {
-    fetchMasterFilters();
+    void fetchMasterFilters();
   }, [fetchMasterFilters]);
 
   const scopedOrders = useMemo(() => {
     let list = orders;
 
     if (activeTab === 'created') {
-      list = list.filter(o => mapBackendStatusToDisplay(o.status) === 'PO Submitted');
+      list = list.filter((o) => mapBackendStatusToDisplay(o.status) === 'PO Submitted');
     } else if (activeTab === 'wip') {
-      list = list.filter(o => mapBackendStatusToDisplay(o.status) === 'Work in Progress');
+      list = list.filter((o) => mapBackendStatusToDisplay(o.status) === 'Work in Progress');
     } else if (activeTab === 'delivery') {
-      list = list.filter(o => mapBackendStatusToDisplay(o.status) === 'On Delivery');
+      list = list.filter((o) => mapBackendStatusToDisplay(o.status) === 'On Delivery');
     } else if (activeTab === 'received') {
-      list = list.filter(o => isReceivedBackendStatus(o.status) || mapBackendStatusToDisplay(o.status) === 'Received');
+      list = list.filter(
+        (o) => isReceivedBackendStatus(o.status) || mapBackendStatusToDisplay(o.status) === 'Received'
+      );
     }
 
     if (specialFilter) {
       const attentionValue = ATTENTION_UI_TO_BACKEND[specialFilter];
-      list = list.filter(o => normalizeAttention(o.attention) === attentionValue);
+      list = list.filter((o) => normalizeAttention(o.attention) === attentionValue);
     }
 
     return list;
@@ -883,16 +951,19 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const filterOptions = useMemo(() => {
     const supplierOptions =
       user.role !== 'vendor'
-        ? ['all', ...dedupeStrings(scopedOrders.map(o => o.nameOfSupplier))]
+        ? ['all', ...dedupeStrings(scopedOrders.map((o) => o.nameOfSupplier))]
         : [];
 
     return {
       status: ['all', ...normalizeDisplayStatusOptions(masterFilters.listStatus)],
-      storage: ['all', ...dedupeStrings(masterFilters.listLocation.map(x => x.text || x.value))],
-      plant: ['all', ...dedupeStrings(masterFilters.listPlant.map(x => x.text || x.value))],
-      group: ['all', ...dedupeStrings(masterFilters.listPurchasingGroup.map(x => x.text || x.value))],
+      storage: ['all', ...dedupeStrings(masterFilters.listLocation.map((x) => x.text || x.value))],
+      plant: ['all', ...dedupeStrings(masterFilters.listPlant.map((x) => x.text || x.value))],
+      group: [
+        'all',
+        ...dedupeStrings(masterFilters.listPurchasingGroup.map((x) => x.text || x.value)),
+      ],
       supplier: supplierOptions,
-      docType: ['all', ...dedupeStrings(masterFilters.listDocType.map(x => x.text || x.value))],
+      docType: ['all', ...dedupeStrings(masterFilters.listDocType.map((x) => x.text || x.value))],
     };
   }, [masterFilters, scopedOrders, user.role]);
 
@@ -901,20 +972,27 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
-      list = list.filter(o =>
-        (o.purchasingDocument ?? '').toLowerCase().includes(q) ||
-        (o.purchaseRequisition ?? '').toLowerCase().includes(q) ||
-        (o.shortText ?? '').toLowerCase().includes(q) ||
-        (o.nameOfSupplier ?? '').toLowerCase().includes(q) ||
-        (o.material ?? '').toLowerCase().includes(q) ||
-        (o.qtyOrder ?? '').toString().toLowerCase().includes(q) ||
-        (o.etaDate ?? '').toLowerCase().includes(q) ||
-        (o.reEtaDate ?? '').toLowerCase().includes(q)
+      list = list.filter(
+        (o) =>
+          (o.purchasingDocument ?? '').toLowerCase().includes(q) ||
+          (o.purchaseRequisition ?? '').toLowerCase().includes(q) ||
+          (o.shortText ?? '').toLowerCase().includes(q) ||
+          (o.nameOfSupplier ?? '').toLowerCase().includes(q) ||
+          (o.material ?? '').toLowerCase().includes(q) ||
+          (o.qtyOrder ?? '').toString().toLowerCase().includes(q) ||
+          (o.etaDate ?? '').toLowerCase().includes(q) ||
+          (o.reEtaDate ?? '').toLowerCase().includes(q)
       );
     }
 
-    if (appliedFilters.status && appliedFilters.status !== 'all' && appliedFilters.status === 'Received') {
-      list = list.filter(o => isReceivedBackendStatus(o.status) || mapBackendStatusToDisplay(o.status) === 'Received');
+    if (
+      appliedFilters.status &&
+      appliedFilters.status !== 'all' &&
+      appliedFilters.status === 'Received'
+    ) {
+      list = list.filter(
+        (o) => isReceivedBackendStatus(o.status) || mapBackendStatusToDisplay(o.status) === 'Received'
+      );
     }
 
     return list;
@@ -923,7 +1001,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const overdueCount = useMemo(() => {
     const v = cardSummary?.POOverdue;
     if (typeof v === 'number') return v;
-    return orders.filter(o => normalizeAttention(o.attention) === 2).length;
+    return orders.filter((o) => normalizeAttention(o.attention) === 2).length;
   }, [cardSummary, orders]);
 
   const receivedCount = useMemo(() => {
@@ -931,14 +1009,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       return (summary.POPartiallyReceived ?? 0) + (summary.POFullyReceived ?? 0);
     }
 
-    return orders.filter(o => isReceivedBackendStatus(o.status)).length;
+    return orders.filter((o) => isReceivedBackendStatus(o.status)).length;
   }, [summary, orders]);
 
   const isServerPagination = pagination !== null;
 
-  const totalOrders = isServerPagination
-    ? pagination.totalFiltered
-    : filteredOrders.length;
+  const totalOrders = isServerPagination ? pagination.totalFiltered : filteredOrders.length;
 
   const totalPages = isServerPagination
     ? Math.max(1, pagination.totalPages)
@@ -946,31 +1022,38 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
   const pageOrders = isServerPagination
     ? filteredOrders
-    : filteredOrders.slice(
-        (currentPage - 1) * itemsPerPage,
-        currentPage * itemsPerPage
-      );
+    : filteredOrders.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   const startIndex = totalOrders === 0 ? 0 : (currentPage - 1) * itemsPerPage;
   const endIndex = Math.min(startIndex + pageOrders.length, totalOrders);
 
-  const hasActiveFilters = useMemo(() => !!(
-    (appliedFilters.status && appliedFilters.status !== 'all') ||
-    (appliedFilters.storageLocation && appliedFilters.storageLocation !== 'all') ||
-    (appliedFilters.plant && appliedFilters.plant !== 'all') ||
-    (appliedFilters.purchasingGroup && appliedFilters.purchasingGroup !== 'all') ||
-    (user.role !== 'vendor' && appliedFilters.supplier && appliedFilters.supplier !== 'all') ||
-    (appliedFilters.purchasingDocType && appliedFilters.purchasingDocType !== 'all')
-  ), [user.role, appliedFilters]);
+  const hasActiveFilters = useMemo(
+    () =>
+      !!(
+        (appliedFilters.status && appliedFilters.status !== 'all') ||
+        (appliedFilters.storageLocation && appliedFilters.storageLocation !== 'all') ||
+        (appliedFilters.plant && appliedFilters.plant !== 'all') ||
+        (appliedFilters.purchasingGroup && appliedFilters.purchasingGroup !== 'all') ||
+        (user.role !== 'vendor' &&
+          appliedFilters.supplier &&
+          appliedFilters.supplier !== 'all') ||
+        (appliedFilters.purchasingDocType && appliedFilters.purchasingDocType !== 'all')
+      ),
+    [user.role, appliedFilters]
+  );
 
-  const activeFilterCount = useMemo(() => ([
-    appliedFilters.status && appliedFilters.status !== 'all',
-    appliedFilters.storageLocation && appliedFilters.storageLocation !== 'all',
-    appliedFilters.plant && appliedFilters.plant !== 'all',
-    appliedFilters.purchasingGroup && appliedFilters.purchasingGroup !== 'all',
-    user.role !== 'vendor' && appliedFilters.supplier && appliedFilters.supplier !== 'all',
-    appliedFilters.purchasingDocType && appliedFilters.purchasingDocType !== 'all',
-  ].filter(Boolean).length), [user.role, appliedFilters]);
+  const activeFilterCount = useMemo(
+    () =>
+      [
+        appliedFilters.status && appliedFilters.status !== 'all',
+        appliedFilters.storageLocation && appliedFilters.storageLocation !== 'all',
+        appliedFilters.plant && appliedFilters.plant !== 'all',
+        appliedFilters.purchasingGroup && appliedFilters.purchasingGroup !== 'all',
+        user.role !== 'vendor' && appliedFilters.supplier && appliedFilters.supplier !== 'all',
+        appliedFilters.purchasingDocType && appliedFilters.purchasingDocType !== 'all',
+      ].filter(Boolean).length,
+    [user.role, appliedFilters]
+  );
 
   const ordersNeedingUpdate = useMemo(() => {
     if (user.role !== 'vendor') return [];
@@ -1054,8 +1137,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       await fetchPurchaseOrders(activeTab, currentAttentionParam, currentPage, itemsPerPage);
       await fetchMasterFilters();
     } catch (err: any) {
-      console.error('[PO] submit delivery update failed', err);
-      toast.error(err?.message || 'Failed to submit update');
+      if (err?.message !== 'Session expired') {
+        console.error('[PO] submit delivery update failed', err);
+        toast.error(err?.message || 'Failed to submit update');
+      }
     } finally {
       setSubmittingUpdate(false);
     }
@@ -1100,7 +1185,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     setCurrentPage(1);
     setActiveTab('all');
 
-    setSpecialFilter(prev => {
+    setSpecialFilter((prev) => {
       const next: AttentionFilter = prev === type ? null : type;
       syncAttractionQuery(next ? ATTENTION_UI_TO_BACKEND[next] : null);
       return next;
@@ -1124,18 +1209,24 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     setUploadFile(file);
   }, []);
 
-  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] || null;
-    processFile(file, e.target);
-  }, [processFile]);
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0] || null;
+      processFile(file, e.target);
+    },
+    [processFile]
+  );
 
-  const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(false);
-    const file = e.dataTransfer.files?.[0] || null;
-    processFile(file);
-  }, [processFile]);
+  const handleDrop = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragOver(false);
+      const file = e.dataTransfer.files?.[0] || null;
+      processFile(file);
+    },
+    [processFile]
+  );
 
   const handleSubmitUploadPO = useCallback(async () => {
     if (!uploadFile) {
@@ -1184,6 +1275,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
         xhr.onreadystatechange = () => {
           if (xhr.readyState === XMLHttpRequest.HEADERS_RECEIVED) {
+            if (xhr.status === 401) {
+              redirectToLoginExpired();
+              reject(new Error('Session expired'));
+              return;
+            }
+
             setUploadProgress(99);
             setUploadStatusText('Processing file on server...');
           }
@@ -1198,6 +1295,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         };
 
         xhr.onload = () => {
+          if (xhr.status === 401) {
+            redirectToLoginExpired();
+            reject(new Error('Session expired'));
+            return;
+          }
+
           if (xhr.status >= 200 && xhr.status < 300) {
             setUploadProgress(100);
             setUploadStatusText('Upload completed');
@@ -1240,9 +1343,11 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       setIsUploadDialogOpen(false);
       resetUploadState();
     } catch (err: any) {
-      console.error('[PO] import failed', err);
-      toast.error(err?.message || 'Failed to import purchase order data');
-      setUploadStatusText('');
+      if (err?.message !== 'Session expired') {
+        console.error('[PO] import failed', err);
+        toast.error(err?.message || 'Failed to import purchase order data');
+        setUploadStatusText('');
+      }
     } finally {
       setUploading(false);
     }
@@ -1287,8 +1392,14 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       ];
 
       const me5aHeaders = [
-        'Order', 'Changed On', 'Purchase order', 'Purchase Requisition', 'Item of requisition',
-        'Material', 'Purchase Order Date', 'Created by'
+        'Order',
+        'Changed On',
+        'Purchase order',
+        'Purchase Requisition',
+        'Item of requisition',
+        'Material',
+        'Purchase Order Date',
+        'Created by',
       ];
 
       const wb = XLSX.utils.book_new();
@@ -1312,14 +1423,33 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const handleDownloadPOData = useCallback(() => {
     try {
       const orderedKeys: ColumnKey[] = [
-        'purchaseRequisition', 'itemOfRequisition', 'purchasingDocument', 'item', 'documentDate',
-        'deliveryDate', 'etaDate', 'purchasingDocType', 'purchasingGroup', 'shortText', 'material',
-        'qtyOrder', 'nameOfSupplier', 'quantityReceived', 'stillToBeDelivered', 'plant', 'storageLocation',
-        'order', 'changedOn', 'grCreatedDate', 'remarks', 'reEtaDate', 'attention',
+        'purchaseRequisition',
+        'itemOfRequisition',
+        'purchasingDocument',
+        'item',
+        'documentDate',
+        'deliveryDate',
+        'etaDate',
+        'purchasingDocType',
+        'purchasingGroup',
+        'shortText',
+        'material',
+        'qtyOrder',
+        'nameOfSupplier',
+        'quantityReceived',
+        'stillToBeDelivered',
+        'plant',
+        'storageLocation',
+        'order',
+        'changedOn',
+        'grCreatedDate',
+        'remarks',
+        'reEtaDate',
+        'attention',
       ];
 
-      const cols = orderedKeys.filter(k => visibleColumns[k]);
-      const headers = cols.map(k => columnLabel(k, user.role)).concat(['Status']);
+      const cols = orderedKeys.filter((k) => visibleColumns[k]);
+      const headers = cols.map((k) => columnLabel(k, user.role)).concat(['Status']);
 
       const escapeCell = (v: any) => {
         if (v === null || v === undefined) return '';
@@ -1336,8 +1466,8 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         return escaped;
       };
 
-      const rows = filteredOrders.map(o => {
-        const row = cols.map(k => escapeCell((o as any)[k]));
+      const rows = filteredOrders.map((o) => {
+        const row = cols.map((k) => escapeCell((o as any)[k]));
         row.push(escapeCell(mapBackendStatusToDisplay(o.status)));
         return row.join(',');
       });
@@ -1391,165 +1521,183 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       mk('qtyOrder', (o) => <span className="text-right block">{o.qtyOrder || '-'}</span>),
       mk('nameOfSupplier', (o) => o.nameOfSupplier),
       mk('quantityReceived', (o) => <span className="text-right block">{o.quantityReceived}</span>),
-      mk('stillToBeDelivered', (o) => <span className="text-right block">{o.stillToBeDelivered}</span>),
+      mk('stillToBeDelivered', (o) => (
+        <span className="text-right block">{o.stillToBeDelivered}</span>
+      )),
       mk('plant', (o) => o.plant),
       mk('storageLocation', (o) => o.storageLocation),
       mk('order', (o) => <span className="text-sm text-gray-600">{o.order || '-'}</span>),
       mk('changedOn', (o) => <span className="text-sm text-gray-600">{o.changedOn || '-'}</span>),
-      mk('grCreatedDate', (o) => <span className="text-sm text-gray-600">{o.grCreatedDate || '-'}</span>),
+      mk('grCreatedDate', (o) => (
+        <span className="text-sm text-gray-600">{o.grCreatedDate || '-'}</span>
+      )),
       mk('remarks', (o) => <span className="max-w-xs truncate block">{o.remarks || '-'}</span>),
       mk('reEtaDate', (o) => <span className="text-sm text-gray-600">{o.reEtaDate || '-'}</span>),
       mk('attention', (o) => attentionBadge(o.attention)),
     ];
   }, [user.role, visibleColumns]);
 
-  const renderTable = useCallback(() => (
-    <Card>
-      <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              {columns.filter(c => c.visible).map(c => (
-                <TableHead key={c.key}>{c.label}</TableHead>
-              ))}
-
-              <TableHead className="sticky right-[100px] bg-white shadow-[-2px_0_4px_rgba(0,0,0,0.05)] z-10">
-                Status
-              </TableHead>
-              <TableHead className="sticky right-0 bg-white shadow-[-2px_0_4px_rgba(0,0,0,0.05)] z-10">
-                Action
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-
-          <TableBody>
-            {pageOrders.map((o, idx) => {
-              const display = mapBackendStatusToDisplay(o.status);
-              const key = getOrderKey(o);
-
-              return (
-                <TableRow key={`${key}-${idx}`}>
-                  {columns.filter(c => c.visible).map(c => (
-                    <TableCell key={c.key}>{c.render(o)}</TableCell>
+  const renderTable = useCallback(
+    () => (
+      <Card>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                {columns
+                  .filter((c) => c.visible)
+                  .map((c) => (
+                    <TableHead key={c.key}>{c.label}</TableHead>
                   ))}
 
-                  <TableCell className="sticky right-[100px] bg-white shadow-[-2px_0_4px_rgba(0,0,0,0.05)] z-10">
-                    <Badge
-                      className="min-w-[120px] justify-center"
-                      style={{ backgroundColor: statusColor(display), color: 'white' }}
-                    >
-                      {display}
-                    </Badge>
-                  </TableCell>
+                <TableHead className="sticky right-[100px] bg-white shadow-[-2px_0_4px_rgba(0,0,0,0.05)] z-10">
+                  Status
+                </TableHead>
+                <TableHead className="sticky right-0 bg-white shadow-[-2px_0_4px_rgba(0,0,0,0.05)] z-10">
+                  Action
+                </TableHead>
+              </TableRow>
+            </TableHeader>
 
-                  <TableCell className="sticky right-0 bg-white shadow-[-2px_0_4px_rgba(0,0,0,0.05)] z-10">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setSelectedOrderId(key);
-                      }}
-                      style={{ borderColor: '#014357', color: '#014357' }}
-                      className="hover:bg-gray-50 min-w-[80px]"
-                    >
-                      <Eye className="h-4 w-4 mr-2" />
-                      View
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
+            <TableBody>
+              {pageOrders.map((o, idx) => {
+                const display = mapBackendStatusToDisplay(o.status);
+                const key = getOrderKey(o);
 
-      {totalOrders > 0 && (
-        <div className="flex items-center justify-between px-4 py-4 border-t gap-4">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-600 whitespace-nowrap">Rows per page:</span>
-            <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
-              <SelectTrigger className="w-[70px]"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="10">10</SelectItem>
-                <SelectItem value="25">25</SelectItem>
-                <SelectItem value="50">50</SelectItem>
-                <SelectItem value="100">100</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+                return (
+                  <TableRow key={`${key}-${idx}`}>
+                    {columns
+                      .filter((c) => c.visible)
+                      .map((c) => (
+                        <TableCell key={c.key}>{c.render(o)}</TableCell>
+                      ))}
 
-          <Pagination>
-            <PaginationContent>
-              <PaginationItem>
-                <PaginationPrevious
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                  className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                />
-              </PaginationItem>
-
-              {[...Array(totalPages)].map((_, i) => {
-                const page = i + 1;
-
-                if (page === 1 || page === totalPages || (page >= currentPage - 1 && page <= currentPage + 1)) {
-                  return (
-                    <PaginationItem key={page}>
-                      <PaginationLink
-                        onClick={() => setCurrentPage(page)}
-                        isActive={currentPage === page}
-                        className="cursor-pointer"
+                    <TableCell className="sticky right-[100px] bg-white shadow-[-2px_0_4px_rgba(0,0,0,0.05)] z-10">
+                      <Badge
+                        className="min-w-[120px] justify-center"
+                        style={{ backgroundColor: statusColor(display), color: 'white' }}
                       >
-                        {page}
-                      </PaginationLink>
-                    </PaginationItem>
-                  );
-                }
+                        {display}
+                      </Badge>
+                    </TableCell>
 
-                if (page === currentPage - 2 || page === currentPage + 2) {
-                  return <PaginationEllipsis key={page} />;
-                }
-
-                return null;
+                    <TableCell className="sticky right-0 bg-white shadow-[-2px_0_4px_rgba(0,0,0,0.05)] z-10">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setSelectedOrderId(key);
+                        }}
+                        style={{ borderColor: '#014357', color: '#014357' }}
+                        className="hover:bg-gray-50 min-w-[80px]"
+                      >
+                        <Eye className="h-4 w-4 mr-2" />
+                        View
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                );
               })}
-
-              <PaginationItem>
-                <PaginationNext
-                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                  className={currentPage === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                />
-              </PaginationItem>
-            </PaginationContent>
-          </Pagination>
-
-          <div className="text-sm text-gray-600 whitespace-nowrap">
-            Showing {totalOrders === 0 ? 0 : startIndex + 1} to {Math.min(endIndex, totalOrders)} of {totalOrders} results
-          </div>
+            </TableBody>
+          </Table>
         </div>
-      )}
-    </Card>
-  ), [
-    columns,
-    pageOrders,
-    totalOrders,
-    totalPages,
-    currentPage,
-    startIndex,
-    endIndex,
-    itemsPerPage,
-    handleItemsPerPageChange,
-  ]);
+
+        {totalOrders > 0 && (
+          <div className="flex items-center justify-between px-4 py-4 border-t gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-600 whitespace-nowrap">Rows per page:</span>
+              <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
+                <SelectTrigger className="w-[70px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="10">10</SelectItem>
+                  <SelectItem value="25">25</SelectItem>
+                  <SelectItem value="50">50</SelectItem>
+                  <SelectItem value="100">100</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Pagination>
+              <PaginationContent>
+                <PaginationItem>
+                  <PaginationPrevious
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                  />
+                </PaginationItem>
+
+                {[...Array(totalPages)].map((_, i) => {
+                  const page = i + 1;
+
+                  if (
+                    page === 1 ||
+                    page === totalPages ||
+                    (page >= currentPage - 1 && page <= currentPage + 1)
+                  ) {
+                    return (
+                      <PaginationItem key={page}>
+                        <PaginationLink
+                          onClick={() => setCurrentPage(page)}
+                          isActive={currentPage === page}
+                          className="cursor-pointer"
+                        >
+                          {page}
+                        </PaginationLink>
+                      </PaginationItem>
+                    );
+                  }
+
+                  if (page === currentPage - 2 || page === currentPage + 2) {
+                    return <PaginationEllipsis key={page} />;
+                  }
+
+                  return null;
+                })}
+
+                <PaginationItem>
+                  <PaginationNext
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    className={
+                      currentPage === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'
+                    }
+                  />
+                </PaginationItem>
+              </PaginationContent>
+            </Pagination>
+
+            <div className="text-sm text-gray-600 whitespace-nowrap">
+              Showing {totalOrders === 0 ? 0 : startIndex + 1} to {Math.min(endIndex, totalOrders)} of{' '}
+              {totalOrders} results
+            </div>
+          </div>
+        )}
+      </Card>
+    ),
+    [
+      columns,
+      pageOrders,
+      totalOrders,
+      totalPages,
+      currentPage,
+      startIndex,
+      endIndex,
+      itemsPerPage,
+      handleItemsPerPageChange,
+    ]
+  );
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 h-full overflow-x-hidden">
       {selectedOrderId !== null ? (
-        <PurchaseOrderDetail
-          user={user}
-          orderId={selectedOrderId}
-          onBack={() => setSelectedOrderId(null)}
-        />
+        <PurchaseOrderDetail user={user} orderId={selectedOrderId} onBack={() => setSelectedOrderId(null)} />
       ) : (
         <>
           <div className="mb-6 sm:mb-8">
-            <h1 className="mb-2" style={{ color: '#014357' }}>Purchase Orders</h1>
+            <h1 className="mb-2" style={{ color: '#014357' }}>
+              Purchase Orders
+            </h1>
             <p className="text-gray-600">Track and manage all purchase orders</p>
           </div>
 
@@ -1593,27 +1741,29 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
           </div>
 
           <div className="grid grid-cols-1 gap-4 mb-4">
-  <Card
-    className={[
-      'p-4 shadow-[0_2px_4px_rgba(220,38,38,0.25)] border-0 cursor-pointer transition-all w-full',
-      specialFilter === 'overdue' ? 'overdue-active' : ''
-    ].join(' ')}
-    style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)' }}
-    onClick={() => handleToggleAttentionCard('overdue')}
-  >
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-3">
-        <div className="p-2 rounded-lg bg-white shadow-sm">
-          <AlertTriangle className="h-4 w-4" style={{ color: '#DC2626' }} />
-        </div>
-        <div className="text-gray-900 text-sm" style={{ fontWeight: 600 }}>Overdue</div>
-      </div>
-      <div className="text-2xl font-bold" style={{ color: '#DC2626', fontWeight: 800 }}>
-        {overdueCount}
-      </div>
-    </div>
-  </Card>
-</div>
+            <Card
+              className={[
+                'p-4 shadow-[0_2px_4px_rgba(220,38,38,0.25)] border-0 cursor-pointer transition-all w-full',
+                specialFilter === 'overdue' ? 'overdue-active' : '',
+              ].join(' ')}
+              style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)' }}
+              onClick={() => handleToggleAttentionCard('overdue')}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-white shadow-sm">
+                    <AlertTriangle className="h-4 w-4" style={{ color: '#DC2626' }} />
+                  </div>
+                  <div className="text-gray-900 text-sm" style={{ fontWeight: 600 }}>
+                    Overdue
+                  </div>
+                </div>
+                <div className="text-2xl font-bold" style={{ color: '#DC2626', fontWeight: 800 }}>
+                  {overdueCount}
+                </div>
+              </div>
+            </Card>
+          </div>
 
           <div className="flex gap-3 mb-6">
             <Card className="flex-1 p-4">
@@ -1623,17 +1773,24 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                 </div>
                 <div className="text-gray-600 text-sm">Total PO Items</div>
               </div>
-              <div className="text-3xl" style={{ color: '#014357' }}>{summary?.TotalPO ?? 0}</div>
+              <div className="text-3xl" style={{ color: '#014357' }}>
+                {summary?.TotalPO ?? 0}
+              </div>
             </Card>
 
             <Card className="flex-1 p-4">
               <div className="flex items-center gap-2 mb-2">
-                <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(237, 131, 45, 0.1)' }}>
+                <div
+                  className="p-2 rounded-lg"
+                  style={{ backgroundColor: 'rgba(237, 131, 45, 0.1)' }}
+                >
                   <FilePlus className="h-4 w-4" style={{ color: '#ED832D' }} />
                 </div>
                 <div className="text-gray-600 text-sm">PO Submitted</div>
               </div>
-              <div className="text-3xl" style={{ color: '#ED832D' }}>{summary?.POSubmitted ?? 0}</div>
+              <div className="text-3xl" style={{ color: '#ED832D' }}>
+                {summary?.POSubmitted ?? 0}
+              </div>
             </Card>
 
             <Card className="flex-1 p-4">
@@ -1643,7 +1800,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                 </div>
                 <div className="text-gray-600 text-sm">Work in Progress</div>
               </div>
-              <div className="text-3xl" style={{ color: '#5C8CB6' }}>{summary?.POWorkInProgress ?? 0}</div>
+              <div className="text-3xl" style={{ color: '#5C8CB6' }}>
+                {summary?.POWorkInProgress ?? 0}
+              </div>
             </Card>
 
             <Card className="flex-1 p-4">
@@ -1653,7 +1812,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                 </div>
                 <div className="text-gray-600 text-sm">On Delivery</div>
               </div>
-              <div className="text-3xl" style={{ color: '#008383' }}>{summary?.POOnDelivery ?? 0}</div>
+              <div className="text-3xl" style={{ color: '#008383' }}>
+                {summary?.POOnDelivery ?? 0}
+              </div>
             </Card>
 
             <Card className="flex-1 p-4">
@@ -1677,7 +1838,8 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
               </div>
 
               <p className="text-sm text-gray-600 mb-4">
-                These orders have a Re-ETA Date within 2 days. Please provide updates on their delivery status.
+                These orders have a Re-ETA Date within 2 days. Please provide updates on their delivery
+                status.
               </p>
 
               <div className="overflow-x-auto">
@@ -1771,7 +1933,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         <div className="space-y-2 pr-4">
                           <div className="flex items-center space-x-2">
                             <Checkbox id="col-purchasingDocument" checked={visibleColumns.purchasingDocument} disabled />
-                            <label htmlFor="col-purchasingDocument" className="text-sm cursor-not-allowed text-gray-700">
+                            <label
+                              htmlFor="col-purchasingDocument"
+                              className="text-sm cursor-not-allowed text-gray-700"
+                            >
                               Purchasing Document
                             </label>
                           </div>
@@ -1788,7 +1953,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           <Separator className="my-3" />
 
                           {(Object.keys(visibleColumns) as ColumnKey[])
-                            .filter(k => !['purchasingDocument', 'item'].includes(k))
+                            .filter((k) => !['purchasingDocument', 'item'].includes(k))
                             .map((k) => (
                               <div key={k} className="flex items-center space-x-2">
                                 <Checkbox
@@ -1831,9 +1996,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                     </DialogHeader>
 
                     {loadingMasterFilters && (
-                      <div className="py-2 text-sm text-gray-500">
-                        Loading filter options...
-                      </div>
+                      <div className="py-2 text-sm text-gray-500">Loading filter options...</div>
                     )}
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-4">
@@ -1841,12 +2004,16 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         <Label>Status</Label>
                         <Select
                           value={draftFilters.status}
-                          onValueChange={(v) => setDraftFilters(prev => ({ ...prev, status: v }))}
+                          onValueChange={(v) => setDraftFilters((prev) => ({ ...prev, status: v }))}
                         >
-                          <SelectTrigger><SelectValue placeholder="All statuses" /></SelectTrigger>
+                          <SelectTrigger>
+                            <SelectValue placeholder="All statuses" />
+                          </SelectTrigger>
                           <SelectContent>
-                            {filterOptions.status.map(opt => (
-                              <SelectItem key={opt} value={opt}>{opt === 'all' ? 'All' : opt}</SelectItem>
+                            {filterOptions.status.map((opt) => (
+                              <SelectItem key={opt} value={opt}>
+                                {opt === 'all' ? 'All' : opt}
+                              </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
@@ -1856,12 +2023,18 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         <Label>Storage Location</Label>
                         <Select
                           value={draftFilters.storageLocation}
-                          onValueChange={(v) => setDraftFilters(prev => ({ ...prev, storageLocation: v }))}
+                          onValueChange={(v) =>
+                            setDraftFilters((prev) => ({ ...prev, storageLocation: v }))
+                          }
                         >
-                          <SelectTrigger><SelectValue placeholder="All storage locations" /></SelectTrigger>
+                          <SelectTrigger>
+                            <SelectValue placeholder="All storage locations" />
+                          </SelectTrigger>
                           <SelectContent>
-                            {filterOptions.storage.map(opt => (
-                              <SelectItem key={opt} value={opt}>{opt === 'all' ? 'All' : opt}</SelectItem>
+                            {filterOptions.storage.map((opt) => (
+                              <SelectItem key={opt} value={opt}>
+                                {opt === 'all' ? 'All' : opt}
+                              </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
@@ -1871,12 +2044,16 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         <Label>Plant</Label>
                         <Select
                           value={draftFilters.plant}
-                          onValueChange={(v) => setDraftFilters(prev => ({ ...prev, plant: v }))}
+                          onValueChange={(v) => setDraftFilters((prev) => ({ ...prev, plant: v }))}
                         >
-                          <SelectTrigger><SelectValue placeholder="All plants" /></SelectTrigger>
+                          <SelectTrigger>
+                            <SelectValue placeholder="All plants" />
+                          </SelectTrigger>
                           <SelectContent>
-                            {filterOptions.plant.map(opt => (
-                              <SelectItem key={opt} value={opt}>{opt === 'all' ? 'All' : opt}</SelectItem>
+                            {filterOptions.plant.map((opt) => (
+                              <SelectItem key={opt} value={opt}>
+                                {opt === 'all' ? 'All' : opt}
+                              </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
@@ -1886,12 +2063,18 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         <Label>Purchasing Group</Label>
                         <Select
                           value={draftFilters.purchasingGroup}
-                          onValueChange={(v) => setDraftFilters(prev => ({ ...prev, purchasingGroup: v }))}
+                          onValueChange={(v) =>
+                            setDraftFilters((prev) => ({ ...prev, purchasingGroup: v }))
+                          }
                         >
-                          <SelectTrigger><SelectValue placeholder="All groups" /></SelectTrigger>
+                          <SelectTrigger>
+                            <SelectValue placeholder="All groups" />
+                          </SelectTrigger>
                           <SelectContent>
-                            {filterOptions.group.map(opt => (
-                              <SelectItem key={opt} value={opt}>{opt === 'all' ? 'All' : opt}</SelectItem>
+                            {filterOptions.group.map((opt) => (
+                              <SelectItem key={opt} value={opt}>
+                                {opt === 'all' ? 'All' : opt}
+                              </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
@@ -1902,12 +2085,16 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           <Label>Supplier</Label>
                           <Select
                             value={draftFilters.supplier}
-                            onValueChange={(v) => setDraftFilters(prev => ({ ...prev, supplier: v }))}
+                            onValueChange={(v) => setDraftFilters((prev) => ({ ...prev, supplier: v }))}
                           >
-                            <SelectTrigger><SelectValue placeholder="All suppliers" /></SelectTrigger>
+                            <SelectTrigger>
+                              <SelectValue placeholder="All suppliers" />
+                            </SelectTrigger>
                             <SelectContent>
-                              {filterOptions.supplier.map(opt => (
-                                <SelectItem key={opt} value={opt}>{opt === 'all' ? 'All' : opt}</SelectItem>
+                              {filterOptions.supplier.map((opt) => (
+                                <SelectItem key={opt} value={opt}>
+                                  {opt === 'all' ? 'All' : opt}
+                                </SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
@@ -1918,12 +2105,18 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         <Label>Doc Type</Label>
                         <Select
                           value={draftFilters.purchasingDocType}
-                          onValueChange={(v) => setDraftFilters(prev => ({ ...prev, purchasingDocType: v }))}
+                          onValueChange={(v) =>
+                            setDraftFilters((prev) => ({ ...prev, purchasingDocType: v }))
+                          }
                         >
-                          <SelectTrigger><SelectValue placeholder="All document types" /></SelectTrigger>
+                          <SelectTrigger>
+                            <SelectValue placeholder="All document types" />
+                          </SelectTrigger>
                           <SelectContent>
-                            {filterOptions.docType.map(opt => (
-                              <SelectItem key={opt} value={opt}>{opt === 'all' ? 'All' : opt}</SelectItem>
+                            {filterOptions.docType.map((opt) => (
+                              <SelectItem key={opt} value={opt}>
+                                {opt === 'all' ? 'All' : opt}
+                              </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
@@ -1959,13 +2152,15 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden">
               <DialogHeader>
                 <DialogTitle style={{ color: '#014357' }}>Update Purchase Order</DialogTitle>
-                <DialogDescription>Provide updates for the delivery status of this purchase order</DialogDescription>
+                <DialogDescription>
+                  Provide updates for the delivery status of this purchase order
+                </DialogDescription>
                 {orderToUpdate && (
                   <div className="flex items-center gap-2 pt-2">
                     <Badge
                       style={{
                         backgroundColor: statusColor(mapBackendStatusToDisplay(orderToUpdate.status)),
-                        color: 'white'
+                        color: 'white',
                       }}
                       className="px-4 py-1.5"
                     >
@@ -1980,24 +2175,35 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   <ScrollArea className="max-h-[calc(85vh-220px)] pr-4">
                     <div className="space-y-6 py-2">
                       <div>
-                        <div className="flex items-center gap-3 mb-4 pb-3 border-b-2" style={{ borderColor: '#014357' }}>
+                        <div
+                          className="flex items-center gap-3 mb-4 pb-3 border-b-2"
+                          style={{ borderColor: '#014357' }}
+                        >
                           <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#014357' }} />
-                          <h3 className="text-lg tracking-wide" style={{ color: '#014357' }}>Order Information</h3>
+                          <h3 className="text-lg tracking-wide" style={{ color: '#014357' }}>
+                            Order Information
+                          </h3>
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">
                           <div>
-                            <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Purchasing Document</p>
+                            <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">
+                              Purchasing Document
+                            </p>
                             <p className="text-sm">{orderToUpdate.purchasingDocument}</p>
                           </div>
 
                           <div>
-                            <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Item of Requisition</p>
+                            <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">
+                              Item of Requisition
+                            </p>
                             <p className="text-sm">{orderToUpdate.itemOfRequisition}</p>
                           </div>
 
                           <div className="col-span-2">
-                            <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Short Text</p>
+                            <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">
+                              Short Text
+                            </p>
                             <p className="text-sm">{orderToUpdate.shortText}</p>
                           </div>
 
@@ -2007,7 +2213,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           </div>
 
                           <div>
-                            <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Re-ETA Date</p>
+                            <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">
+                              Re-ETA Date
+                            </p>
                             <p className="text-sm">{orderToUpdate.reEtaDate || 'N/A'}</p>
                           </div>
 
@@ -2024,9 +2232,14 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       </div>
 
                       <div>
-                        <div className="flex items-center gap-3 mb-4 pb-3 border-b-2" style={{ borderColor: '#014357' }}>
+                        <div
+                          className="flex items-center gap-3 mb-4 pb-3 border-b-2"
+                          style={{ borderColor: '#014357' }}
+                        >
                           <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#014357' }} />
-                          <h3 className="text-lg tracking-wide" style={{ color: '#014357' }}>Update Details</h3>
+                          <h3 className="text-lg tracking-wide" style={{ color: '#014357' }}>
+                            Update Details
+                          </h3>
                         </div>
 
                         <div className="space-y-2">
@@ -2045,7 +2258,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   </ScrollArea>
 
                   <DialogFooter className="mt-4">
-                    <Button variant="outline" onClick={() => setIsUpdateDialogOpen(false)}>Cancel</Button>
+                    <Button variant="outline" onClick={() => setIsUpdateDialogOpen(false)}>
+                      Cancel
+                    </Button>
                     <Button
                       style={{ backgroundColor: '#014357' }}
                       className="text-white hover:opacity-90"
@@ -2108,8 +2323,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   ].join(' ')}
                 >
                   <Upload className="h-8 w-8 mb-1" style={{ color: '#014357' }} />
-                  <p className="text-sm font-medium" style={{ color: '#014357' }}>Drag & drop Excel file di sini</p>
-                  <p className="text-xs text-gray-500">atau <span className="underline">klik untuk memilih file</span></p>
+                  <p className="text-sm font-medium" style={{ color: '#014357' }}>
+                    Drag &amp; drop Excel file di sini
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    atau <span className="underline">klik untuk memilih file</span>
+                  </p>
                   <p className="text-[11px] text-gray-400 mt-1">
                     Hanya format <b>.xlsx</b> atau <b>.xls</b> yang diperbolehkan.
                   </p>
@@ -2177,11 +2396,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
               </div>
 
               <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => setIsUploadDialogOpen(false)}
-                  disabled={uploading}
-                >
+                <Button variant="outline" onClick={() => setIsUploadDialogOpen(false)} disabled={uploading}>
                   Cancel
                 </Button>
 

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { Card } from '../ui/card';
-import { getAccessToken } from '../../utils/authSession';
+import { getAccessToken, redirectToLoginExpired } from '../../utils/authSession';
 import {
   AreaChart,
   Area,
@@ -49,7 +49,7 @@ import {
   PaginationEllipsis,
 } from '../ui/pagination';
 import { Alert, AlertDescription } from '../ui/alert';
-import { User } from './Login';
+import type { User } from './Login';
 import { API } from '../../config';
 
 interface DashboardProps {
@@ -157,6 +157,27 @@ const buildAuthHeaders = (): HeadersInit => {
   };
 };
 
+const fetchWithAuth = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const res = await fetch(input, init);
+
+  if (res.status === 401) {
+    redirectToLoginExpired();
+    throw new Error('Session expired');
+  }
+
+  return res;
+};
+
+const getJsonData = async <T,>(res: Response): Promise<T> => {
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `Request failed with status ${res.status}`);
+  }
+
+  const json = await res.json();
+  return (json?.Data ?? json) as T;
+};
+
 const getStatusColor = (name: string): string => {
   switch (name) {
     case 'PO Uploaded':
@@ -177,9 +198,7 @@ const normalizeStatusLabel = (name: string): string => {
   return name;
 };
 
-const shouldExcludeStatusFromChart = (name: string): boolean => {
-  return name === 'Partially Received';
-};
+const shouldExcludeStatusFromChart = (name: string): boolean => name === 'Partially Received';
 
 const formatLocalDateParam = (date: Date) => {
   const year = date.getFullYear();
@@ -304,6 +323,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
 
   const currentVendorAggregate = useMemo(() => {
     if (user.role !== 'vendor' || !user.company) return undefined;
+
     return vendorScorecardAggregates.find(
       (v) => v.vendorName === user.company || v.vendorCode === user.company
     );
@@ -313,6 +333,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
 
   const vendorComposition = useMemo(() => {
     if (!currentVendorAggregate) return [];
+
     return [
       { category: 'OTD', value: currentVendorAggregate.otd, color: '#008383' },
       { category: 'Communication', value: currentVendorAggregate.communication, color: '#5C8CB6' },
@@ -324,6 +345,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
 
   const vendorScopedItems = useMemo(() => {
     if (user.role !== 'vendor') return [];
+
     return vendorScorecardItems.filter((item) => {
       if (!user.company) return true;
       return item.vendorName === user.company || item.vendorCode === user.company;
@@ -378,7 +400,10 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
     return sortedVendorAggregates.slice(startIndex, endIndex);
   }, [sortedVendorAggregates, scorecardCurrentPage, scorecardItemsPerPage]);
 
-  const buildCommonParams = (useDefault: boolean, groupParamName: 'group' | 'purchasing_group') => {
+  const buildCommonParams = (
+    useDefault: boolean,
+    groupParamName: 'group' | 'purchasing_group'
+  ) => {
     const params = new URLSearchParams();
 
     if (useDefault) return params;
@@ -408,29 +433,21 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
         return;
       }
 
-      const res = await fetch(API.MASTER_FILTER_DASHBOARD(), {
+      const res = await fetchWithAuth(API.MASTER_FILTER_DASHBOARD(), {
         headers: buildAuthHeaders(),
       });
 
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Master filters failed with status ${res.status}`);
-      }
-
-      const json = await res.json();
-      const data = json.Data ?? json;
+      const data = await getJsonData<{ plants?: string[]; suppliers?: Array<{ name: string; raw: string }> }>(res);
 
       setPlantOptions(Array.isArray(data.plants) ? data.plants : []);
-
-      if (Array.isArray(data.suppliers)) {
-        const suppliers: VendorOption[] = data.suppliers.map((s: any) => ({
-          name: s.name,
-          raw: s.raw,
-        }));
-        setVendorOptions(suppliers);
-      } else {
-        setVendorOptions([]);
-      }
+      setVendorOptions(
+        Array.isArray(data.suppliers)
+          ? data.suppliers.map((s) => ({
+              name: s.name,
+              raw: s.raw,
+            }))
+          : []
+      );
     } catch (err) {
       console.error('Failed to fetch master filters', err);
     }
@@ -449,19 +466,15 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
 
       const params = buildCommonParams(useDefault, 'group');
       const url = `${API.SUMMARYDASHBOARD()}?${params.toString()}`;
-      const res = await fetch(url, { headers: buildAuthHeaders() });
+      const res = await fetchWithAuth(url, { headers: buildAuthHeaders() });
+      const data = await getJsonData<SummaryData>(res);
 
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Request failed with status ${res.status}`);
-      }
-
-      const json = await res.json();
-      const data = json.Data ?? json;
-      setSummary(data as SummaryData);
+      setSummary(data);
     } catch (err: any) {
       console.error('Failed to fetch PO dashboard summary', err);
-      setSummaryError(err?.message || 'Failed to fetch PO dashboard summary');
+      if (err?.message !== 'Session expired') {
+        setSummaryError(err?.message || 'Failed to fetch PO dashboard summary');
+      }
     } finally {
       setSummaryLoading(false);
     }
@@ -477,16 +490,10 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
 
       const params = buildCommonParams(useDefault, 'purchasing_group');
       const url = `${API.DASHBOARD_PO_TREND()}?${params.toString()}`;
-      const res = await fetch(url, { headers: buildAuthHeaders() });
+      const res = await fetchWithAuth(url, { headers: buildAuthHeaders() });
+      const data = await getJsonData<PoTrendPoint[]>(res);
 
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `PO trend failed with status ${res.status}`);
-      }
-
-      const json = await res.json();
-      const data = json.Data ?? json;
-      setPoTrendData(data as PoTrendPoint[]);
+      setPoTrendData(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Failed to fetch PO trend', err);
     }
@@ -502,25 +509,18 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
 
       const params = buildCommonParams(useDefault, 'purchasing_group');
       const url = `${API.DASHBOARD_STATUS_DISTRIBUTION()}?${params.toString()}`;
-      const res = await fetch(url, { headers: buildAuthHeaders() });
+      const res = await fetchWithAuth(url, { headers: buildAuthHeaders() });
+      const data = await getJsonData<any[]>(res);
 
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Status distribution failed with status ${res.status}`);
-      }
-
-      const json = await res.json();
-      const data = (json.Data ?? json) as any[];
-
-      const mapped: StatusDistributionItem[] = data
+      const mapped: StatusDistributionItem[] = (Array.isArray(data) ? data : [])
         .filter((d) => !shouldExcludeStatusFromChart(d.name))
         .map((d) => {
           const displayName = normalizeStatusLabel(d.name);
           return {
             name: displayName,
-            value: d.value,
-            rawStatus: d.rawStatus,
-            totalAll: d.totalAll,
+            value: Number(d.value ?? 0),
+            rawStatus: d.rawStatus ?? '',
+            totalAll: Number(d.totalAll ?? 0),
             color: getStatusColor(displayName),
           };
         });
@@ -541,16 +541,10 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
 
       const params = buildCommonParams(useDefault, 'group');
       const url = `${API.DASHBOARD_MONTHLY_COMPLETION_DELAY()}?${params.toString()}`;
-      const res = await fetch(url, { headers: buildAuthHeaders() });
+      const res = await fetchWithAuth(url, { headers: buildAuthHeaders() });
+      const data = await getJsonData<MonthlyTrendPoint[]>(res);
 
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Monthly completion delay failed with status ${res.status}`);
-      }
-
-      const json = await res.json();
-      const data = json.Data ?? json;
-      setMonthlyTrends(data as MonthlyTrendPoint[]);
+      setMonthlyTrends(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Failed to fetch monthly completion delay', err);
     }
@@ -579,6 +573,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
         if (mappedDocType) params.append('doc_type', mappedDocType);
 
         let vendorFilter: string | undefined;
+
         if (user.role === 'vendor' && user.company) {
           vendorFilter = user.company;
         } else if (vendor) {
@@ -591,30 +586,23 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
       }
 
       const url = `${API.DASHBOARD_VENDOR_SCORECARD()}?${params.toString()}`;
-      const res = await fetch(url, { headers: buildAuthHeaders() });
+      const res = await fetchWithAuth(url, { headers: buildAuthHeaders() });
+      const data = await getJsonData<{ items?: any[]; vendor_aggregates?: any[] }>(res);
 
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Vendor scorecard failed with status ${res.status}`);
-      }
-
-      const json = await res.json();
-      const data = json.Data ?? json;
-
-      const items = (data.items ?? []) as any[];
-      const aggregates = (data.vendor_aggregates ?? []) as any[];
+      const items = Array.isArray(data.items) ? data.items : [];
+      const aggregates = Array.isArray(data.vendor_aggregates) ? data.vendor_aggregates : [];
 
       const uiItems: VendorScorecardItemUI[] = items.map((i) => ({
         poNumber: i.PONumber,
         itemOfRequisition: i.ItemOfRequisition,
         vendorCode: i.VendorCode,
         vendorName: i.VendorName,
-        otd: i.OTD,
-        communication: i.Communication,
-        reETAAccepted: i.ReETAAccepted,
-        reETARejected: i.ReETARejected,
-        excellencePoint: i.ExcellencePoint,
-        overallScore: i.OverallScore,
+        otd: Number(i.OTD ?? 0),
+        communication: Number(i.Communication ?? 0),
+        reETAAccepted: Number(i.ReETAAccepted ?? 0),
+        reETARejected: Number(i.ReETARejected ?? 0),
+        excellencePoint: Number(i.ExcellencePoint ?? 0),
+        overallScore: Number(i.OverallScore ?? 0),
       }));
 
       const aggregatesMap: Record<string, VendorScorecardAggregateUI> = {};
@@ -624,19 +612,20 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
         aggregatesMap[key] = {
           vendorCode: agg.VendorCode,
           vendorName: agg.VendorName,
-          otd: agg.OTD,
-          communication: agg.Communication,
-          reETAAccepted: agg.ReETAAccepted,
-          reETARejected: agg.ReETARejected,
-          excellencePoint: agg.ExcellencePoint,
-          overallScore: agg.OverallScore,
-          itemsCount: agg.ItemsCount ?? 0,
+          otd: Number(agg.OTD ?? 0),
+          communication: Number(agg.Communication ?? 0),
+          reETAAccepted: Number(agg.ReETAAccepted ?? 0),
+          reETARejected: Number(agg.ReETARejected ?? 0),
+          excellencePoint: Number(agg.ExcellencePoint ?? 0),
+          overallScore: Number(agg.OverallScore ?? 0),
+          itemsCount: Number(agg.ItemsCount ?? 0),
           items: [],
         };
       }
 
       for (const item of uiItems) {
         const key = `${item.vendorCode}|${item.vendorName}`;
+
         if (!aggregatesMap[key]) {
           aggregatesMap[key] = {
             vendorCode: item.vendorCode,
@@ -651,6 +640,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
             items: [],
           };
         }
+
         aggregatesMap[key].items.push(item);
         aggregatesMap[key].itemsCount = aggregatesMap[key].items.length;
       }
@@ -659,18 +649,20 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
       setVendorScorecardAggregates(Object.values(aggregatesMap));
     } catch (err: any) {
       console.error('Failed to fetch vendor scorecard', err);
-      setVendorScorecardError(err?.message || 'Failed to fetch vendor scorecard');
+      if (err?.message !== 'Session expired') {
+        setVendorScorecardError(err?.message || 'Failed to fetch vendor scorecard');
+      }
     } finally {
       setVendorScorecardLoading(false);
     }
   };
 
   const reloadAllData = (useDefault = false) => {
-    fetchSummary(useDefault);
-    fetchPoTrend(useDefault);
-    fetchStatusDistribution(useDefault);
-    fetchMonthlyCompletionDelay(useDefault);
-    fetchVendorScorecard(useDefault);
+    void fetchSummary(useDefault);
+    void fetchPoTrend(useDefault);
+    void fetchStatusDistribution(useDefault);
+    void fetchMonthlyCompletionDelay(useDefault);
+    void fetchVendorScorecard(useDefault);
   };
 
   const handleApplyFilters = () => {
@@ -828,7 +820,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
   };
 
   useEffect(() => {
-    fetchMasterFilters();
+    void fetchMasterFilters();
     reloadAllData(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -867,7 +859,10 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
         </div>
       </div>
       <div className="text-gray-600 text-sm mb-0.5">{title}</div>
-      <div className={`text-3xl ${valueClassName}`} style={!valueClassName ? { color: iconColor } : undefined}>
+      <div
+        className={`text-3xl ${valueClassName}`}
+        style={!valueClassName ? { color: iconColor } : undefined}
+      >
         {value}
       </div>
       <div className="mt-0.5 flex items-center justify-between gap-2">
@@ -912,7 +907,11 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                 <SlidersHorizontal className="h-5 w-5" />
                 <h3 className="mb-0">Filters</h3>
               </div>
-              {isFiltersOpen ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+              {isFiltersOpen ? (
+                <ChevronUp className="h-5 w-5" />
+              ) : (
+                <ChevronDown className="h-5 w-5" />
+              )}
             </button>
           </CollapsibleTrigger>
 
@@ -1473,6 +1472,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                     : 'Comprehensive vendor ratings and performance classifications'}
                 </p>
               </div>
+
               {user.role === 'admin' && (
                 <Button
                   onClick={handleExportVendorScorecard}
@@ -1638,7 +1638,9 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                             <TableCell className="text-gray-700 pl-8">
                               <div className="flex flex-col">
                                 <span className="text-sm">PO: {item.poNumber}</span>
-                                <span className="text-xs text-gray-500">Item: {item.itemOfRequisition}</span>
+                                <span className="text-xs text-gray-500">
+                                  Item: {item.itemOfRequisition}
+                                </span>
                               </div>
                             </TableCell>
                             <TableCell className="text-center text-gray-700 text-sm">{item.otd}%</TableCell>

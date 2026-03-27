@@ -8,7 +8,7 @@ export interface VendorSessionData {
   email: string;
   completeName: string;
   accessToken: string;
-  id: string;           // unified (was vendorId)
+  id: string;
   vendorName: string;
 }
 
@@ -17,7 +17,7 @@ export interface InternalSessionData {
   email: string;
   name: string;
   nrp: string;
-  id: string;           // unified
+  id: string;
   role: string;
   department: string;
   jobsite: string;
@@ -34,6 +34,15 @@ function safeSessionStorage(): Storage | null {
   try {
     if (typeof window === 'undefined') return null;
     return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+function safeLocalStorage(): Storage | null {
+  try {
+    if (typeof window === 'undefined') return null;
+    return window.localStorage;
   } catch {
     return null;
   }
@@ -98,6 +107,80 @@ export function isInternalSession(s?: AuthSession | null): s is InternalSessionD
   return Boolean(x && x.kind === 'INTERNAL');
 }
 
+/**
+ * Hapus semua cookie yang bisa dihapus dari JavaScript.
+ * Catatan: cookie HttpOnly TIDAK bisa dihapus dari frontend.
+ */
+export function clearBrowserCookies(): void {
+  if (typeof document === 'undefined') return;
+
+  try {
+    const cookies = document.cookie ? document.cookie.split(';') : [];
+
+    for (const cookie of cookies) {
+      const eqPos = cookie.indexOf('=');
+      const rawName = eqPos > -1 ? cookie.slice(0, eqPos) : cookie;
+      const name = rawName.trim();
+
+      if (!name) continue;
+
+      // hapus untuk path default
+      document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+
+      // beberapa variasi umum
+      document.cookie = `${name}=; Max-Age=0; path=/`;
+      document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax`;
+      document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Strict`;
+
+      // kalau app pakai secure cookie di https
+      if (window.location.protocol === 'https:') {
+        document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; Secure; SameSite=None`;
+      }
+    }
+  } catch (e) {
+    console.error('clearBrowserCookies failed:', e);
+  }
+}
+
+/**
+ * Bersihkan semua auth data di browser
+ */
+export function clearAllAuthData(): void {
+  try {
+    clearAuthSession();
+
+    const ss = safeSessionStorage();
+    const ls = safeLocalStorage();
+
+    ss?.removeItem('vendorSession');
+    ss?.removeItem('internalSession');
+    ss?.removeItem('accessToken');
+    ss?.removeItem('refreshToken');
+
+    ls?.removeItem('vendorSession');
+    ls?.removeItem('internalSession');
+    ls?.removeItem('accessToken');
+    ls?.removeItem('refreshToken');
+    ls?.removeItem(KEY);
+
+    clearBrowserCookies();
+  } catch (e) {
+    console.error('clearAllAuthData failed:', e);
+  }
+}
+
+/**
+ * Redirect ke login dengan error expired
+ */
+export function redirectToLoginExpired(): void {
+  if (typeof window === 'undefined') return;
+
+  clearAllAuthData();
+
+  const loginUrl = `/login?err=${encodeURIComponent('Expired')}`;
+  window.location.replace(loginUrl);
+}
+
 // ---- Legacy migration (maps vendorId -> id) ----
 function migrateFromLegacy(): AuthSession | null {
   const ss = safeSessionStorage();
@@ -112,7 +195,7 @@ function migrateFromLegacy(): AuthSession | null {
           email: v.email ?? '',
           completeName: v.completeName ?? '',
           accessToken: v.accessToken ?? '',
-          id: v.vendorId ?? v.id ?? '',              // <- map vendorId -> id
+          id: v.vendorId ?? v.id ?? '',
           vendorName: v.vendorName ?? '',
         };
         saveAuthSession(migrated);
