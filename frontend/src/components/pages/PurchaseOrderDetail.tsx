@@ -172,13 +172,6 @@ type StatusFlowHistoryProps = {
   statusHistory: Record<string, string>;
 };
 
-type ValidationNoticeProps = {
-  title: string;
-  description: string;
-  actionLabel?: string;
-  onAction?: () => void;
-};
-
 type FileActionCardProps = {
   file: ReEtaFile;
   label: string;
@@ -324,12 +317,12 @@ const mapFlowStatus = (backendStatus?: string | null): FlowStatus | null => {
   if (u === 'SUBMITTED' || u === 'PO SUBMITTED') return 'PO Submitted';
   if (u === 'WORK IN PROGRESS') return 'Work in Progress';
   if (u === 'ON DELIVERY') return 'On Delivery';
-  if (u === 'FULLY RECEIVED') return 'Fully Received';
+  if (u === 'FULLY RECEIVED' || u === 'RECEIVED') return 'Fully Received';
 
   if (s === 'Submitted') return 'PO Submitted';
   if (s === 'Work In Progress' || s === 'Work in Progress') return 'Work in Progress';
   if (s === 'On Delivery') return 'On Delivery';
-  if (s === 'Fully Received') return 'Fully Received';
+  if (s === 'Fully Received' || s === 'Received') return 'Fully Received';
 
   return null;
 };
@@ -758,44 +751,68 @@ function ValidationNotice({
   onAction,
 }: ValidationNoticeProps) {
   return (
-    <Alert
-      className="mt-2 rounded-xl border px-4 py-3"
+    <div
+      className="mb-4 m-[0px] flex items-start gap-3 rounded-lg p-4"
       style={{
-        borderColor: warningPalette.border,
-        backgroundColor: warningPalette.background,
+        backgroundColor: 'rgba(1, 67, 87, 0.05)',
+        border: '1px solid rgba(1, 67, 87, 0.12)',
       }}
     >
-      <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" style={{ color: warningPalette.icon }} />
+      <div
+        className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+        style={{ backgroundColor: '#014357' }}
+      >
+        <CalendarDays className="h-5 w-5 text-white" />
+      </div>
 
-      <AlertDescription className="w-full justify-items-stretch gap-3">
-        <div className="flex w-full flex-col gap-3">
-          <div className="flex w-full min-w-0 items-start gap-3">
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold" style={{ color: warningPalette.text }}>
-                {title}
-              </p>
-              <p className="mt-0.5 text-sm leading-6" style={{ color: warningPalette.text }}>
-                {description}
-              </p>
-            </div>
-          </div>
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex items-center gap-2">
+          <Label className="text-sm" style={{ color: '#014357' }}>
+            Required Delivery Date
+          </Label>
 
-          {actionLabel && onAction && (
-            <div className="w-full text-right">
-              <button
-                type="button"
-                onClick={onAction}
-                className="inline-flex items-center gap-2 text-sm font-semibold underline underline-offset-4 transition-opacity hover:opacity-80"
-                style={{ color: '#B45309' }}
-              >
-                <span>{actionLabel}</span>
-                <ArrowRight className="h-4 w-4" />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" className="inline-flex">
+                <Info className="h-3.5 w-3.5 text-gray-400" />
               </button>
-            </div>
-          )}
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="max-w-[220px] text-xs">
+                This is the buyer&apos;s requested delivery date. Please plan your ETD and ETA accordingly.
+              </p>
+            </TooltipContent>
+          </Tooltip>
         </div>
-      </AlertDescription>
-    </Alert>
+
+        <p className="text-lg font-medium" style={{ color: '#014357' }}>
+          {deliveryDate ? format(deliveryDate, 'EEEE, MMMM dd, yyyy') : '-'}
+        </p>
+
+        {typeof daysLeft === 'number' && (
+          <div className="mt-1 flex items-center gap-1.5">
+            <Clock
+              className="h-3.5 w-3.5"
+              style={{
+                color: isOverdue ? '#DC2626' : isUrgent ? '#ED832D' : '#6AA75D',
+              }}
+            />
+            <span
+              className="text-sm"
+              style={{
+                color: isOverdue ? '#DC2626' : isUrgent ? '#ED832D' : '#6AA75D',
+              }}
+            >
+              {isOverdue
+                ? `${Math.abs(daysLeft)} days overdue`
+                : daysLeft === 0
+                  ? 'Delivery due today'
+                  : `${daysLeft} days remaining`}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -1542,7 +1559,7 @@ export function PurchaseOrderDetail({
         return;
       }
 
-      if (status === 'PO Submitted' && isEtaBeyondDeliveryDate) {
+      if (status === 'PO Submitted' && !hasPendingReEtaApproval && isEtaBeyondDeliveryDate) {
         toast.error(ETA_DELIVERY_DATE_ERROR);
         return;
       }
