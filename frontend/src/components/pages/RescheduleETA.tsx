@@ -60,7 +60,7 @@ import {
 
 import { API } from "../../config";
 import type { User } from "./Login";
-import { getAccessToken } from "../../utils/authSession";
+import { getAccessToken, redirectToLoginExpired } from "../../utils/authSession";
 
 // =====================
 // Types
@@ -185,6 +185,17 @@ const buildAuthHeaders = (): HeadersInit => {
   };
 };
 
+const fetchWithAuth = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const res = await fetch(input, init);
+
+  if (res.status === 401) {
+    redirectToLoginExpired();
+    throw new Error("Session expired");
+  }
+
+  return res;
+};
+
 // =====================
 // Utils
 // =====================
@@ -242,7 +253,7 @@ function downloadBase64Pdf(base64: string, fileName: string) {
 }
 
 async function apiFetch<T>(url: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(url, {
+  const res = await fetchWithAuth(url, {
     ...init,
     headers: {
       ...buildAuthHeaders(),
@@ -586,10 +597,12 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
       setMeta(payload?.meta || {});
       setRows(payload?.items || []);
     } catch (e: any) {
-      toast.error(e.message || "Failed to load requests");
-      setSummary({});
-      setMeta({});
-      setRows([]);
+      if (e?.message !== "Session expired") {
+        toast.error(e.message || "Failed to load requests");
+        setSummary({});
+        setMeta({});
+        setRows([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -640,8 +653,10 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
 
       setPoItems(items);
     } catch (e: any) {
-      toast.error(e.message || "Failed to load PO items");
-      setPoItems([]);
+      if (e?.message !== "Session expired") {
+        toast.error(e.message || "Failed to load PO items");
+        setPoItems([]);
+      }
     }
   };
 
@@ -745,38 +760,19 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
     try {
       setLoading(true);
 
-      const res = await fetch(API.REETA_CREATE(), {
+      await apiFetch<any>(API.REETA_CREATE(), {
         method: "POST",
-        headers: buildAuthHeaders(),
         body: JSON.stringify(payload),
       });
-
-      const text = await res.text();
-      const parsed = (() => {
-        try {
-          return JSON.parse(text);
-        } catch {
-          return null;
-        }
-      })();
-
-      if (!res.ok) {
-        const msg =
-          parsed?.message ||
-          parsed?.Message ||
-          parsed?.error ||
-          text ||
-          `HTTP ${res.status}`;
-
-        throw new Error(msg);
-      }
 
       toast.success("Reschedule request submitted successfully");
       handleCloseCreateDialog();
       setCurrentPage(1);
       await fetchList();
     } catch (e: any) {
-      toast.error(e?.message || "Failed submit request");
+      if (e?.message !== "Session expired") {
+        toast.error(e?.message || "Failed submit request");
+      }
     } finally {
       setLoading(false);
     }
@@ -878,7 +874,9 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
       handleCloseActionDialog();
       await fetchList();
     } catch (e: any) {
-      toast.error(e.message || "Failed process request");
+      if (e?.message !== "Session expired") {
+        toast.error(e.message || "Failed process request");
+      }
     } finally {
       setLoading(false);
     }
@@ -899,7 +897,9 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
         open: true,
         request: payload || request,
       });
-    } catch {
+    } catch (e: any) {
+      if (e?.message === "Session expired") return;
+
       setDetailsDialog({
         open: true,
         request,
@@ -972,7 +972,9 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
       handleCloseVendorResponseDialog();
       await fetchList();
     } catch (e: any) {
-      toast.error(e.message || "Failed upload document");
+      if (e?.message !== "Session expired") {
+        toast.error(e.message || "Failed upload document");
+      }
     } finally {
       setLoading(false);
     }
@@ -1004,7 +1006,9 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
 
       downloadBase64Pdf(base64, name);
     } catch (e: any) {
-      toast.error(e.message || "Failed download document");
+      if (e?.message !== "Session expired") {
+        toast.error(e.message || "Failed download document");
+      }
     }
   };
 
