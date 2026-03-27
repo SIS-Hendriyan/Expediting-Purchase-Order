@@ -172,13 +172,6 @@ type StatusFlowHistoryProps = {
   statusHistory: Record<string, string>;
 };
 
-type ValidationNoticeProps = {
-  title: string;
-  description: string;
-  actionLabel?: string;
-  onAction?: () => void;
-};
-
 type FileActionCardProps = {
   file: ReEtaFile;
   label: string;
@@ -324,12 +317,12 @@ const mapFlowStatus = (backendStatus?: string | null): FlowStatus | null => {
   if (u === 'SUBMITTED' || u === 'PO SUBMITTED') return 'PO Submitted';
   if (u === 'WORK IN PROGRESS') return 'Work in Progress';
   if (u === 'ON DELIVERY') return 'On Delivery';
-  if (u === 'FULLY RECEIVED') return 'Fully Received';
+  if (u === 'FULLY RECEIVED' || u === 'RECEIVED') return 'Fully Received';
 
   if (s === 'Submitted') return 'PO Submitted';
   if (s === 'Work In Progress' || s === 'Work in Progress') return 'Work in Progress';
   if (s === 'On Delivery') return 'On Delivery';
-  if (s === 'Fully Received') return 'Fully Received';
+  if (s === 'Fully Received' || s === 'Received') return 'Fully Received';
 
   return null;
 };
@@ -438,7 +431,6 @@ const pickBase64File = (
 
   const name = trim(fileName) || fallbackName;
   const mime = trim(contentType) || null;
-
   const numericSize = size === null || size === undefined || size === '' ? null : Number(size);
 
   return {
@@ -751,54 +743,6 @@ const downloadBase64File = (base64: string, fileName: string, contentType?: stri
 };
 
 // ===================== Small UI Parts =====================
-function ValidationNotice({
-  title,
-  description,
-  actionLabel,
-  onAction,
-}: ValidationNoticeProps) {
-  return (
-    <Alert
-      className="mt-2 rounded-xl border px-4 py-3"
-      style={{
-        borderColor: warningPalette.border,
-        backgroundColor: warningPalette.background,
-      }}
-    >
-      <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" style={{ color: warningPalette.icon }} />
-
-      <AlertDescription className="w-full justify-items-stretch gap-3">
-        <div className="flex w-full flex-col gap-3">
-          <div className="flex w-full min-w-0 items-start gap-3">
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold" style={{ color: warningPalette.text }}>
-                {title}
-              </p>
-              <p className="mt-0.5 text-sm leading-6" style={{ color: warningPalette.text }}>
-                {description}
-              </p>
-            </div>
-          </div>
-
-          {actionLabel && onAction && (
-            <div className="w-full text-right">
-              <button
-                type="button"
-                onClick={onAction}
-                className="inline-flex items-center gap-2 text-sm font-semibold underline underline-offset-4 transition-opacity hover:opacity-80"
-                style={{ color: '#B45309' }}
-              >
-                <span>{actionLabel}</span>
-                <ArrowRight className="h-4 w-4" />
-              </button>
-            </div>
-          )}
-        </div>
-      </AlertDescription>
-    </Alert>
-  );
-}
-
 function RequiredDeliveryDateCard({ deliveryDateValue }: RequiredDeliveryDateCardProps) {
   const deliveryDate = parseServerDate(deliveryDateValue);
   const daysLeft = getDaysUntilDelivery(deliveryDateValue);
@@ -1008,7 +952,6 @@ function StatusRelatedInformation({
     status === 'Work in Progress' || status === 'On Delivery' || status === 'Fully Received';
 
   const showOnDeliverySection = status === 'On Delivery' || status === 'Fully Received';
-
   const showReceivedSection = status === 'Fully Received';
 
   const handleViewAwbFile = useCallback(() => {
@@ -1280,9 +1223,7 @@ export function PurchaseOrderDetail({
         setAwb((prev) => prev || serverAwb);
         setEtaDays((prev) => prev || serverEtaDays);
       } catch (e: any) {
-        if (e?.message === 'Session expired') {
-          return;
-        }
+        if (e?.message === 'Session expired') return;
 
         const isAbort = e?.name === 'AbortError';
 
@@ -1312,15 +1253,11 @@ export function PurchaseOrderDetail({
 
   const idPoItem = useMemo(() => extractIdPoItem(poDetail, statusFlowRows), [poDetail, statusFlowRows]);
 
-  const latestApprovedReEta = useMemo(() => {
-    return getLatestApprovedReEta(reEtaRequestsRaw);
-  }, [reEtaRequestsRaw]);
+  const latestApprovedReEta = useMemo(() => getLatestApprovedReEta(reEtaRequestsRaw), [reEtaRequestsRaw]);
 
   const latestApprovedReEtaDate = useMemo(() => {
     const fallbackDeliveryDate = poDetail?.DeliveryDate ?? poDetail?.['Delivery date'] ?? null;
-
     if (reEtaRequestsRaw.length === 0) return fallbackDeliveryDate;
-
     return latestApprovedReEta?.NewETA ?? latestApprovedReEta?.newETA ?? fallbackDeliveryDate;
   }, [latestApprovedReEta, poDetail, reEtaRequestsRaw]);
 
@@ -1329,13 +1266,9 @@ export function PurchaseOrderDetail({
     return approvedNewEta ?? poDetail?.DeliveryDate ?? poDetail?.['Delivery date'] ?? null;
   }, [latestApprovedReEtaDate, poDetail]);
 
-  const deliveryDate = useMemo(() => {
-    return parseServerDate(poDeliveryDateValue);
-  }, [poDeliveryDateValue]);
+  const deliveryDate = useMemo(() => parseServerDate(poDeliveryDateValue), [poDeliveryDateValue]);
 
-  const currentEtaForReschedule = useMemo(() => {
-    return safeDateOnly(poDeliveryDateValue);
-  }, [poDeliveryDateValue]);
+  const currentEtaForReschedule = useMemo(() => safeDateOnly(poDeliveryDateValue), [poDeliveryDateValue]);
 
   const calculatedEtaDate = useMemo(() => {
     const days = parseInt(etaDays, 10);
@@ -1362,17 +1295,25 @@ export function PurchaseOrderDetail({
       .sort((a, b) => (b.requestDate || '').localeCompare(a.requestDate || ''));
   }, [reEtaRequestsRaw]);
 
-  const hasPendingReEtaApproval = useMemo(() => {
-    return rescheduleRequests.some((request) => request.status === 'Pending');
-  }, [rescheduleRequests]);
+  const hasPendingReEtaApproval = useMemo(
+    () => rescheduleRequests.some((request) => request.status === 'Pending'),
+    [rescheduleRequests]
+  );
+
+  const shouldShowEtaExceededAlert = useMemo(() => {
+    if (hasPendingReEtaApproval) return false;
+    return isEtaBeyondDeliveryDate;
+  }, [hasPendingReEtaApproval, isEtaBeyondDeliveryDate]);
 
   const isPoSubmittedBlockedByEta = useMemo(() => {
+    if (hasPendingReEtaApproval) return false;
     return isEtaBeyondDeliveryDate;
-  }, [isEtaBeyondDeliveryDate]);
+  }, [hasPendingReEtaApproval, isEtaBeyondDeliveryDate]);
 
-  const isPoSubmittedSubmitDisabled = useMemo(() => {
-    return isPoSubmittedBlockedByEta || hasPendingReEtaApproval;
-  }, [isPoSubmittedBlockedByEta, hasPendingReEtaApproval]);
+  const isPoSubmittedSubmitDisabled = useMemo(
+    () => isPoSubmittedBlockedByEta || hasPendingReEtaApproval,
+    [isPoSubmittedBlockedByEta, hasPendingReEtaApproval]
+  );
 
   const orderQuantity = useMemo(() => {
     return toNumberOrZero(poDetail?.['Qty Order'] ?? poDetail?.QtyOrder);
@@ -1542,7 +1483,7 @@ export function PurchaseOrderDetail({
         return;
       }
 
-      if (status === 'PO Submitted' && isEtaBeyondDeliveryDate) {
+      if (status === 'PO Submitted' && !hasPendingReEtaApproval && isEtaBeyondDeliveryDate) {
         toast.error(ETA_DELIVERY_DATE_ERROR);
         return;
       }
@@ -1779,13 +1720,18 @@ export function PurchaseOrderDetail({
       return;
     }
 
-    if (isEtaBeyondDeliveryDate) {
+    if (shouldShowEtaExceededAlert) {
       toast.error(ETA_DELIVERY_DATE_ERROR);
       return;
     }
 
     void handleSubmitOrderInformation();
-  }, [submittingPoStatus, hasPendingReEtaApproval, isEtaBeyondDeliveryDate, handleSubmitOrderInformation]);
+  }, [
+    submittingPoStatus,
+    hasPendingReEtaApproval,
+    shouldShowEtaExceededAlert,
+    handleSubmitOrderInformation,
+  ]);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
@@ -1855,13 +1801,15 @@ export function PurchaseOrderDetail({
           <>
             {status === 'PO Submitted' &&
               (() => {
-                const etaExceedsDelivery =
+                const rawEtaExceedsDelivery =
                   !!etd &&
                   !!etaDays &&
                   parseInt(etaDays, 10) > 0 &&
                   !!deliveryDate &&
                   addDaysDateOnly(etd, parseInt(etaDays, 10)).getTime() >
                     startOfDay(deliveryDate).getTime();
+
+                const etaExceedsDelivery = !hasPendingReEtaApproval && rawEtaExceedsDelivery;
 
                 const etaExceededDays =
                   calculatedEtaDate && deliveryDate
