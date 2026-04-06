@@ -4,7 +4,14 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../ui/table";
 import { Badge } from "../ui/badge";
 import {
   Dialog,
@@ -42,11 +49,6 @@ import {
   PaginationPrevious,
   PaginationEllipsis,
 } from "../ui/pagination";
-import { API } from "../../config";
-import type { User } from "./Login";
-import { getAccessToken } from "../../utils/authSession";
-
-// Searchable dropdown (shadcn pattern)
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import {
   Command,
@@ -56,8 +58,12 @@ import {
   CommandItem,
 } from "../ui/command";
 
+import { API } from "../../config";
+import type { User } from "./Login";
+import { getAccessToken, redirectToLoginExpired } from "../../utils/authSession";
+
 // =====================
-// Types (match backend SP)
+// Types
 // =====================
 type RequestStatus =
   | "PENDING"
@@ -77,9 +83,9 @@ type ReEtaRow = {
   "Vendor Code"?: string;
   "Vendor Name"?: string;
 
-  "Current ETA"?: string; // date
-  "Proposed ETA"?: number; // int (days)
-  ResultETA?: string; // date from SP (optional)
+  "Current ETA"?: string;
+  "Proposed ETA"?: number;
+  ResultETA?: string;
 
   "Reschedule Reason"?: string;
   "Reschedule Status"?: RequestStatus;
@@ -100,6 +106,14 @@ type ReEtaRow = {
   "Evidence Doc ID"?: number;
   "Feedback Doc ID"?: number;
   "VendorResp Doc ID"?: number;
+
+  // detail fields
+  ShortText?: string;
+  ETD?: string;
+  "ETA Days"?: number;
+  RequestETADate?: string;
+  ResultProposeEtaDesc?: string;
+  FeedbackFileName?: string;
 };
 
 type SummaryRow = {
@@ -118,22 +132,44 @@ type MetaRow = {
 
 type PoItemRow = {
   ID: number;
-  "Purchasing Document": string; // PO number
-  Item: string; // item no
+  "Purchasing Document": string;
+  Item: string;
   "Name of Supplier": string;
   "Short Text"?: string;
   ETD?: string;
   "ETA Days"?: number;
-  ReEtaDate?: string; // current ETA date (ETD + ETA days)
+  ReEtaDate?: string;
   Status?: string;
+};
+
+type SelectOption = {
+  value: string;
+  label: string;
+  disabled?: boolean;
 };
 
 interface RescheduleETAProps {
   user: User;
 }
 
+type ActionDialogState = {
+  open: boolean;
+  type: "approve" | "reject" | null;
+  request: ReEtaRow | null;
+};
+
+type DetailsDialogState = {
+  open: boolean;
+  request: ReEtaRow | null;
+};
+
+type VendorResponseDialogState = {
+  open: boolean;
+  request: ReEtaRow | null;
+};
+
 // =====================
-// Auth helpers (same style as PurchaseOrder.tsx)
+// Auth helpers
 // =====================
 const getAuthToken = (): string => {
   const local = localStorage.getItem("accessToken");
@@ -149,6 +185,17 @@ const buildAuthHeaders = (): HeadersInit => {
   };
 };
 
+const fetchWithAuth = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const res = await fetch(input, init);
+
+  if (res.status === 401) {
+    redirectToLoginExpired();
+    throw new Error("Session expired");
+  }
+
+  return res;
+};
+
 // =====================
 // Utils
 // =====================
@@ -158,8 +205,251 @@ function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
-type SelectOption = { value: string; label: string; disabled?: boolean };
+function safeNumber(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
 
+function isPdfFile(file: File): boolean {
+  return file.type === "application/pdf";
+}
+
+function isValidFileSize(file: File, maxMb = 100): boolean {
+  return file.size <= maxMb * 1024 * 1024;
+}
+
+async function fileToBase64(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+
+  return btoa(binary);
+}
+
+function downloadBase64Pdf(base64: string, fileName: string) {
+  const byteCharacters = atob(base64);
+  const byteNumbers = new Array(byteCharacters.length);
+
+  for (let i = 0; i < byteCharacters.length; i++) {
+    byteNumbers[i] = byteCharacters.charCodeAt(i);
+  }
+
+  const blob = new Blob([new Uint8Array(byteNumbers)], {
+    type: "application/pdf",
+  });
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+
+  a.href = url;
+  a.download = fileName || "document.pdf";
+  a.click();
+
+  URL.revokeObjectURL(url);
+}
+
+async function apiFetch<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetchWithAuth(url, {
+    ...init,
+    headers: {
+      ...buildAuthHeaders(),
+      ...(init.headers || {}),
+    },
+  });
+
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+
+    try {
+      const text = await res.text();
+      const parsed = (() => {
+        try {
+          return JSON.parse(text);
+        } catch {
+          return null;
+        }
+      })();
+
+      msg = parsed?.message || parsed?.Message || parsed?.error || text || msg;
+    } catch {
+      // ignore
+    }
+
+    throw new Error(msg);
+  }
+
+  return (await res.json()) as T;
+}
+
+// ===== Date-only helpers =====
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+const monthMap: Record<string, number> = {
+  jan: 0,
+  feb: 1,
+  mar: 2,
+  apr: 3,
+  may: 4,
+  jun: 5,
+  jul: 6,
+  aug: 7,
+  sep: 8,
+  oct: 9,
+  nov: 10,
+  dec: 11,
+};
+
+function parseDateOnly(input?: string | null): Date | null {
+  if (!input) return null;
+
+  const s = String(input).trim();
+  if (!s) return null;
+
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (iso) {
+    const y = Number(iso[1]);
+    const m = Number(iso[2]) - 1;
+    const d = Number(iso[3]);
+    const dt = new Date(y, m, d);
+    return Number.isNaN(dt.getTime()) ? null : dt;
+  }
+
+  const dmy = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec(s);
+  if (dmy) {
+    const d = Number(dmy[1]);
+    const m = monthMap[dmy[2].toLowerCase()];
+    const y = Number(dmy[3]);
+
+    if (m === undefined) return null;
+
+    const dt = new Date(y, m, d);
+    return Number.isNaN(dt.getTime()) ? null : dt;
+  }
+
+  const dt = new Date(s);
+  if (Number.isNaN(dt.getTime())) return null;
+
+  return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+}
+
+function addDaysDateOnly(date: Date, days: number): Date {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function formatYMD(date: Date): string {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(
+    date.getDate()
+  )}`;
+}
+
+function formatDate(dateString?: string | null): string {
+  if (!dateString) return "-";
+
+  const d = new Date(dateString);
+  if (Number.isNaN(d.getTime())) return dateString;
+
+  return d.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  });
+}
+
+// =====================
+// Shared ETA / status helpers
+// =====================
+function getStatusLabel(status?: RequestStatus) {
+  switch (status) {
+    case "PENDING":
+      return "Pending";
+    case "APPROVED":
+      return "Approved";
+    case "AWAITING_VENDOR_DOC":
+      return "Awaiting Vendor Doc";
+    case "REJECTED":
+      return "Rejected";
+    case "VENDOR_DOC_UPLOADED":
+      return "Vendor Doc Uploaded";
+    default:
+      return "-";
+  }
+}
+
+function getStatusColor(status?: RequestStatus) {
+  switch (status) {
+    case "APPROVED":
+      return "#6AA75D";
+    case "PENDING":
+      return "#ED832D";
+    case "AWAITING_VENDOR_DOC":
+      return "#FFA500";
+    case "REJECTED":
+      return "#d4183d";
+    case "VENDOR_DOC_UPLOADED":
+      return "#008383";
+    default:
+      return "#014357";
+  }
+}
+
+function isAwaitingVendorDoc(row: ReEtaRow) {
+  return row["Reschedule Status"] === "AWAITING_VENDOR_DOC";
+}
+
+function getRequestedEtaDate(row?: ReEtaRow | null): string | null {
+  return row?.RequestETADate || row?.ResultETA || null;
+}
+
+function getRequestedEtaDesc(row?: ReEtaRow | null): string {
+  if (row?.ResultProposeEtaDesc) {
+    return String(row.ResultProposeEtaDesc);
+  }
+
+  const proposed = safeNumber(row?.["Proposed ETA"], 0);
+  return `${proposed} day(s)`;
+}
+
+function getDocButtonTheme(status?: RequestStatus) {
+  if (status === "APPROVED") {
+    return {
+      color: "#6AA75D",
+      hoverClass: "hover:bg-green-50",
+      softBg: "rgba(106,167,93,0.12)",
+    };
+  }
+
+  if (status === "REJECTED") {
+    return {
+      color: "#d4183d",
+      hoverClass: "hover:bg-red-50",
+      softBg: "rgba(212,24,61,0.10)",
+    };
+  }
+
+  if (status === "AWAITING_VENDOR_DOC") {
+    return {
+      color: "#FFA500",
+      hoverClass: "hover:bg-orange-50",
+      softBg: "rgba(255,165,0,0.12)",
+    };
+  }
+
+  return {
+    color: "#014357",
+    hoverClass: "hover:bg-slate-50",
+    softBg: "rgba(1,67,87,0.08)",
+  };
+}
+
+// =====================
+// Searchable Select
+// =====================
 function SearchableSelect(props: {
   value: string;
   onChange: (v: string) => void;
@@ -209,6 +499,7 @@ function SearchableSelect(props: {
         <Command>
           <CommandInput placeholder={searchPlaceholder} />
           <CommandEmpty>{emptyText}</CommandEmpty>
+
           <CommandGroup className="max-h-[260px] overflow-auto">
             {options.map((opt) => (
               <CommandItem
@@ -236,204 +527,56 @@ function SearchableSelect(props: {
   );
 }
 
-async function fileToBase64(file: File): Promise<string> {
-  const buf = await file.arrayBuffer();
-  const bytes = new Uint8Array(buf);
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
-}
-
-function downloadBase64Pdf(base64: string, fileName: string) {
-  const byteCharacters = atob(base64);
-  const byteNumbers = new Array(byteCharacters.length);
-  for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
-  const blob = new Blob([new Uint8Array(byteNumbers)], { type: "application/pdf" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName || "document.pdf";
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-async function apiFetch<T>(url: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      ...buildAuthHeaders(),
-      ...(init.headers || {}),
-    },
-  });
-
-  if (!res.ok) {
-    let msg = `HTTP ${res.status}`;
-    try {
-      const text = await res.text();
-      const parsed = (() => {
-        try {
-          return JSON.parse(text);
-        } catch {
-          return null;
-        }
-      })();
-      msg = parsed?.message || parsed?.Message || parsed?.error || text || msg;
-    } catch {
-      // ignore
-    }
-    throw new Error(msg);
-  }
-
-  return (await res.json()) as T;
-}
-// ===== Date-only helpers (safe, no timezone shifting) =====
-const pad2 = (n: number) => String(n).padStart(2, "0");
-
-const monthMap: Record<string, number> = {
-  jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
-  jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
-};
-
-// Parse date-only dari beberapa format umum:
-// - "2025-01-03"
-// - "2025-01-03T00:00:00"
-// - "03-Jan-2025"
-// - "Jan 03, 2025"
-function parseDateOnly(input?: string | null): Date | null {
-  if (!input) return null;
-  const s = String(input).trim();
-  if (!s) return null;
-
-  // ISO yyyy-mm-dd (or with time)
-  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
-  if (iso) {
-    const y = Number(iso[1]);
-    const m = Number(iso[2]) - 1;
-    const d = Number(iso[3]);
-    const dt = new Date(y, m, d); // local date-only
-    return Number.isNaN(dt.getTime()) ? null : dt;
-  }
-
-  // dd-MMM-yyyy (e.g. 03-Jan-2025)
-  const dmy = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec(s);
-  if (dmy) {
-    const d = Number(dmy[1]);
-    const m = monthMap[dmy[2].toLowerCase()];
-    const y = Number(dmy[3]);
-    if (m === undefined) return null;
-    const dt = new Date(y, m, d);
-    return Number.isNaN(dt.getTime()) ? null : dt;
-  }
-
-  // Fallback: try native parse (for "Jan 03, 2025")
-  const dt = new Date(s);
-  if (Number.isNaN(dt.getTime())) return null;
-
-  // normalize to date-only local
-  return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
-}
-
-function addDaysDateOnly(date: Date, days: number): Date {
-  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  d.setDate(d.getDate() + days);
-  return d;
-}
-
-function formatYMD(date: Date): string {
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
-}
-
-function formatDate(dateString?: string | null): string {
-  if (!dateString) return "-";
-  const d = new Date(dateString);
-  if (Number.isNaN(d.getTime())) return dateString;
-  return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "2-digit" });
-}
-
+// =====================
+// Component
+// =====================
 export function RescheduleETA({ user }: RescheduleETAProps) {
-  // UI state
+  // list/filter state
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [loading, setLoading] = useState(false);
 
-  // Data
+  // data state
   const [summary, setSummary] = useState<SummaryRow>({});
   const [meta, setMeta] = useState<MetaRow>({});
   const [rows, setRows] = useState<ReEtaRow[]>([]);
-
-  // PO items for Create
   const [poItems, setPoItems] = useState<PoItemRow[]>([]);
 
-  // Dialogs
-  const [actionDialog, setActionDialog] = useState<{
-    open: boolean;
-    type: "approve" | "reject" | null;
-    request: ReEtaRow | null;
-  }>({ open: false, type: null, request: null });
+  // dialogs
+  const [actionDialog, setActionDialog] = useState<ActionDialogState>({
+    open: false,
+    type: null,
+    request: null,
+  });
 
-  const [detailsDialog, setDetailsDialog] = useState<{ open: boolean; request: ReEtaRow | null }>({
+  const [detailsDialog, setDetailsDialog] = useState<DetailsDialogState>({
     open: false,
     request: null,
   });
 
+  const [vendorResponseDialog, setVendorResponseDialog] =
+    useState<VendorResponseDialogState>({
+      open: false,
+      request: null,
+    });
+
+  const [createDialog, setCreateDialog] = useState(false);
+
+  // form states
   const [remark, setRemark] = useState("");
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [vendorResponseFile, setVendorResponseFile] = useState<File | null>(
+    null
+  );
 
-  const [vendorResponseDialog, setVendorResponseDialog] = useState<{ open: boolean; request: ReEtaRow | null }>({
-    open: false,
-    request: null,
-  });
-  const [vendorResponseFile, setVendorResponseFile] = useState<File | null>(null);
-
-  // Create form
-  const [createDialog, setCreateDialog] = useState(false);
   const [selectedPO, setSelectedPO] = useState("");
   const [selectedItem, setSelectedItem] = useState("");
   const [newETADays, setNewETADays] = useState("");
   const [rescheduleReason, setRescheduleReason] = useState("");
 
   // =====================
-  // Status helpers
-  // =====================
-  const getStatusLabel = (s?: RequestStatus) => {
-    switch (s) {
-      case "PENDING":
-        return "Pending";
-      case "APPROVED":
-        return "Approved";
-      case "AWAITING_VENDOR_DOC":
-        return "Awaiting Vendor Doc";
-      case "REJECTED":
-        return "Rejected";
-      case "VENDOR_DOC_UPLOADED":
-        return "Vendor Doc Uploaded";
-      default:
-        return "-";
-    }
-  };
-
-  const getStatusColor = (s?: RequestStatus) => {
-    switch (s) {
-      case "APPROVED":
-        return "#6AA75D";
-      case "PENDING":
-        return "#ED832D";
-      case "AWAITING_VENDOR_DOC":
-        return "#FFA500";
-      case "REJECTED":
-        return "#d4183d";
-      case "VENDOR_DOC_UPLOADED":
-        return "#008383";
-      default:
-        return "#014357";
-    }
-  };
-
-  const isAwaitingVendorDoc = (r: ReEtaRow) => r["Reschedule Status"] === "AWAITING_VENDOR_DOC";
-
-  // =====================
-  // Fetch list
+  // Load list
   // =====================
   const fetchList = async () => {
     try {
@@ -444,17 +587,22 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
       qs.set("page", String(currentPage));
       qs.set("pageSize", String(itemsPerPage));
 
-      const raw = await apiFetch<any>(API.REETA_LIST() + `?${qs.toString()}`, { method: "GET" });
+      const raw = await apiFetch<any>(`${API.REETA_LIST()}?${qs.toString()}`, {
+        method: "GET",
+      });
+
       const payload = unwrap(raw);
 
       setSummary(payload?.summary || {});
       setMeta(payload?.meta || {});
       setRows(payload?.items || []);
     } catch (e: any) {
-      toast.error(e.message || "Failed to load requests");
-      setSummary({});
-      setMeta({});
-      setRows([]);
+      if (e?.message !== "Session expired") {
+        toast.error(e.message || "Failed to load requests");
+        setSummary({});
+        setMeta({});
+        setRows([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -466,9 +614,9 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
   }, [searchQuery, currentPage, itemsPerPage]);
 
   // =====================
-  // Paging
+  // Pagination
   // =====================
-  const totalRows = Number(meta?.TotalRows || 0);
+  const totalRows = safeNumber(meta?.TotalRows, 0);
   const totalPages = Math.max(1, Math.ceil(totalRows / itemsPerPage));
 
   const handleSearchChange = (value: string) => {
@@ -483,60 +631,52 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
   };
 
   // =====================
-  // PO Items (Create dialog)
+  // Create dialog helpers
   // =====================
- const loadPoItems = async () => {
-  try {
-    const qs = new URLSearchParams();
-    qs.set("eligibleOnly", "true");
-    qs.set("page", "1");
-    qs.set("pageSize", "200");
+  const loadPoItems = async () => {
+    try {
+      const qs = new URLSearchParams();
+      qs.set("eligibleOnly", "true");
+      qs.set("page", "1");
+      qs.set("pageSize", "200");
 
-    if (user.role === "vendor" && user.company) {
-      qs.set("vendor", user.company);
+      if (user.role === "vendor" && user.company) {
+        qs.set("vendor", user.company);
+      }
+
+      const raw = await apiFetch<any>(`${API.PO_ITEMS()}?${qs.toString()}`, {
+        method: "GET",
+      });
+
+      const payload = unwrap(raw);
+      const items: PoItemRow[] = payload?.items || payload || [];
+
+      setPoItems(items);
+    } catch (e: any) {
+      if (e?.message !== "Session expired") {
+        toast.error(e.message || "Failed to load PO items");
+        setPoItems([]);
+      }
     }
+  };
 
-    const raw = await apiFetch<any>(API.PO_ITEMS() + `?${qs.toString()}`, {
-      method: "GET",
-    });
-
-    const payload = unwrap(raw);
-    console.log(payload);
-    console.log(user.company);
-    console.log(user);
-
-    const items: PoItemRow[] = payload?.items || payload || [];
-
-    setPoItems(items);
-  } catch (e: any) {
-    toast.error(e.message || "Failed to load PO items");
-    setPoItems([]);
-  }
-};
-  const handleOpenCreateDialog = async () => {
-    setCreateDialog(true);
+  const resetCreateForm = () => {
     setSelectedPO("");
     setSelectedItem("");
     setNewETADays("");
     setRescheduleReason("");
+  };
+
+  const handleOpenCreateDialog = async () => {
+    setCreateDialog(true);
+    resetCreateForm();
     await loadPoItems();
   };
 
   const handleCloseCreateDialog = () => {
     setCreateDialog(false);
-    setSelectedPO("");
-    setSelectedItem("");
-    setNewETADays("");
-    setRescheduleReason("");
+    resetCreateForm();
   };
-
-const getDocButtonColor = (s?: RequestStatus) => {
-  // default kalau status undefined
-  if (s === "APPROVED") return { color: "#6AA75D", hoverClass: "hover:bg-green-50" };
-  if (s === "REJECTED") return { color: "#d4183d", hoverClass: "hover:bg-red-50" };
-  // fallback (misal pending/awaiting)
-  return { color: "#014357", hoverClass: "hover:bg-slate-50" };
-};
 
   const uniquePONumbers = useMemo(
     () => Array.from(new Set(poItems.map((x) => x["Purchasing Document"]))),
@@ -550,121 +690,116 @@ const getDocButtonColor = (s?: RequestStatus) => {
 
   const selectedPoItem = useMemo(() => {
     if (!selectedPO || !selectedItem) return null;
-    return poItems.find((x) => x["Purchasing Document"] === selectedPO && x.Item === selectedItem) || null;
+
+    return (
+      poItems.find(
+        (x) =>
+          x["Purchasing Document"] === selectedPO && x.Item === selectedItem
+      ) || null
+    );
   }, [poItems, selectedPO, selectedItem]);
 
   const calculateETADate = (etd: string, days: number): string => {
-     const base = parseDateOnly(etd);
-  if (!base) return "-";
-  const eta = addDaysDateOnly(base, days);
-  return formatYMD(eta); // aman, tidak pakai toISOString()
+    const base = parseDateOnly(etd);
+    if (!base) return "-";
+
+    const eta = addDaysDateOnly(base, days);
+    return formatYMD(eta);
   };
 
   const calculateNewETADate = (): string | null => {
     if (!selectedPoItem?.ETD) return null;
+
     const days = parseInt(newETADays, 10);
     if (!Number.isFinite(days) || days <= 0) return null;
+
     return calculateETADate(selectedPoItem.ETD, days);
   };
 
- const handleSubmitRequest = async () => {
-  if (!selectedPO) return toast.error("Please select a Purchase Order");
-  if (!selectedItem) return toast.error("Please select an Item of Requisition");
-
-  const days = parseInt(newETADays, 10);
-  if (!Number.isFinite(days) || days <= 0) return toast.error("Please enter a valid new ETA in days");
-  if (!rescheduleReason.trim()) return toast.error("Please provide a reason for rescheduling");
-  if (!selectedPoItem) return toast.error("PO item not found");
-
-  const currentDays = Number(selectedPoItem["ETA Days"] ?? 0);
-  if (currentDays > 0 && days <= currentDays) {
-    return toast.error("New ETA days must be greater than current ETA days");
-  }
-
-  const payload = {
-    idPoItem: selectedPoItem.ID,
-    poNumber: selectedPoItem["Purchasing Document"],
-    poItemNo: selectedPoItem.Item,
-    vendorName: selectedPoItem["Name of Supplier"],
-    currentEta: selectedPoItem.ReEtaDate || null,
-    proposedEtaDays: days,
-    reason: rescheduleReason,
-
-    evidenceFileName: null,
-    evidenceContentType: null,
-    evidenceSize: null,
-    evidenceBase64: null,
-  };
-
-  // ✅ DEBUG LOG (before request)
-  console.log("[ReETA][CREATE] url =", API.REETA_CREATE());
-  console.log("[ReETA][CREATE] payload =", payload);
-  console.log("[ReETA][CREATE] token exists =", !!getAuthToken());
-
-  try {
-    setLoading(true);
-
-    // ✅ pakai fetch langsung supaya bisa lihat raw error body
-    const res = await fetch(API.REETA_CREATE(), {
-      method: "POST",
-      headers: buildAuthHeaders(),
-      body: JSON.stringify(payload),
-    });
-
-    const text = await res.text(); // ambil raw body dulu
-
-    // ✅ DEBUG LOG (after request)
-    console.log("[ReETA][CREATE] status =", res.status);
-    console.log("[ReETA][CREATE] raw response text =", text);
-
-    // coba parse json kalau bisa
-    const parsed = (() => {
-      try {
-        return JSON.parse(text);
-      } catch {
-        return null;
-      }
-    })();
-
-    console.log("[ReETA][CREATE] parsed json =", parsed);
-
-    if (!res.ok) {
-      const msg =
-        parsed?.message ||
-        parsed?.Message ||
-        parsed?.error ||
-        text ||
-        `HTTP ${res.status}`;
-
-      throw new Error(msg);
+  const handleSubmitRequest = async () => {
+    if (!selectedPO) {
+      return toast.error("Please select a Purchase Order");
     }
 
-    toast.success("Reschedule request submitted successfully");
-    handleCloseCreateDialog();
-    setCurrentPage(1);
-    await fetchList();
-  } catch (e: any) {
-    // ✅ DEBUG LOG (catch)
-    console.error("[ReETA][CREATE] ERROR =", e);
-    console.error("[ReETA][CREATE] ERROR message =", e?.message);
+    if (!selectedItem) {
+      return toast.error("Please select an Item of Requisition");
+    }
 
-    toast.error(e?.message || "Failed submit request");
-  } finally {
-    setLoading(false);
-  }
-};
+    const days = parseInt(newETADays, 10);
+    if (!Number.isFinite(days) || days <= 0) {
+      return toast.error("Please enter a valid new ETA in days");
+    }
+
+    if (!rescheduleReason.trim()) {
+      return toast.error("Please provide a reason for rescheduling");
+    }
+
+    if (!selectedPoItem) {
+      return toast.error("PO item not found");
+    }
+
+    const currentDays = safeNumber(selectedPoItem["ETA Days"], 0);
+    if (currentDays > 0 && days <= currentDays) {
+      return toast.error("New ETA days must be greater than current ETA days");
+    }
+
+    const payload = {
+      idPoItem: selectedPoItem.ID,
+      poNumber: selectedPoItem["Purchasing Document"],
+      poItemNo: selectedPoItem.Item,
+      vendorName: selectedPoItem["Name of Supplier"],
+      currentEta: selectedPoItem.ReEtaDate || null,
+      proposedEtaDays: days,
+      reason: rescheduleReason,
+      evidenceFileName: null,
+      evidenceContentType: null,
+      evidenceSize: null,
+      evidenceBase64: null,
+    };
+
+    try {
+      setLoading(true);
+
+      await apiFetch<any>(API.REETA_CREATE(), {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+
+      toast.success("Reschedule request submitted successfully");
+      handleCloseCreateDialog();
+      setCurrentPage(1);
+      await fetchList();
+    } catch (e: any) {
+      if (e?.message !== "Session expired") {
+        toast.error(e?.message || "Failed submit request");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // =====================
-  // Approve / Reject (Admin)
+  // Approve / Reject
   // =====================
-  const handleOpenActionDialog = (type: "approve" | "reject", request: ReEtaRow) => {
-    setActionDialog({ open: true, type, request });
+  const handleOpenActionDialog = (
+    type: "approve" | "reject",
+    request: ReEtaRow
+  ) => {
+    setActionDialog({
+      open: true,
+      type,
+      request,
+    });
     setRemark("");
     setUploadedFile(null);
   };
 
   const handleCloseActionDialog = () => {
-    setActionDialog({ open: false, type: null, request: null });
+    setActionDialog({
+      open: false,
+      type: null,
+      request: null,
+    });
     setRemark("");
     setUploadedFile(null);
   };
@@ -672,8 +807,15 @@ const getDocButtonColor = (s?: RequestStatus) => {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.type !== "application/pdf") return toast.error("Only PDF files are allowed");
-    if (file.size > 100 * 1024 * 1024) return toast.error("File size must not exceed 100MB");
+
+    if (!isPdfFile(file)) {
+      return toast.error("Only PDF files are allowed");
+    }
+
+    if (!isValidFileSize(file)) {
+      return toast.error("File size must not exceed 100MB");
+    }
+
     setUploadedFile(file);
     toast.success("File uploaded successfully");
   };
@@ -682,7 +824,10 @@ const getDocButtonColor = (s?: RequestStatus) => {
     const req = actionDialog.request;
     if (!req || !actionDialog.type) return;
 
-    if (!remark.trim()) return toast.error("Please provide a reason or remark");
+    if (!remark.trim()) {
+      return toast.error("Please provide a reason or remark");
+    }
+
     if (actionDialog.type === "reject" && !uploadedFile) {
       return toast.error("Record of Event file is required for rejection");
     }
@@ -702,20 +847,36 @@ const getDocButtonColor = (s?: RequestStatus) => {
         fileSize = uploadedFile.size;
       }
 
-      const payload = { feedback: remark, fileName, contentType, fileSize, base64 };
+      const payload = {
+        feedback: remark,
+        fileName,
+        contentType,
+        fileSize,
+        base64,
+      };
 
       if (actionDialog.type === "approve") {
-        await apiFetch<any>(API.REETA_APPROVE(req.ID), { method: "POST", body: JSON.stringify(payload) });
+        await apiFetch<any>(API.REETA_APPROVE(req.ID), {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+
         toast.success("Request approved successfully");
       } else {
-        await apiFetch<any>(API.REETA_REJECT(req.ID), { method: "POST", body: JSON.stringify(payload) });
+        await apiFetch<any>(API.REETA_REJECT(req.ID), {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+
         toast.success("Request rejected successfully");
       }
 
       handleCloseActionDialog();
       await fetchList();
     } catch (e: any) {
-      toast.error(e.message || "Failed process request");
+      if (e?.message !== "Session expired") {
+        toast.error(e.message || "Failed process request");
+      }
     } finally {
       setLoading(false);
     }
@@ -726,79 +887,75 @@ const getDocButtonColor = (s?: RequestStatus) => {
   // =====================
   const handleViewDetails = async (request: ReEtaRow) => {
     try {
-        
-      const raw = await apiFetch<any>(API.REETA_DETAIL(request.ID), { method: "GET" });
+      const raw = await apiFetch<any>(API.REETA_DETAIL(request.ID), {
+        method: "GET",
+      });
+
       const payload = unwrap(raw);
-      console.log(payload);
-      setDetailsDialog({ open: true, request: payload || request });
-    } catch {
-      setDetailsDialog({ open: true, request });
+
+      setDetailsDialog({
+        open: true,
+        request: payload || request,
+      });
+    } catch (e: any) {
+      if (e?.message === "Session expired") return;
+
+      setDetailsDialog({
+        open: true,
+        request,
+      });
     }
   };
 
   // =====================
-  // Vendor Response Upload
+  // Vendor response
   // =====================
   const handleOpenVendorResponseDialog = (request: ReEtaRow) => {
-    setVendorResponseDialog({ open: true, request });
+    setVendorResponseDialog({
+      open: true,
+      request,
+    });
     setVendorResponseFile(null);
   };
 
   const handleCloseVendorResponseDialog = () => {
-    setVendorResponseDialog({ open: false, request: null });
+    setVendorResponseDialog({
+      open: false,
+      request: null,
+    });
     setVendorResponseFile(null);
   };
 
-  const handleVendorResponseFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleVendorResponseFileUpload = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.type !== "application/pdf") return toast.error("Only PDF files are allowed");
-    if (file.size > 100 * 1024 * 1024) return toast.error("File size must not exceed 100MB");
+
+    if (!isPdfFile(file)) {
+      return toast.error("Only PDF files are allowed");
+    }
+
+    if (!isValidFileSize(file)) {
+      return toast.error("File size must not exceed 100MB");
+    }
+
     setVendorResponseFile(file);
     toast.success("File uploaded successfully");
   };
 
-function getDocButtonTheme(status?: RequestStatus) {
-  if (status === "APPROVED") {
-    return {
-      color: "#6AA75D",
-      hoverClass: "hover:bg-green-50",
-      softBg: "rgba(106,167,93,0.12)",
-    };
-  }
-
-  if (status === "REJECTED") {
-    return {
-      color: "#d4183d",
-      hoverClass: "hover:bg-red-50",
-      softBg: "rgba(212,24,61,0.10)",
-    };
-  }
-
-  if (status === "AWAITING_VENDOR_DOC") {
-    return {
-      color: "rgb(255, 165, 0)",
-      hoverClass: "hover:bg-orange-50",
-      softBg: "rgba(255,165,0,0.12)",
-    };
-  }
-
-  return {
-    color: "#014357",
-    hoverClass: "hover:bg-slate-50",
-    softBg: "rgba(1,67,87,0.08)",
-  };
-}
-
   const handleSubmitVendorResponse = async () => {
-    if (!vendorResponseFile) return toast.error("Please upload a supporting document");
+    if (!vendorResponseFile) {
+      return toast.error("Please upload a supporting document");
+    }
+
     const req = vendorResponseDialog.request;
     if (!req) return;
 
     try {
       setLoading(true);
-      const base64 = await fileToBase64(vendorResponseFile);
 
+      const base64 = await fileToBase64(vendorResponseFile);
       const payload = {
         fileName: vendorResponseFile.name || "vendor_response.pdf",
         contentType: vendorResponseFile.type,
@@ -806,52 +963,66 @@ function getDocButtonTheme(status?: RequestStatus) {
         base64,
       };
 
-      await apiFetch<any>(API.REETA_VENDOR_RESPONSE(req.ID), { method: "POST", body: JSON.stringify(payload) });
+      await apiFetch<any>(API.REETA_VENDOR_RESPONSE(req.ID), {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
 
       toast.success("Supporting document uploaded successfully");
       handleCloseVendorResponseDialog();
       await fetchList();
     } catch (e: any) {
-      toast.error(e.message || "Failed upload document");
+      if (e?.message !== "Session expired") {
+        toast.error(e.message || "Failed upload document");
+      }
     } finally {
       setLoading(false);
     }
   };
 
   // =====================
-  // Download Doc (base64)
+  // Documents
   // =====================
-  const handleDownloadDoc = async (docId?: number, fallbackName?: string) => {
-    if (!docId) return toast.error("Document not available");
+  const handleDownloadDoc = async (
+    docId?: number,
+    fallbackName?: string
+  ) => {
+    if (!docId) {
+      return toast.error("Document not available");
+    }
 
     try {
-      const raw = await apiFetch<any>(API.REETA_DOC(docId), { method: "GET" });
-      const d = unwrap(raw);
+      const raw = await apiFetch<any>(API.REETA_DOC(docId), {
+        method: "GET",
+      });
 
+      const d = unwrap(raw);
       const base64 = d?.BASE64_DATA ?? d?.base64_data ?? d?.base64;
       const name = d?.FILE_NAME ?? fallbackName ?? "document.pdf";
-      if (!base64) return toast.error("No base64 data");
+
+      if (!base64) {
+        return toast.error("No base64 data");
+      }
 
       downloadBase64Pdf(base64, name);
     } catch (e: any) {
-      toast.error(e.message || "Failed download document");
+      if (e?.message !== "Session expired") {
+        toast.error(e.message || "Failed download document");
+      }
     }
   };
 
   // =====================
-  // Derived counts
+  // Derived data
   // =====================
-  const totalRequests = Number(summary?.["Total Requests"] || 0);
-  const pendingCount = Number(summary?.["Pending Review"] || 0);
-  const approvedCount = Number(summary?.Approved || 0);
-  const awaitingVendorCount = Number(summary?.["Awaiting Vendor Doc"] || 0);
-  const rejectedCount = Number(summary?.Rejected || 0);
+  const totalRequests = safeNumber(summary?.["Total Requests"], 0);
+  const pendingCount = safeNumber(summary?.["Pending Review"], 0);
+  const approvedCount = safeNumber(summary?.Approved, 0);
+  const awaitingVendorCount = safeNumber(summary?.["Awaiting Vendor Doc"], 0);
+  const rejectedCount = safeNumber(summary?.Rejected, 0);
 
   const paginatedRequests = rows;
 
-  // =====================
-  // Searchable dropdown options
-  // =====================
   const pageSizeOptions: SelectOption[] = useMemo(
     () => ["10", "25", "50", "100"].map((v) => ({ value: v, label: v })),
     []
@@ -892,15 +1063,14 @@ function getDocButtonTheme(status?: RequestStatus) {
             onClick={handleOpenCreateDialog}
             disabled={loading}
           >
-            <Plus className="h-4 w-4 mr-2" />
+            <Plus className="mr-2 h-4 w-4" />
             Create Request
           </Button>
         )}
       </div>
 
-      {/* Search Bar */}
-      <div className="relative w-96 mb-6">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+      <div className="relative mb-6 w-96">
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transform text-gray-400" />
         <Input
           placeholder="Search by request number, PO number, vendor, reason..."
           value={searchQuery}
@@ -909,14 +1079,16 @@ function getDocButtonTheme(status?: RequestStatus) {
         />
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-6">
+      <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-5">
         <Card className="p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="p-2 rounded-lg" style={{ backgroundColor: "rgba(1, 67, 87, 0.1)" }}>
+          <div className="mb-2 flex items-center gap-2">
+            <div
+              className="rounded-lg p-2"
+              style={{ backgroundColor: "rgba(1, 67, 87, 0.1)" }}
+            >
               <FileText className="h-4 w-4" style={{ color: "#014357" }} />
             </div>
-            <div className="text-gray-600 text-sm">Total Requests</div>
+            <div className="text-sm text-gray-600">Total Requests</div>
           </div>
           <div className="text-3xl" style={{ color: "#014357" }}>
             {totalRequests}
@@ -924,11 +1096,14 @@ function getDocButtonTheme(status?: RequestStatus) {
         </Card>
 
         <Card className="p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="p-2 rounded-lg" style={{ backgroundColor: "rgba(237, 131, 45, 0.1)" }}>
+          <div className="mb-2 flex items-center gap-2">
+            <div
+              className="rounded-lg p-2"
+              style={{ backgroundColor: "rgba(237, 131, 45, 0.1)" }}
+            >
               <Clock className="h-4 w-4" style={{ color: "#ED832D" }} />
             </div>
-            <div className="text-gray-600 text-sm">Pending Review</div>
+            <div className="text-sm text-gray-600">Pending Review</div>
           </div>
           <div className="text-3xl" style={{ color: "#ED832D" }}>
             {pendingCount}
@@ -936,11 +1111,14 @@ function getDocButtonTheme(status?: RequestStatus) {
         </Card>
 
         <Card className="p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="p-2 rounded-lg" style={{ backgroundColor: "rgba(106, 167, 93, 0.1)" }}>
+          <div className="mb-2 flex items-center gap-2">
+            <div
+              className="rounded-lg p-2"
+              style={{ backgroundColor: "rgba(106, 167, 93, 0.1)" }}
+            >
               <CheckCircle2 className="h-4 w-4" style={{ color: "#6AA75D" }} />
             </div>
-            <div className="text-gray-600 text-sm">Approved</div>
+            <div className="text-sm text-gray-600">Approved</div>
           </div>
           <div className="text-3xl" style={{ color: "#6AA75D" }}>
             {approvedCount}
@@ -948,11 +1126,14 @@ function getDocButtonTheme(status?: RequestStatus) {
         </Card>
 
         <Card className="p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="p-2 rounded-lg" style={{ backgroundColor: "rgba(255, 165, 0, 0.1)" }}>
+          <div className="mb-2 flex items-center gap-2">
+            <div
+              className="rounded-lg p-2"
+              style={{ backgroundColor: "rgba(255, 165, 0, 0.1)" }}
+            >
               <AlertCircle className="h-4 w-4" style={{ color: "#FFA500" }} />
             </div>
-            <div className="text-gray-600 text-sm text-xs">Awaiting Vendor Doc</div>
+            <div className="text-xs text-gray-600">Awaiting Vendor Doc</div>
           </div>
           <div className="text-3xl" style={{ color: "#FFA500" }}>
             {awaitingVendorCount}
@@ -960,11 +1141,14 @@ function getDocButtonTheme(status?: RequestStatus) {
         </Card>
 
         <Card className="p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="p-2 rounded-lg" style={{ backgroundColor: "rgba(212, 24, 61, 0.1)" }}>
+          <div className="mb-2 flex items-center gap-2">
+            <div
+              className="rounded-lg p-2"
+              style={{ backgroundColor: "rgba(212, 24, 61, 0.1)" }}
+            >
               <XCircle className="h-4 w-4" style={{ color: "#d4183d" }} />
             </div>
-            <div className="text-gray-600 text-sm">Rejected</div>
+            <div className="text-sm text-gray-600">Rejected</div>
           </div>
           <div className="text-3xl" style={{ color: "#d4183d" }}>
             {rejectedCount}
@@ -972,7 +1156,6 @@ function getDocButtonTheme(status?: RequestStatus) {
         </Card>
       </div>
 
-      {/* Requests Table */}
       <Card>
         <div className="relative overflow-x-auto">
           <Table>
@@ -983,7 +1166,7 @@ function getDocButtonTheme(status?: RequestStatus) {
                 <TableHead>Item</TableHead>
                 {user.role === "admin" && <TableHead>Vendor</TableHead>}
                 <TableHead>Current ETA</TableHead>
-                <TableHead>Requested ETA</TableHead>
+                <TableHead>NEW ETA</TableHead>
                 <TableHead>Request Date</TableHead>
                 <TableHead>
                   <div className="flex items-center gap-1">
@@ -991,10 +1174,13 @@ function getDocButtonTheme(status?: RequestStatus) {
                     Docs
                   </div>
                 </TableHead>
-                <TableHead className="sticky right-[140px] bg-white z-10 shadow-[-2px_0_4px_rgba(0,0,0,0.05)]">
+                <TableHead className="sticky right-[140px] z-10 bg-white shadow-[-2px_0_4px_rgba(0,0,0,0.05)]">
                   Status
                 </TableHead>
-                <TableHead className="sticky right-0 bg-white z-10" style={{ width: "140px", minWidth: "140px" }}>
+                <TableHead
+                  className="sticky right-0 z-10 bg-white"
+                  style={{ width: "140px", minWidth: "140px" }}
+                >
                   Action
                 </TableHead>
               </TableRow>
@@ -1013,16 +1199,25 @@ function getDocButtonTheme(status?: RequestStatus) {
               ) : paginatedRequests.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={user.role === "admin" ? 10 : 9}>
-                    <div className="py-10 text-center text-gray-500">No data</div>
+                    <div className="py-10 text-center text-gray-500">
+                      No data
+                    </div>
                   </TableCell>
                 </TableRow>
               ) : (
                 paginatedRequests.map((r) => (
-                  <TableRow key={r.ID} className={`group ${isAwaitingVendorDoc(r) ? "bg-orange-50" : ""}`}>
+                  <TableRow
+                    key={r.ID}
+                    className={`group ${
+                      isAwaitingVendorDoc(r) ? "bg-orange-50" : ""
+                    }`}
+                  >
                     <TableCell>{r.POREETANUMBER}</TableCell>
                     <TableCell>{r["PO Number"] || "-"}</TableCell>
                     <TableCell>{r["PO Item No"] || "-"}</TableCell>
-                    {user.role === "admin" && <TableCell>{r["Vendor Name"] || "-"}</TableCell>}
+                    {user.role === "admin" && (
+                      <TableCell>{r["Vendor Name"] || "-"}</TableCell>
+                    )}
 
                     <TableCell className="text-sm text-gray-600">
                       <div className="flex items-center gap-1">
@@ -1032,24 +1227,43 @@ function getDocButtonTheme(status?: RequestStatus) {
                     </TableCell>
 
                     <TableCell className="text-sm">
-                      <div className="flex items-center gap-1" style={{ color: "#ED832D" }}>
+                      <div
+                        className="flex items-center gap-1"
+                        style={{ color: "#ED832D" }}
+                      >
                         <Clock className="h-3 w-3" />
-                        {formatDate(r.ResultETA)}
+                        {formatDate(getRequestedEtaDate(r))}
                       </div>
                     </TableCell>
 
-                    <TableCell className="text-sm text-gray-600">{formatDate(r.CREATED_AT)}</TableCell>
+                    <TableCell className="text-sm text-gray-600">
+                      {formatDate(r.CREATED_AT)}
+                    </TableCell>
 
                     <TableCell>
                       <div className="flex flex-col gap-1">
                         {r.HasFeedbackAttachment || r["Feedback Doc ID"] ? (
-                          <Badge variant="outline" className="text-xs w-fit" style={{ borderColor: "#014357", color: "#014357" }}>
+                          <Badge
+                            variant="outline"
+                            className="w-fit text-xs"
+                            style={{
+                              borderColor: "#014357",
+                              color: "#014357",
+                            }}
+                          >
                             Admin ✓
                           </Badge>
                         ) : null}
 
                         {r.HasVendorResponse || r["VendorResp Doc ID"] ? (
-                          <Badge variant="outline" className="text-xs w-fit" style={{ borderColor: "#008383", color: "#008383" }}>
+                          <Badge
+                            variant="outline"
+                            className="w-fit text-xs"
+                            style={{
+                              borderColor: "#008383",
+                              color: "#008383",
+                            }}
+                          >
                             Vendor ✓
                           </Badge>
                         ) : null}
@@ -1059,7 +1273,9 @@ function getDocButtonTheme(status?: RequestStatus) {
                           r["Feedback Doc ID"] ||
                           r.HasVendorResponse ||
                           r["VendorResp Doc ID"]
-                        ) && <span className="text-xs text-gray-400">-</span>}
+                        ) && (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
                       </div>
                     </TableCell>
 
@@ -1068,13 +1284,22 @@ function getDocButtonTheme(status?: RequestStatus) {
                         isAwaitingVendorDoc(r) ? "bg-orange-50" : "bg-white"
                       } group-hover:bg-muted/50`}
                     >
-                      <Badge style={{ backgroundColor: getStatusColor(r["Reschedule Status"]) }} className="text-white text-xs whitespace-nowrap">
+                      <Badge
+                        style={{
+                          backgroundColor: getStatusColor(
+                            r["Reschedule Status"]
+                          ),
+                        }}
+                        className="whitespace-nowrap text-xs text-white"
+                      >
                         {getStatusLabel(r["Reschedule Status"])}
                       </Badge>
                     </TableCell>
 
                     <TableCell
-                      className={`sticky right-0 z-10 ${isAwaitingVendorDoc(r) ? "bg-orange-50" : "bg-white"} group-hover:bg-muted/50`}
+                      className={`sticky right-0 z-10 ${
+                        isAwaitingVendorDoc(r) ? "bg-orange-50" : "bg-white"
+                      } group-hover:bg-muted/50`}
                       style={{ width: "140px", minWidth: "140px" }}
                     >
                       <div className="flex gap-2">
@@ -1083,9 +1308,12 @@ function getDocButtonTheme(status?: RequestStatus) {
                             <Button
                               variant="outline"
                               size="sm"
-                              style={{ borderColor: "#014357", color: "#014357" }}
+                              style={{
+                                borderColor: "#014357",
+                                color: "#014357",
+                              }}
                               onClick={() => handleViewDetails(r)}
-                              className="w-9 h-9 p-0"
+                              className="h-9 w-9 p-0"
                               title="View Details"
                               disabled={loading}
                             >
@@ -1096,7 +1324,7 @@ function getDocButtonTheme(status?: RequestStatus) {
                               <Button
                                 size="sm"
                                 style={{ backgroundColor: "#FFA500" }}
-                                className="text-white w-9 h-9 p-0"
+                                className="h-9 w-9 p-0 text-white"
                                 onClick={() => handleOpenVendorResponseDialog(r)}
                                 title="Upload Document"
                                 disabled={loading}
@@ -1109,11 +1337,14 @@ function getDocButtonTheme(status?: RequestStatus) {
                           <Button
                             variant="outline"
                             size="sm"
-                            style={{ borderColor: "#014357", color: "#014357" }}
+                            style={{
+                              borderColor: "#014357",
+                              color: "#014357",
+                            }}
                             onClick={() => handleViewDetails(r)}
                             disabled={loading}
                           >
-                            <Eye className="h-4 w-4 mr-1" />
+                            <Eye className="mr-1 h-4 w-4" />
                             Details
                           </Button>
                         )}
@@ -1126,16 +1357,16 @@ function getDocButtonTheme(status?: RequestStatus) {
           </Table>
         </div>
 
-        {/* Pagination (server-side) */}
-        <div className="flex items-center justify-between px-4 py-4 border-t gap-4">
+        <div className="flex items-center justify-between gap-4 border-t px-4 py-4">
           <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-600 whitespace-nowrap">Rows per page:</span>
+            <span className="whitespace-nowrap text-sm text-gray-600">
+              Rows per page:
+            </span>
 
-            {/* ✅ Searchable dropdown */}
             <div className="w-[90px]">
               <SearchableSelect
                 value={itemsPerPage.toString()}
-                onChange={(v) => handleItemsPerPageChange(v)}
+                onChange={handleItemsPerPageChange}
                 placeholder="Rows"
                 searchPlaceholder="Search size..."
                 options={pageSizeOptions}
@@ -1149,16 +1380,22 @@ function getDocButtonTheme(status?: RequestStatus) {
               <PaginationItem>
                 <PaginationPrevious
                   onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                  className={
+                    currentPage === 1
+                      ? "pointer-events-none opacity-50"
+                      : "cursor-pointer"
+                  }
                 />
               </PaginationItem>
 
               {[...Array(totalPages)].map((_, idx) => {
                 const pageNumber = idx + 1;
+
                 if (
                   pageNumber === 1 ||
                   pageNumber === totalPages ||
-                  (pageNumber >= currentPage - 1 && pageNumber <= currentPage + 1)
+                  (pageNumber >= currentPage - 1 &&
+                    pageNumber <= currentPage + 1)
                 ) {
                   return (
                     <PaginationItem key={pageNumber}>
@@ -1171,34 +1408,51 @@ function getDocButtonTheme(status?: RequestStatus) {
                       </PaginationLink>
                     </PaginationItem>
                   );
-                } else if (pageNumber === currentPage - 2 || pageNumber === currentPage + 2) {
+                }
+
+                if (
+                  pageNumber === currentPage - 2 ||
+                  pageNumber === currentPage + 2
+                ) {
                   return <PaginationEllipsis key={pageNumber} />;
                 }
+
                 return null;
               })}
 
               <PaginationItem>
                 <PaginationNext
-                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                  className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                  onClick={() =>
+                    setCurrentPage((p) => Math.min(totalPages, p + 1))
+                  }
+                  className={
+                    currentPage === totalPages
+                      ? "pointer-events-none opacity-50"
+                      : "cursor-pointer"
+                  }
                 />
               </PaginationItem>
             </PaginationContent>
           </Pagination>
 
-          <div className="text-sm text-gray-600 whitespace-nowrap">
+          <div className="whitespace-nowrap text-sm text-gray-600">
             Page {currentPage} of {totalPages} • Total {totalRows} rows
           </div>
         </div>
       </Card>
 
-      {/* Create Request Dialog (Vendor) */}
-      <Dialog open={createDialog} onOpenChange={(open) => !open && handleCloseCreateDialog()}>
+      <Dialog
+        open={createDialog}
+        onOpenChange={(open) => !open && handleCloseCreateDialog()}
+      >
         <DialogContent className="max-w-3xl max-h-[90vh]">
           <DialogHeader>
-            <DialogTitle style={{ color: "#014357" }}>Create Reschedule ETA Request</DialogTitle>
+            <DialogTitle style={{ color: "#014357" }}>
+              Create Reschedule ETA Request
+            </DialogTitle>
             <DialogDescription>
-              Submit a request to reschedule the Estimated Date of Delivery for your purchase order.
+              Submit a request to reschedule the Estimated Date of Delivery for
+              your purchase order.
             </DialogDescription>
           </DialogHeader>
 
@@ -1209,7 +1463,6 @@ function getDocButtonTheme(status?: RequestStatus) {
                   Purchase Order Number <span className="text-red-500">*</span>
                 </Label>
 
-                {/* ✅ Searchable dropdown */}
                 <SearchableSelect
                   value={selectedPO}
                   onChange={(v) => {
@@ -1228,7 +1481,6 @@ function getDocButtonTheme(status?: RequestStatus) {
                   Item of Requisition <span className="text-red-500">*</span>
                 </Label>
 
-                {/* ✅ Searchable dropdown */}
                 <SearchableSelect
                   value={selectedItem}
                   onChange={setSelectedItem}
@@ -1240,26 +1492,40 @@ function getDocButtonTheme(status?: RequestStatus) {
               </div>
 
               {selectedPoItem && (
-                <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 space-y-4">
+                <div className="space-y-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
                   <div>
-                    <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Item Description</p>
-                    <p className="text-sm">{selectedPoItem["Short Text"] || "-"}</p>
+                    <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                      Item Description
+                    </p>
+                    <p className="text-sm">
+                      {selectedPoItem["Short Text"] || "-"}
+                    </p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">ETD</p>
+                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                        ETD
+                      </p>
                       <p className="text-sm">{formatDate(selectedPoItem.ETD)}</p>
                     </div>
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Current ETA</p>
+                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                        Current ETA
+                      </p>
                       <div className="space-y-1">
-                        <p className="text-sm">{formatDate(selectedPoItem.ReEtaDate)}</p>
+                        <p className="text-sm">
+                          {formatDate(selectedPoItem.ReEtaDate)}
+                        </p>
                         <p
-                          className="text-xs inline-block px-2 py-0.5 rounded"
-                          style={{ backgroundColor: "rgba(1, 67, 87, 0.1)", color: "#014357" }}
+                          className="inline-block rounded px-2 py-0.5 text-xs"
+                          style={{
+                            backgroundColor: "rgba(1, 67, 87, 0.1)",
+                            color: "#014357",
+                          }}
                         >
-                          ({Number(selectedPoItem["ETA Days"] ?? 0)} days after ETD)
+                          ({safeNumber(selectedPoItem["ETA Days"], 0)} days after
+                          ETD)
                         </p>
                       </div>
                     </div>
@@ -1269,7 +1535,8 @@ function getDocButtonTheme(status?: RequestStatus) {
 
               <div className="space-y-2">
                 <Label>
-                  New ETA (in days after ETD) <span className="text-red-500">*</span>
+                  New ETA (in days after ETD){" "}
+                  <span className="text-red-500">*</span>
                 </Label>
                 <Input
                   type="number"
@@ -1279,22 +1546,42 @@ function getDocButtonTheme(status?: RequestStatus) {
                   onChange={(e) => setNewETADays(e.target.value)}
                   disabled={!selectedPoItem || loading}
                 />
-                {selectedPoItem && newETADays && parseInt(newETADays, 10) > 0 && (
-                  <div className="mt-2 p-4 rounded-lg border" style={{ backgroundColor: "#FFF4E6", borderColor: "#ED832D" }}>
-                    <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">New ETA Date</p>
-                    <p className="text-lg mb-1" style={{ color: "#ED832D" }}>
-                      {calculateNewETADate() ? formatDate(calculateNewETADate()!) : "-"}
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      Extension: +{Math.max(0, parseInt(newETADays, 10) - Number(selectedPoItem["ETA Days"] ?? 0))} days
-                    </p>
-                  </div>
-                )}
+
+                {selectedPoItem &&
+                  newETADays &&
+                  parseInt(newETADays, 10) > 0 && (
+                    <div
+                      className="mt-2 rounded-lg border p-4"
+                      style={{
+                        backgroundColor: "#FFF4E6",
+                        borderColor: "#ED832D",
+                      }}
+                    >
+                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                        New ETA Date
+                      </p>
+                      <p className="mb-1 text-lg" style={{ color: "#ED832D" }}>
+                        {calculateNewETADate()
+                          ? formatDate(calculateNewETADate()!)
+                          : "-"}
+                      </p>
+                      <p className="text-sm text-gray-600">
+                        Extension: +
+                        {Math.max(
+                          0,
+                          parseInt(newETADays, 10) -
+                            safeNumber(selectedPoItem["ETA Days"], 0)
+                        )}{" "}
+                        days
+                      </p>
+                    </div>
+                  )}
               </div>
 
               <div className="space-y-2">
                 <Label>
-                  Reason for Rescheduling <span className="text-red-500">*</span>
+                  Reason for Rescheduling{" "}
+                  <span className="text-red-500">*</span>
                 </Label>
                 <Textarea
                   placeholder="Provide detailed reason for the ETA reschedule request..."
@@ -1309,7 +1596,11 @@ function getDocButtonTheme(status?: RequestStatus) {
           </ScrollArea>
 
           <DialogFooter className="mt-4">
-            <Button variant="outline" onClick={handleCloseCreateDialog} disabled={loading}>
+            <Button
+              variant="outline"
+              onClick={handleCloseCreateDialog}
+              disabled={loading}
+            >
               Cancel
             </Button>
             <Button
@@ -1318,20 +1609,23 @@ function getDocButtonTheme(status?: RequestStatus) {
               onClick={handleSubmitRequest}
               disabled={loading}
             >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Submit Request
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Admin Approve/Reject Dialog */}
       {user.role === "admin" && (
-        <Dialog open={actionDialog.open} onOpenChange={(open) => !open && handleCloseActionDialog()}>
+        <Dialog
+          open={actionDialog.open}
+          onOpenChange={(open) => !open && handleCloseActionDialog()}
+        >
           <DialogContent className="max-w-2xl max-h-[90vh]">
             <DialogHeader>
               <DialogTitle style={{ color: "#014357" }}>
-                {actionDialog.type === "approve" ? "Approve" : "Reject"} Reschedule Request
+                {actionDialog.type === "approve" ? "Approve" : "Reject"}{" "}
+                Reschedule Request
               </DialogTitle>
               <DialogDescription>
                 {actionDialog.type === "approve"
@@ -1345,14 +1639,27 @@ function getDocButtonTheme(status?: RequestStatus) {
                 <div className="space-y-6 py-2">
                   <div>
                     <div
-                      className="flex items-center gap-3 mb-4 pb-3 border-b-2"
-                      style={{ borderColor: actionDialog.type === "approve" ? "#6AA75D" : "#d4183d" }}
+                      className="mb-4 flex items-center gap-3 border-b-2 pb-3"
+                      style={{
+                        borderColor:
+                          actionDialog.type === "approve"
+                            ? "#6AA75D"
+                            : "#d4183d",
+                      }}
                     >
                       <div
                         className="h-1.5 w-1.5 rounded-full"
-                        style={{ backgroundColor: actionDialog.type === "approve" ? "#6AA75D" : "#d4183d" }}
+                        style={{
+                          backgroundColor:
+                            actionDialog.type === "approve"
+                              ? "#6AA75D"
+                              : "#d4183d",
+                        }}
                       />
-                      <h3 className="text-lg tracking-wide" style={{ color: "#014357" }}>
+                      <h3
+                        className="text-lg tracking-wide"
+                        style={{ color: "#014357" }}
+                      >
                         Request Information
                       </h3>
                     </div>
@@ -1360,45 +1667,80 @@ function getDocButtonTheme(status?: RequestStatus) {
                     <div className="space-y-4">
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Request No</p>
-                          <p className="text-sm">{actionDialog.request.POREETANUMBER}</p>
+                          <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                            Request No
+                          </p>
+                          <p className="text-sm">
+                            {actionDialog.request.POREETANUMBER}
+                          </p>
                         </div>
                         <div>
-                          <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">PO Number</p>
-                          <p className="text-sm">{actionDialog.request["PO Number"]}</p>
+                          <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                            PO Number
+                          </p>
+                          <p className="text-sm">
+                            {actionDialog.request["PO Number"]}
+                          </p>
                         </div>
                         <div>
-                          <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Item</p>
-                          <p className="text-sm">{actionDialog.request["PO Item No"]}</p>
+                          <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                            Item
+                          </p>
+                          <p className="text-sm">
+                            {actionDialog.request["PO Item No"]}
+                          </p>
                         </div>
                         <div>
-                          <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Vendor</p>
-                          <p className="text-sm">{actionDialog.request["Vendor Name"]}</p>
+                          <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                            Vendor
+                          </p>
+                          <p className="text-sm">
+                            {actionDialog.request["Vendor Name"]}
+                          </p>
                         </div>
                       </div>
 
                       <div className="grid grid-cols-2 gap-4 pt-2">
-                        <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                          <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">Current ETA</p>
-                          <p className="text-xl mb-1">{formatDate(actionDialog.request["Current ETA"])}</p>
+                        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                          <p className="mb-2 text-xs uppercase tracking-wide text-gray-500">
+                            Current ETA
+                          </p>
+                          <p className="mb-1 text-xl">
+                            {formatDate(actionDialog.request["Current ETA"])}
+                          </p>
                           <p className="text-sm text-gray-600">
-                            +{Number(actionDialog.request["Proposed ETA"] ?? 0)} days
+                            {safeNumber(
+                              actionDialog.request["ETA Days"],
+                              actionDialog.request["Proposed ETA"]
+                            )}{" "}
+                            days after ETD
                           </p>
                         </div>
-                        <div className="rounded-lg p-4 border" style={{ backgroundColor: "#FFF4E6", borderColor: "#ED832D" }}>
-                          <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">Requested ETA</p>
-                          <p className="text-xl mb-1" style={{ color: "#ED832D" }}>
-                            {formatDate(actionDialog.request.ResultETA)}
+
+                        <div
+                          className="rounded-lg border p-4"
+                          style={{
+                            backgroundColor: "#FFF4E6",
+                            borderColor: "#ED832D",
+                          }}
+                        >
+                          <p className="mb-2 text-xs uppercase tracking-wide text-gray-500">
+                            NEW ETA
+                          </p>
+                          <p className="mb-1 text-xl" style={{ color: "#ED832D" }}>
+                            {formatDate(getRequestedEtaDate(actionDialog.request))}
                           </p>
                           <p className="text-sm" style={{ color: "#ED832D" }}>
-                            Proposed: {Number(actionDialog.request["Proposed ETA"] ?? 0)} day(s)
+                            +{getRequestedEtaDesc(actionDialog.request)}
                           </p>
                         </div>
                       </div>
 
                       <div>
-                        <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">Vendor&apos;s Reason</p>
-                        <p className="p-4 bg-gray-50 rounded-lg border border-gray-200 text-sm leading-relaxed">
+                        <p className="mb-2 text-xs uppercase tracking-wide text-gray-500">
+                          Vendor&apos;s Reason
+                        </p>
+                        <p className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm leading-relaxed">
                           {actionDialog.request["Reschedule Reason"] || "-"}
                         </p>
                       </div>
@@ -1407,26 +1749,47 @@ function getDocButtonTheme(status?: RequestStatus) {
 
                   <div>
                     <div
-                      className="flex items-center gap-3 mb-4 pb-3 border-b-2"
-                      style={{ borderColor: actionDialog.type === "approve" ? "#6AA75D" : "#d4183d" }}
+                      className="mb-4 flex items-center gap-3 border-b-2 pb-3"
+                      style={{
+                        borderColor:
+                          actionDialog.type === "approve"
+                            ? "#6AA75D"
+                            : "#d4183d",
+                      }}
                     >
                       <div
                         className="h-1.5 w-1.5 rounded-full"
-                        style={{ backgroundColor: actionDialog.type === "approve" ? "#6AA75D" : "#d4183d" }}
+                        style={{
+                          backgroundColor:
+                            actionDialog.type === "approve"
+                              ? "#6AA75D"
+                              : "#d4183d",
+                        }}
                       />
-                      <h3 className="text-lg tracking-wide" style={{ color: "#014357" }}>
-                        {actionDialog.type === "approve" ? "Approval Remark" : "Rejection Details"}
+                      <h3
+                        className="text-lg tracking-wide"
+                        style={{ color: "#014357" }}
+                      >
+                        {actionDialog.type === "approve"
+                          ? "Approval Remark"
+                          : "Rejection Details"}
                       </h3>
                     </div>
 
                     <div className="space-y-4">
                       <div>
                         <Label className="mb-2 block">
-                          {actionDialog.type === "approve" ? "Remark" : "Reason for Rejection"}
-                          <span className="text-red-500 ml-1">*</span>
+                          {actionDialog.type === "approve"
+                            ? "Remark"
+                            : "Reason for Rejection"}
+                          <span className="ml-1 text-red-500">*</span>
                         </Label>
                         <Textarea
-                          placeholder={actionDialog.type === "approve" ? "Enter your approval remark..." : "Provide detailed reason..."}
+                          placeholder={
+                            actionDialog.type === "approve"
+                              ? "Enter your approval remark..."
+                              : "Provide detailed reason..."
+                          }
                           rows={4}
                           value={remark}
                           onChange={(e) => setRemark(e.target.value)}
@@ -1438,10 +1801,14 @@ function getDocButtonTheme(status?: RequestStatus) {
                       <div>
                         <Label className="mb-2 block">
                           Record of Event (PDF)
-                          {actionDialog.type === "reject" && <span className="text-red-500 ml-1">*</span>}
-                          {actionDialog.type === "approve" && <span className="text-gray-500 ml-1">(Optional)</span>}
+                          {actionDialog.type === "reject" && (
+                            <span className="ml-1 text-red-500">*</span>
+                          )}
+                          {actionDialog.type === "approve" && (
+                            <span className="ml-1 text-gray-500">(Optional)</span>
+                          )}
                         </Label>
-                        <p className="text-xs text-gray-500 mb-3">
+                        <p className="mb-3 text-xs text-gray-500">
                           {actionDialog.type === "reject"
                             ? "Supporting documentation for rejection (PDF format, max 100MB)"
                             : "Optional supporting documentation (PDF format, max 100MB)"}
@@ -1449,40 +1816,110 @@ function getDocButtonTheme(status?: RequestStatus) {
 
                         {!uploadedFile ? (
                           <label
-                            className="flex items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer transition-all hover:border-gray-400 hover:bg-gray-50"
-                            style={{ borderColor: actionDialog.type === "approve" ? "#6AA75D" : "#d4183d" }}
+                            className="flex h-32 w-full cursor-pointer items-center justify-center rounded-lg border-2 border-dashed transition-all hover:border-gray-400 hover:bg-gray-50"
+                            style={{
+                              borderColor:
+                                actionDialog.type === "approve"
+                                  ? "#6AA75D"
+                                  : "#d4183d",
+                            }}
                           >
                             <div className="text-center">
                               <div
-                                className="mx-auto mb-3 p-3 rounded-full"
-                                style={{ backgroundColor: actionDialog.type === "approve" ? "#E8F5E9" : "#FFE6EB", width: "fit-content" }}
+                                className="mx-auto mb-3 rounded-full p-3"
+                                style={{
+                                  backgroundColor:
+                                    actionDialog.type === "approve"
+                                      ? "#E8F5E9"
+                                      : "#FFE6EB",
+                                  width: "fit-content",
+                                }}
                               >
-                                <Upload className="h-6 w-6" style={{ color: actionDialog.type === "approve" ? "#6AA75D" : "#d4183d" }} />
+                                <Upload
+                                  className="h-6 w-6"
+                                  style={{
+                                    color:
+                                      actionDialog.type === "approve"
+                                        ? "#6AA75D"
+                                        : "#d4183d",
+                                  }}
+                                />
                               </div>
-                              <p className="text-sm mb-1" style={{ color: "#014357" }}>Click to upload PDF document</p>
-                              <p className="text-xs text-gray-500">Maximum file size: 100MB</p>
+                              <p
+                                className="mb-1 text-sm"
+                                style={{ color: "#014357" }}
+                              >
+                                Click to upload PDF document
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                Maximum file size: 100MB
+                              </p>
                             </div>
-                            <input type="file" accept="application/pdf" className="hidden" onChange={handleFileUpload} disabled={loading} />
+
+                            <input
+                              type="file"
+                              accept="application/pdf"
+                              className="hidden"
+                              onChange={handleFileUpload}
+                              disabled={loading}
+                            />
                           </label>
                         ) : (
                           <div
-                            className="flex items-center justify-between p-4 rounded-lg border-2"
+                            className="flex items-center justify-between rounded-lg border-2 p-4"
                             style={{
-                              backgroundColor: actionDialog.type === "approve" ? "#E8F5E9" : "#FFE6EB",
-                              borderColor: actionDialog.type === "approve" ? "#6AA75D" : "#d4183d",
+                              backgroundColor:
+                                actionDialog.type === "approve"
+                                  ? "#E8F5E9"
+                                  : "#FFE6EB",
+                              borderColor:
+                                actionDialog.type === "approve"
+                                  ? "#6AA75D"
+                                  : "#d4183d",
                             }}
                           >
                             <div className="flex items-center gap-3">
-                              <div className="p-2 rounded" style={{ backgroundColor: actionDialog.type === "approve" ? "#6AA75D" : "#d4183d" }}>
+                              <div
+                                className="rounded p-2"
+                                style={{
+                                  backgroundColor:
+                                    actionDialog.type === "approve"
+                                      ? "#6AA75D"
+                                      : "#d4183d",
+                                }}
+                              >
                                 <FileText className="h-6 w-6 text-white" />
                               </div>
                               <div>
-                                <p className="text-sm" style={{ color: "#014357" }}>{uploadedFile.name}</p>
-                                <p className="text-xs text-gray-600">{(uploadedFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                                <p
+                                  className="text-sm"
+                                  style={{ color: "#014357" }}
+                                >
+                                  {uploadedFile.name}
+                                </p>
+                                <p className="text-xs text-gray-600">
+                                  {(uploadedFile.size / 1024 / 1024).toFixed(2)}{" "}
+                                  MB
+                                </p>
                               </div>
                             </div>
-                            <Button variant="ghost" size="sm" onClick={() => setUploadedFile(null)} className="hover:bg-white/50" disabled={loading}>
-                              <X className="h-4 w-4" style={{ color: actionDialog.type === "approve" ? "#6AA75D" : "#d4183d" }} />
+
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setUploadedFile(null)}
+                              className="hover:bg-white/50"
+                              disabled={loading}
+                            >
+                              <X
+                                className="h-4 w-4"
+                                style={{
+                                  color:
+                                    actionDialog.type === "approve"
+                                      ? "#6AA75D"
+                                      : "#d4183d",
+                                }}
+                              />
                             </Button>
                           </div>
                         )}
@@ -1494,35 +1931,54 @@ function getDocButtonTheme(status?: RequestStatus) {
             )}
 
             <DialogFooter className="mt-4">
-              <Button variant="outline" onClick={handleCloseActionDialog} disabled={loading}>
+              <Button
+                variant="outline"
+                onClick={handleCloseActionDialog}
+                disabled={loading}
+              >
                 Cancel
               </Button>
               <Button
-                style={{ backgroundColor: actionDialog.type === "approve" ? "#6AA75D" : "#d4183d" }}
+                style={{
+                  backgroundColor:
+                    actionDialog.type === "approve" ? "#6AA75D" : "#d4183d",
+                }}
                 className="text-white"
                 onClick={handleSubmitAction}
                 disabled={loading}
               >
-                {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                {actionDialog.type === "approve" ? "Approve Request" : "Reject Request"}
+                {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                {actionDialog.type === "approve"
+                  ? "Approve Request"
+                  : "Reject Request"}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       )}
 
-      {/* Details Dialog */}
-      <Dialog open={detailsDialog.open} onOpenChange={(open) => !open && setDetailsDialog({ open: false, request: null })}>
+      <Dialog
+        open={detailsDialog.open}
+        onOpenChange={(open) =>
+          !open && setDetailsDialog({ open: false, request: null })
+        }
+      >
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden">
           <DialogHeader>
             <DialogTitle style={{ color: "#014357" }}>Request Details</DialogTitle>
-            <DialogDescription>View complete information about this reschedule request.</DialogDescription>
+            <DialogDescription>
+              View complete information about this reschedule request.
+            </DialogDescription>
 
             {detailsDialog.request && (
               <div className="flex items-center gap-2 pt-2">
                 <Badge
-                  style={{ backgroundColor: getStatusColor(detailsDialog.request["Reschedule Status"]) }}
-                  className="text-white px-4 py-1.5"
+                  style={{
+                    backgroundColor: getStatusColor(
+                      detailsDialog.request["Reschedule Status"]
+                    ),
+                  }}
+                  className="px-4 py-1.5 text-white"
                 >
                   {getStatusLabel(detailsDialog.request["Reschedule Status"])}
                 </Badge>
@@ -1534,80 +1990,160 @@ function getDocButtonTheme(status?: RequestStatus) {
             <ScrollArea className="max-h-[calc(85vh-220px)] pr-4">
               <div className="space-y-6 py-2">
                 <div>
-                  <div className="flex items-center gap-3 mb-4 pb-3 border-b-2" style={{ borderColor: "#014357" }}>
-                    <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: "#014357" }} />
-                    <h3 className="text-lg tracking-wide" style={{ color: "#014357" }}>Basic Information</h3>
+                  <div
+                    className="mb-4 flex items-center gap-3 border-b-2 pb-3"
+                    style={{ borderColor: "#014357" }}
+                  >
+                    <div
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{ backgroundColor: "#014357" }}
+                    />
+                    <h3
+                      className="text-lg tracking-wide"
+                      style={{ color: "#014357" }}
+                    >
+                      Basic Information
+                    </h3>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Request No</p>
-                      <p className="text-sm">{detailsDialog.request.POREETANUMBER}</p>
+                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                        Request No
+                      </p>
+                      <p className="text-sm">
+                        {detailsDialog.request.POREETANUMBER}
+                      </p>
                     </div>
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">PO Number</p>
-                      <p className="text-sm">{detailsDialog.request["PO Number"] || "-"}</p>
+                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                        PO Number
+                      </p>
+                      <p className="text-sm">
+                        {detailsDialog.request["PO Number"] || "-"}
+                      </p>
                     </div>
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Item</p>
-                      <p className="text-sm">{detailsDialog.request["PO Item No"] || "-"}</p>
+                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                        Item
+                      </p>
+                      <p className="text-sm">
+                        {detailsDialog.request["PO Item No"] || "-"}
+                      </p>
                     </div>
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Vendor</p>
-                      <p className="text-sm">{detailsDialog.request["Vendor Name"] || "-"}</p>
+                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                        Vendor
+                      </p>
+                      <p className="text-sm">
+                        {detailsDialog.request["Vendor Name"] || "-"}
+                      </p>
                     </div>
 
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Item Description</p>
-                      <p className="text-sm">{detailsDialog.request.ShortText || "-"}</p>
+                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                        Item Description
+                      </p>
+                      <p className="text-sm">
+                        {detailsDialog.request.ShortText || "-"}
+                      </p>
                     </div>
+
                     <div className="invisible">
-                        <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Item Description</p>
-                        <p className="text-sm">{detailsDialog.request.ShortText || "-"}</p>
+                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                        Spacer
+                      </p>
+                      <p className="text-sm">-</p>
+                    </div>
+
+                    <div>
+                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                        Request Date
+                      </p>
+                      <p className="text-sm">
+                        {formatDate(detailsDialog.request.CREATED_AT)}
+                      </p>
                     </div>
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Request Date</p>
-                      <p className="text-sm">{formatDate(detailsDialog.request.CREATED_AT)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">ETD</p>
-                      <p className="text-sm">{formatDate(detailsDialog.request.ETD) || "-"}</p>
+                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                        ETD
+                      </p>
+                      <p className="text-sm">
+                        {formatDate(detailsDialog.request.ETD)}
+                      </p>
                     </div>
                   </div>
                 </div>
 
                 <div>
-                  <div className="flex items-center gap-3 mb-4 pb-3 border-b-2" style={{ borderColor: "#014357" }}>
-                    <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: "#014357" }} />
-                    <h3 className="text-lg tracking-wide" style={{ color: "#014357" }}>ETA Details</h3>
+                  <div
+                    className="mb-4 flex items-center gap-3 border-b-2 pb-3"
+                    style={{ borderColor: "#014357" }}
+                  >
+                    <div
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{ backgroundColor: "#014357" }}
+                    />
+                    <h3
+                      className="text-lg tracking-wide"
+                      style={{ color: "#014357" }}
+                    >
+                      ETA Details
+                    </h3>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                      <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">Current ETA</p>
-                      <p className="text-xl mb-1">{formatDate(detailsDialog.request["Current ETA"])}</p>
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                      <p className="mb-2 text-xs uppercase tracking-wide text-gray-500">
+                        Current ETA
+                      </p>
+                      <p className="mb-1 text-xl">
+                        {formatDate(detailsDialog.request["Current ETA"])}
+                      </p>
                       <p className="text-sm text-gray-600">
-                        {detailsDialog.request["ETA Days"]+ " days after ETD"}
+                        {safeNumber(detailsDialog.request["ETA Days"], 0)} days
+                        after ETD
                       </p>
                     </div>
-                    <div className="rounded-lg p-4 border" style={{ backgroundColor: "#FFF4E6", borderColor: "#ED832D" }}>
-                      <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">Requested ETA</p>
-                      <p className="text-xl mb-1" style={{ color: "#ED832D" }}>
-                        {formatDate(detailsDialog.request.RequestETADate)}
+
+                    <div
+                      className="rounded-lg border p-4"
+                      style={{
+                        backgroundColor: "#FFF4E6",
+                        borderColor: "#ED832D",
+                      }}
+                    >
+                      <p className="mb-2 text-xs uppercase tracking-wide text-gray-500">
+                        NEW ETA
+                      </p>
+                      <p className="mb-1 text-xl" style={{ color: "#ED832D" }}>
+                        {formatDate(getRequestedEtaDate(detailsDialog.request))}
                       </p>
                       <p className="text-sm" style={{ color: "#ED832D" }}>
-                        +{detailsDialog.request.ResultProposeEtaDesc}
+                        +{getRequestedEtaDesc(detailsDialog.request)}
                       </p>
                     </div>
                   </div>
                 </div>
 
                 <div>
-                  <div className="flex items-center gap-3 mb-4 pb-3 border-b-2" style={{ borderColor: "#014357" }}>
-                    <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: "#014357" }} />
-                    <h3 className="text-lg tracking-wide" style={{ color: "#014357" }}>Vendor&apos;s Reason</h3>
+                  <div
+                    className="mb-4 flex items-center gap-3 border-b-2 pb-3"
+                    style={{ borderColor: "#014357" }}
+                  >
+                    <div
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{ backgroundColor: "#014357" }}
+                    />
+                    <h3
+                      className="text-lg tracking-wide"
+                      style={{ color: "#014357" }}
+                    >
+                      Vendor&apos;s Reason
+                    </h3>
                   </div>
-                  <p className="p-4 bg-gray-50 rounded-lg border border-gray-200 text-sm leading-relaxed">
+
+                  <p className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm leading-relaxed">
                     {detailsDialog.request["Reschedule Reason"] || "-"}
                   </p>
                 </div>
@@ -1615,103 +2151,177 @@ function getDocButtonTheme(status?: RequestStatus) {
                 {detailsDialog.request["Reschedule Status"] !== "PENDING" && (
                   <div>
                     <div
-                      className="flex items-center gap-3 mb-4 pb-3 border-b-2"
-                      style={{ borderColor: getStatusColor(detailsDialog.request["Reschedule Status"]) }}
+                      className="mb-4 flex items-center gap-3 border-b-2 pb-3"
+                      style={{
+                        borderColor: getStatusColor(
+                          detailsDialog.request["Reschedule Status"]
+                        ),
+                      }}
                     >
                       <div
                         className="h-1.5 w-1.5 rounded-full"
-                        style={{ backgroundColor: getStatusColor(detailsDialog.request["Reschedule Status"]) }}
+                        style={{
+                          backgroundColor: getStatusColor(
+                            detailsDialog.request["Reschedule Status"]
+                          ),
+                        }}
                       />
-                      <h3 className="text-lg tracking-wide" style={{ color: "#014357" }}>Admin Response</h3>
+                      <h3
+                        className="text-lg tracking-wide"
+                        style={{ color: "#014357" }}
+                      >
+                        Admin Response
+                      </h3>
                     </div>
 
                     <div className="space-y-4">
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Processed By</p>
-                          <p className="text-sm">{detailsDialog.request.FEEDBACK_BY || "-"}</p>
+                          <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                            Processed By
+                          </p>
+                          <p className="text-sm">
+                            {detailsDialog.request.FEEDBACK_BY || "-"}
+                          </p>
                         </div>
                         <div>
-                          <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Processed Date</p>
-                          <p className="text-sm">{formatDate(detailsDialog.request.FEEDBACK_AT)}</p>
+                          <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                            Processed Date
+                          </p>
+                          <p className="text-sm">
+                            {formatDate(detailsDialog.request.FEEDBACK_AT)}
+                          </p>
                         </div>
                       </div>
 
                       <div>
-                        <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">Remark</p>
-                        <p className="p-4 bg-gray-50 rounded-lg border border-gray-200 text-sm leading-relaxed">
+                        <p className="mb-2 text-xs uppercase tracking-wide text-gray-500">
+                          Remark
+                        </p>
+                        <p className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm leading-relaxed">
                           {detailsDialog.request.Feedback || "-"}
                         </p>
                       </div>
 
-                      {detailsDialog.request?.["Feedback Doc ID"] && (() => {
-  const status = detailsDialog.request?.["Reschedule Status"];
-  const theme = getDocButtonTheme(status);
+                      {detailsDialog.request["Feedback Doc ID"] ? (
+                        (() => {
+                          const status =
+                            detailsDialog.request["Reschedule Status"];
+                          const theme = getDocButtonTheme(status);
 
-  return (
-    <div>
-      <Label className="mb-2 block">Admin&apos;s Record of Event</Label>
+                          return (
+                            <div>
+                              <Label className="mb-2 block">
+                                Admin&apos;s Record of Event
+                              </Label>
 
-      <div
-        className="flex items-center justify-between p-4 rounded-lg border-2"
-        style={{ backgroundColor: theme.softBg, borderColor: theme.color }}
-      >
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded" style={{ backgroundColor: theme.color }}>
-            <FileText className="h-6 w-6 text-white" />
-          </div>
+                              <div
+                                className="flex items-center justify-between rounded-lg border-2 p-4"
+                                style={{
+                                  backgroundColor: theme.softBg,
+                                  borderColor: theme.color,
+                                }}
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div
+                                    className="rounded p-2"
+                                    style={{ backgroundColor: theme.color }}
+                                  >
+                                    <FileText className="h-6 w-6 text-white" />
+                                  </div>
 
-          <div>
-            <p className="text-sm" style={{ color: "#014357" }}>
-              Doc # {detailsDialog.request?.FeedbackFileName}
-            </p>
-            <p className="text-xs text-gray-600">PDF Document</p>
-          </div>
-        </div>
+                                  <div>
+                                    <p
+                                      className="text-sm"
+                                      style={{ color: "#014357" }}
+                                    >
+                                      Doc #{" "}
+                                      {detailsDialog.request.FeedbackFileName ||
+                                        detailsDialog.request["Feedback Doc ID"]}
+                                    </p>
+                                    <p className="text-xs text-gray-600">
+                                      PDF Document
+                                    </p>
+                                  </div>
+                                </div>
 
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() =>
-            handleDownloadDoc(
-              detailsDialog.request?.["Feedback Doc ID"],
-              "record_of_event.pdf"
-            )
-          }
-          style={{ borderColor: theme.color, color: theme.color }}
-          className={theme.hoverClass}
-          disabled={loading}
-        >
-          <Download className="h-4 w-4 mr-2" />
-          Download
-        </Button>
-      </div>
-    </div>
-  );
-})()}
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() =>
+                                    handleDownloadDoc(
+                                      detailsDialog.request?.["Feedback Doc ID"],
+                                      "record_of_event.pdf"
+                                    )
+                                  }
+                                  style={{
+                                    borderColor: theme.color,
+                                    color: theme.color,
+                                  }}
+                                  className={theme.hoverClass}
+                                  disabled={loading}
+                                >
+                                  <Download className="mr-2 h-4 w-4" />
+                                  Download
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })()
+                      ) : null}
 
                       {detailsDialog.request["VendorResp Doc ID"] ? (
                         <div>
-                          <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">Vendor&apos;s Supporting Document</p>
-                          <div className="flex items-center justify-between p-4 rounded-lg border-2" style={{ backgroundColor: "rgba(0, 131, 131, 0.1)", borderColor: "#008383" }}>
+                          <p className="mb-2 text-xs uppercase tracking-wide text-gray-500">
+                            Vendor&apos;s Supporting Document
+                          </p>
+                          <div
+                            className="flex items-center justify-between rounded-lg border-2 p-4"
+                            style={{
+                              backgroundColor: "rgba(0, 131, 131, 0.1)",
+                              borderColor: "#008383",
+                            }}
+                          >
                             <div className="flex items-center gap-3">
-                              <div className="p-2 rounded" style={{ backgroundColor: "#008383" }}>
+                              <div
+                                className="rounded p-2"
+                                style={{ backgroundColor: "#008383" }}
+                              >
                                 <FileText className="h-6 w-6 text-white" />
                               </div>
                               <div>
-                                <p className="text-sm" style={{ color: "#014357" }}>Doc #{detailsDialog.request["VendorResp Doc ID"]}</p>
-                                <p className="text-xs text-gray-600">Uploaded {formatDate(detailsDialog.request.VENDOR_RESPONSE_AT)}</p>
+                                <p
+                                  className="text-sm"
+                                  style={{ color: "#014357" }}
+                                >
+                                  Doc # {detailsDialog.request["VendorResp Doc ID"]}
+                                </p>
+                                <p className="text-xs text-gray-600">
+                                  Uploaded{" "}
+                                  {formatDate(
+                                    detailsDialog.request.VENDOR_RESPONSE_AT
+                                  )}
+                                </p>
                               </div>
                             </div>
+
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => handleDownloadDoc(detailsDialog.request?.["VendorResp Doc ID"], "vendor_response.pdf")}
-                              style={{ borderColor: "#008383", color: "#008383" }}
+                              onClick={() =>
+                                handleDownloadDoc(
+                                  detailsDialog.request?.["VendorResp Doc ID"],
+                                  "vendor_response.pdf"
+                                )
+                              }
+                              style={{
+                                borderColor: "#008383",
+                                color: "#008383",
+                              }}
                               className="hover:bg-teal-50"
                               disabled={loading}
                             >
-                              <Download className="h-4 w-4 mr-2" />
+                              <Download className="mr-2 h-4 w-4" />
                               Download
                             </Button>
                           </div>
@@ -1725,7 +2335,8 @@ function getDocButtonTheme(status?: RequestStatus) {
           )}
 
           <DialogFooter className="mt-4">
-            {user.role === "admin" && detailsDialog.request?.["Reschedule Status"] === "PENDING" ? (
+            {user.role === "admin" &&
+            detailsDialog.request?.["Reschedule Status"] === "PENDING" ? (
               <>
                 <Button
                   onClick={() => {
@@ -1753,7 +2364,13 @@ function getDocButtonTheme(status?: RequestStatus) {
                 </Button>
               </>
             ) : (
-              <Button variant="outline" onClick={() => setDetailsDialog({ open: false, request: null })} disabled={loading}>
+              <Button
+                variant="outline"
+                onClick={() =>
+                  setDetailsDialog({ open: false, request: null })
+                }
+                disabled={loading}
+              >
                 Close
               </Button>
             )}
@@ -1761,54 +2378,93 @@ function getDocButtonTheme(status?: RequestStatus) {
         </DialogContent>
       </Dialog>
 
-      {/* Vendor Response Upload Dialog */}
       {user.role === "vendor" && (
-        <Dialog open={vendorResponseDialog.open} onOpenChange={(open) => !open && handleCloseVendorResponseDialog()}>
+        <Dialog
+          open={vendorResponseDialog.open}
+          onOpenChange={(open) => !open && handleCloseVendorResponseDialog()}
+        >
           <DialogContent className="max-w-2xl">
             <DialogHeader>
-              <DialogTitle style={{ color: "#014357" }}>Upload Supporting Document</DialogTitle>
+              <DialogTitle style={{ color: "#014357" }}>
+                Upload Supporting Document
+              </DialogTitle>
               <DialogDescription>
-                The admin has rejected your request with a supporting document. Please upload your response document.
+                The admin has rejected your request with a supporting document.
+                Please upload your response document.
               </DialogDescription>
             </DialogHeader>
 
             {vendorResponseDialog.request && (
               <div className="space-y-6">
-                <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Request No</p>
-                      <p className="text-sm">{vendorResponseDialog.request.POREETANUMBER}</p>
+                      <p className="mb-1 text-xs uppercase tracking-wide text-gray-500">
+                        Request No
+                      </p>
+                      <p className="text-sm">
+                        {vendorResponseDialog.request.POREETANUMBER}
+                      </p>
                     </div>
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">PO Number</p>
-                      <p className="text-sm">{vendorResponseDialog.request["PO Number"]}</p>
+                      <p className="mb-1 text-xs uppercase tracking-wide text-gray-500">
+                        PO Number
+                      </p>
+                      <p className="text-sm">
+                        {vendorResponseDialog.request["PO Number"]}
+                      </p>
                     </div>
                   </div>
                 </div>
 
                 {vendorResponseDialog.request["Feedback Doc ID"] && (
                   <div>
-                    <Label className="mb-2 block">Admin&apos;s Record of Event</Label>
-                    <div className="flex items-center justify-between p-4 rounded-lg border-2" style={{ backgroundColor: "#FFE6EB", borderColor: "#d4183d" }}>
+                    <Label className="mb-2 block">
+                      Admin&apos;s Record of Event
+                    </Label>
+                    <div
+                      className="flex items-center justify-between rounded-lg border-2 p-4"
+                      style={{
+                        backgroundColor: "#FFE6EB",
+                        borderColor: "#d4183d",
+                      }}
+                    >
                       <div className="flex items-center gap-3">
-                        <div className="p-2 rounded" style={{ backgroundColor: "#d4183d" }}>
+                        <div
+                          className="rounded p-2"
+                          style={{ backgroundColor: "#d4183d" }}
+                        >
                           <FileText className="h-6 w-6 text-white" />
                         </div>
                         <div>
-                          <p className="text-sm" style={{ color: "#014357" }}>Doc #{vendorResponseDialog.request["Feedback Doc ID"]}</p>
-                          <p className="text-xs text-gray-600">PDF Document</p>
+                          <p
+                            className="text-sm"
+                            style={{ color: "#014357" }}
+                          >
+                            Doc #{" "}
+                            {vendorResponseDialog.request.FeedbackFileName ||
+                              vendorResponseDialog.request["Feedback Doc ID"]}
+                          </p>
+                          <p className="text-xs text-gray-600">
+                            PDF Document
+                          </p>
                         </div>
                       </div>
+
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleDownloadDoc(vendorResponseDialog.request?.["Feedback Doc ID"], "record_of_event.pdf")}
+                        onClick={() =>
+                          handleDownloadDoc(
+                            vendorResponseDialog.request?.["Feedback Doc ID"],
+                            "record_of_event.pdf"
+                          )
+                        }
                         style={{ borderColor: "#d4183d", color: "#d4183d" }}
                         className="hover:bg-red-50"
                         disabled={loading}
                       >
-                        <Download className="h-4 w-4 mr-2" />
+                        <Download className="mr-2 h-4 w-4" />
                         Download
                       </Button>
                     </div>
@@ -1817,36 +2473,77 @@ function getDocButtonTheme(status?: RequestStatus) {
 
                 <div>
                   <Label className="mb-2 block">
-                    Your Supporting Document (PDF) <span className="text-red-500">*</span>
+                    Your Supporting Document (PDF){" "}
+                    <span className="text-red-500">*</span>
                   </Label>
-                  <p className="text-xs text-gray-500 mb-3">Upload your response document in PDF format (max 100MB)</p>
+                  <p className="mb-3 text-xs text-gray-500">
+                    Upload your response document in PDF format (max 100MB)
+                  </p>
 
                   {!vendorResponseFile ? (
                     <label
-                      className="flex items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer transition-all hover:border-gray-400 hover:bg-gray-50"
+                      className="flex h-32 w-full cursor-pointer items-center justify-center rounded-lg border-2 border-dashed transition-all hover:border-gray-400 hover:bg-gray-50"
                       style={{ borderColor: "#FFA500" }}
                     >
                       <div className="text-center">
-                        <div className="mx-auto mb-3 p-3 rounded-full" style={{ backgroundColor: "rgba(255, 165, 0, 0.1)", width: "fit-content" }}>
+                        <div
+                          className="mx-auto mb-3 rounded-full p-3"
+                          style={{
+                            backgroundColor: "rgba(255, 165, 0, 0.1)",
+                            width: "fit-content",
+                          }}
+                        >
                           <Upload className="h-6 w-6" style={{ color: "#FFA500" }} />
                         </div>
-                        <p className="text-sm mb-1" style={{ color: "#014357" }}>Click to upload PDF document</p>
-                        <p className="text-xs text-gray-500">Maximum file size: 100MB</p>
+                        <p className="mb-1 text-sm" style={{ color: "#014357" }}>
+                          Click to upload PDF document
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          Maximum file size: 100MB
+                        </p>
                       </div>
-                      <input type="file" accept="application/pdf" className="hidden" onChange={handleVendorResponseFileUpload} disabled={loading} />
+
+                      <input
+                        type="file"
+                        accept="application/pdf"
+                        className="hidden"
+                        onChange={handleVendorResponseFileUpload}
+                        disabled={loading}
+                      />
                     </label>
                   ) : (
-                    <div className="flex items-center justify-between p-4 rounded-lg border-2" style={{ backgroundColor: "rgba(255, 165, 0, 0.1)", borderColor: "#FFA500" }}>
+                    <div
+                      className="flex items-center justify-between rounded-lg border-2 p-4"
+                      style={{
+                        backgroundColor: "rgba(255, 165, 0, 0.1)",
+                        borderColor: "#FFA500",
+                      }}
+                    >
                       <div className="flex items-center gap-3">
-                        <div className="p-2 rounded" style={{ backgroundColor: "#FFA500" }}>
+                        <div
+                          className="rounded p-2"
+                          style={{ backgroundColor: "#FFA500" }}
+                        >
                           <FileText className="h-6 w-6 text-white" />
                         </div>
                         <div>
-                          <p className="text-sm" style={{ color: "#014357" }}>{vendorResponseFile.name}</p>
-                          <p className="text-xs text-gray-600">{(vendorResponseFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                          <p className="text-sm" style={{ color: "#014357" }}>
+                            {vendorResponseFile.name}
+                          </p>
+                          <p className="text-xs text-gray-600">
+                            {(vendorResponseFile.size / 1024 / 1024).toFixed(2)}{" "}
+                            MB
+                          </p>
                         </div>
                       </div>
-                      <Button variant="ghost" size="sm" onClick={() => setVendorResponseFile(null)} className="hover:bg-white/50" disabled={loading}>
+
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setVendorResponseFile(null)}
+                        className="hover:bg-white/50"
+                        disabled={loading}
+                      >
                         <X className="h-4 w-4" style={{ color: "#FFA500" }} />
                       </Button>
                     </div>
@@ -1856,11 +2553,20 @@ function getDocButtonTheme(status?: RequestStatus) {
             )}
 
             <DialogFooter>
-              <Button variant="outline" onClick={handleCloseVendorResponseDialog} disabled={loading}>
+              <Button
+                variant="outline"
+                onClick={handleCloseVendorResponseDialog}
+                disabled={loading}
+              >
                 Cancel
               </Button>
-              <Button style={{ backgroundColor: "#FFA500" }} className="text-white" onClick={handleSubmitVendorResponse} disabled={loading}>
-                {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              <Button
+                style={{ backgroundColor: "#FFA500" }}
+                className="text-white"
+                onClick={handleSubmitVendorResponse}
+                disabled={loading}
+              >
+                {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 Submit Document
               </Button>
             </DialogFooter>

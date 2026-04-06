@@ -206,10 +206,15 @@
   }
 }
 
+/* @layer utilities {
+  .overdue-active {
+    box-shadow: 0 0 0 2px #DC2626 !important;
+  }
+} */
+
 html {
   font-size: var(--font-size);
 }
-
 /* Hide native date input calendar icon */
 input[type="date"]::-webkit-calendar-picker-indicator {
   display: none;

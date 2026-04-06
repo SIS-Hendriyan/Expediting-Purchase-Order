@@ -37,7 +37,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { API } from '../../config';
-import { getAccessToken } from '../../utils/authSession';
+import { getAccessToken, redirectToLoginExpired } from '../../utils/authSession';
 
 interface Vendor {
   id: string;
@@ -63,10 +63,14 @@ interface VendorSummary {
 }
 
 // =============== Shared helpers ===============
-const buildAuthHeaders = (): HeadersInit => {
+const getAuthToken = (): string => {
   const local = localStorage.getItem('accessToken');
   const sessionToken = getAccessToken();
-  const token = local || sessionToken;
+  return local || sessionToken || '';
+};
+
+const buildAuthHeaders = (): HeadersInit => {
+  const token = getAuthToken();
 
   return {
     'Content-Type': 'application/json',
@@ -74,11 +78,22 @@ const buildAuthHeaders = (): HeadersInit => {
   };
 };
 
+const fetchWithAuth = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const res = await fetch(input, init);
+
+  if (res.status === 401) {
+    redirectToLoginExpired();
+    throw new Error('Session expired');
+  }
+
+  return res;
+};
+
 const parseErrorResponse = async (res: Response): Promise<string> => {
   const text = await res.text();
   try {
     const json = text ? JSON.parse(text) : {};
-    return json.message || json.msg || `HTTP ${res.status}`;
+    return json.message || json.msg || json.Message || `HTTP ${res.status}`;
   } catch {
     return text || `HTTP ${res.status}`;
   }
@@ -99,7 +114,7 @@ export function VendorManagement() {
   const fetchVendors = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch(API.LISTVENDOR(), {
+      const res = await fetchWithAuth(API.LISTVENDOR(), {
         headers: buildAuthHeaders(),
       });
 
@@ -110,7 +125,6 @@ export function VendorManagement() {
       const json = await res.json();
       console.log('Fetched vendors:', json);
 
-      // rows vendor
       const rows =
         json.data?.rows ??
         json.Data?.rows ??
@@ -147,7 +161,6 @@ export function VendorManagement() {
 
       setVendors(normalized);
 
-      // summary/header
       const summaryRaw =
         json.data?.summary ??
         json.Data?.summary ??
@@ -160,8 +173,10 @@ export function VendorManagement() {
         setSummary(null);
       }
     } catch (err: any) {
-      console.error(err);
-      toast.error(`Failed to load vendors: ${err.message || err}`);
+      if (err?.message !== 'Session expired') {
+        console.error(err);
+        toast.error(`Failed to load vendors: ${err.message || err}`);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -233,7 +248,7 @@ export function VendorManagement() {
     setAccessLoadingId(vendorId);
 
     try {
-      const res = await fetch(API.ACCESSVENDOR(vendorId), {
+      const res = await fetchWithAuth(API.ACCESSVENDOR(vendorId), {
         method: 'POST',
         headers: buildAuthHeaders(),
         body: JSON.stringify({
@@ -249,19 +264,21 @@ export function VendorManagement() {
       const msg =
         json.message ||
         json.msg ||
+        json.Message ||
         `Access ${newAccessState ? 'granted' : 'revoked'} for ${vendor.name}`;
 
       toast.success(msg);
 
-      // refresh list + summary
       await fetchVendors();
     } catch (err: any) {
-      console.error(err);
-      toast.error(
-        `Failed to update access for ${vendor.name}: ${
-          err.message || err
-        }`,
-      );
+      if (err?.message !== 'Session expired') {
+        console.error(err);
+        toast.error(
+          `Failed to update access for ${vendor.name}: ${
+            err.message || err
+          }`,
+        );
+      }
     } finally {
       setAccessLoadingId(null);
     }
@@ -270,7 +287,6 @@ export function VendorManagement() {
   // =============== render ===============
   return (
     <div className="p-4 sm:p-6 lg:p-8">
-      {/* Title */}
       <div className="mb-6 sm:mb-8">
         <h1 className="mb-2" style={{ color: '#014357' }}>
           Vendor Management
@@ -280,7 +296,6 @@ export function VendorManagement() {
         </p>
       </div>
 
-      {/* Search Bar */}
       <div className="flex flex-col sm:flex-row sm:justify-between gap-3 mb-6">
         <div className="relative flex-1 sm:max-w-md">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
@@ -293,7 +308,6 @@ export function VendorManagement() {
         </div>
       </div>
 
-      {/* Stats Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">
         <Card className="p-4">
           <div className="flex items-center gap-2 mb-2">
@@ -360,7 +374,6 @@ export function VendorManagement() {
         </Card>
       </div>
 
-      {/* Vendors Table */}
       <Card>
         <div className="overflow-x-auto">
           <Table>
@@ -496,7 +509,6 @@ export function VendorManagement() {
           </Table>
         </div>
 
-        {/* Pagination */}
         {filteredVendors.length > 0 && (
           <div className="flex items-center justify-between px-4 py-4 border-t gap-4">
             <div className="flex items-center gap-2">
