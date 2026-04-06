@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card } from '../ui/card';
 import { Input } from '../ui/input';
 import { Button } from '../ui/button';
@@ -53,20 +53,17 @@ interface VendorSummary {
   vendorsWithAccess?: number;
   vendorsWithoutAccess?: number;
   averageScore?: number;
-
   TotalVendors?: number;
   VendorsWithAccess?: number;
   VendorsWithoutAccess?: number;
   AverageScore?: number;
-
   [key: string]: any;
 }
 
-// =============== Shared helpers ===============
 const getAuthToken = (): string => {
-  const local = localStorage.getItem('accessToken');
+  const localToken = localStorage.getItem('accessToken');
   const sessionToken = getAccessToken();
-  return local || sessionToken || '';
+  return localToken || sessionToken || '';
 };
 
 const buildAuthHeaders = (): HeadersInit => {
@@ -79,226 +76,336 @@ const buildAuthHeaders = (): HeadersInit => {
 };
 
 const fetchWithAuth = async (input: RequestInfo | URL, init?: RequestInit) => {
-  const res = await fetch(input, init);
+  const response = await fetch(input, init);
 
-  if (res.status === 401) {
+  if (response.status === 401) {
     redirectToLoginExpired();
     throw new Error('Session expired');
   }
 
-  return res;
+  return response;
 };
 
-const parseErrorResponse = async (res: Response): Promise<string> => {
-  const text = await res.text();
+const parseErrorResponse = async (response: Response): Promise<string> => {
+  const text = await response.text();
+
   try {
     const json = text ? JSON.parse(text) : {};
-    return json.message || json.msg || json.Message || `HTTP ${res.status}`;
+    return json.message || json.msg || json.Message || `HTTP ${response.status}`;
   } catch {
-    return text || `HTTP ${res.status}`;
+    return text || `HTTP ${response.status}`;
   }
 };
 
+const isValidVendorId = (value: string): boolean =>
+  typeof value === 'string' && value.trim() !== '';
+
+const parseBoolean = (value: unknown): boolean => {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    return value === 1;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    return (
+      normalized === 'true' ||
+      normalized === '1' ||
+      normalized === 'yes' ||
+      normalized === 'y'
+    );
+  }
+
+  return false;
+};
+
+const normalizeVendor = (raw: any): Vendor => {
+  console.log('RAW IsAccess:', raw?.IsAccess, 'RAW hasAccess:', raw?.hasAccess, 'RAW row:', raw);
+
+  const id = String(raw?.VendorID ?? raw?.Id ?? raw?.id ?? '').trim();
+
+  return {
+    id,
+    name: String(raw?.VendorName ?? raw?.Name ?? raw?.name ?? '').trim(),
+    userName: String(
+      raw?.UserName ??
+        raw?.CompleteName ??
+        raw?.userName ??
+        raw?.completeName ??
+        '',
+    ).trim(),
+    email: String(raw?.Email ?? raw?.email ?? '').trim(),
+    hasAccess: parseBoolean(raw?.IsAccess ?? raw?.hasAccess),
+    score:
+      Number(
+        raw?.Score ??
+          raw?.PerformanceScore ??
+          raw?.performanceScore ??
+          0,
+      ) || 0,
+  };
+};
+
+const extractVendorRows = (json: any): any[] => {
+  const rows =
+    json?.data?.rows ??
+    json?.Data?.rows ??
+    json?.data ??
+    json?.Data ??
+    json?.vendors ??
+    json;
+
+  if (Array.isArray(rows)) {
+    return rows;
+  }
+
+  if (Array.isArray(rows?.vendors)) {
+    return rows.vendors;
+  }
+
+  return [];
+};
+
+const extractSummary = (json: any): VendorSummary | null => {
+  const summaryRaw =
+    json?.data?.summary ??
+    json?.Data?.summary ??
+    json?.summary ??
+    null;
+
+  return summaryRaw && typeof summaryRaw === 'object'
+    ? (summaryRaw as VendorSummary)
+    : null;
+};
+
+const getPaginationItems = (currentPage: number, totalPages: number) => {
+  const items: Array<number | 'ellipsis-left' | 'ellipsis-right'> = [];
+
+  for (let page = 1; page <= totalPages; page += 1) {
+    const shouldShow =
+      page === 1 ||
+      page === totalPages ||
+      (page >= currentPage - 1 && page <= currentPage + 1);
+
+    if (shouldShow) {
+      items.push(page);
+      continue;
+    }
+
+    if (page === currentPage - 2) {
+      items.push('ellipsis-left');
+      continue;
+    }
+
+    if (page === currentPage + 2) {
+      items.push('ellipsis-right');
+    }
+  }
+
+  return items;
+};
+
 export function VendorManagement() {
-  // =============== state ===============
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
 
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [summary, setSummary] = useState<VendorSummary | null>(null);
+
   const [isLoading, setIsLoading] = useState(false);
   const [accessLoadingId, setAccessLoadingId] = useState<string | null>(null);
 
-  // =============== fetch vendors ===============
-  const fetchVendors = async () => {
+  const fetchVendors = useCallback(async () => {
     setIsLoading(true);
+
     try {
-      const res = await fetchWithAuth(API.LISTVENDOR(), {
+      const response = await fetchWithAuth(API.LISTVENDOR(), {
         headers: buildAuthHeaders(),
       });
 
-      if (!res.ok) {
-        throw new Error(await parseErrorResponse(res));
+      if (!response.ok) {
+        throw new Error(await parseErrorResponse(response));
       }
 
-      const json = await res.json();
+      const json = await response.json();
       console.log('Fetched vendors:', json);
 
-      const rows =
-        json.data?.rows ??
-        json.Data?.rows ??
-        json.data ??
-        json.Data ??
-        json.vendors ??
-        json;
+      const rawList = extractVendorRows(json);
+      const normalizedVendors = rawList.map((item) => {
+        const mapped = normalizeVendor(item);
+        console.log('Mapped vendor:', mapped, 'Raw vendor:', item);
+        return mapped;
+      });
 
-      const list: any[] = Array.isArray(rows)
-        ? rows
-        : Array.isArray(rows?.vendors)
-        ? rows.vendors
-        : [];
-
-      const normalized: Vendor[] = list.map((v: any) => ({
-        id: String(v.VendorID ?? v.Id ?? v.id ?? ''),
-        name: v.VendorName ?? v.Name ?? v.name ?? '',
-        userName:
-          v.UserName ??
-          v.CompleteName ??
-          v.userName ??
-          v.completeName ??
-          '',
-        email: v.Email ?? v.email ?? '',
-        hasAccess: Boolean(v.IsAccess ?? v.hasAccess ?? false),
-        score:
-          Number(
-            v.Score ??
-              v.PerformanceScore ??
-              v.performanceScore ??
-              0,
-          ) || 0,
-      }));
-
-      setVendors(normalized);
-
-      const summaryRaw =
-        json.data?.summary ??
-        json.Data?.summary ??
-        json.summary ??
-        null;
-
-      if (summaryRaw && typeof summaryRaw === 'object') {
-        setSummary(summaryRaw as VendorSummary);
-      } else {
-        setSummary(null);
-      }
-    } catch (err: any) {
-      if (err?.message !== 'Session expired') {
-        console.error(err);
-        toast.error(`Failed to load vendors: ${err.message || err}`);
+      setVendors(normalizedVendors);
+      setSummary(extractSummary(json));
+    } catch (error: any) {
+      if (error?.message !== 'Session expired') {
+        console.error(error);
+        toast.error(`Failed to load vendors: ${error.message || error}`);
       }
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchVendors();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fetchVendors]);
 
-  // =============== stats (cards) ===============
-  const totalVendors =
-    summary?.TotalVendors ??
-    summary?.totalVendors ??
-    vendors.length;
+  const totalVendors = useMemo(() => {
+    return summary?.TotalVendors ?? summary?.totalVendors ?? vendors.length;
+  }, [summary, vendors]);
 
-  const vendorsWithAccess =
-    summary?.VendorsWithAccess ??
-    summary?.vendorsWithAccess ??
-    vendors.filter((v) => v.hasAccess).length;
+  const vendorsWithAccess = useMemo(() => {
+    return (
+      summary?.VendorsWithAccess ??
+      summary?.vendorsWithAccess ??
+      vendors.filter((vendor) => vendor.hasAccess).length
+    );
+  }, [summary, vendors]);
 
-  const vendorsWithoutAccess =
-    summary?.VendorsWithoutAccess ??
-    summary?.vendorsWithoutAccess ??
-    vendors.filter((v) => !v.hasAccess).length;
+  const vendorsWithoutAccess = useMemo(() => {
+    return (
+      summary?.VendorsWithoutAccess ??
+      summary?.vendorsWithoutAccess ??
+      vendors.filter((vendor) => !vendor.hasAccess).length
+    );
+  }, [summary, vendors]);
 
-  const averageScore =
-    summary?.AverageScore ??
-    summary?.averageScore ??
-    (vendors.length > 0
-      ? Math.round(
-          vendors.reduce((sum, v) => sum + (v.score || 0), 0) /
-            vendors.length,
-        )
-      : 0);
+  const averageScore = useMemo(() => {
+    return (
+      summary?.AverageScore ??
+      summary?.averageScore ??
+      (vendors.length > 0
+        ? Math.round(
+            vendors.reduce((sum, vendor) => sum + (vendor.score || 0), 0) /
+              vendors.length,
+          )
+        : 0)
+    );
+  }, [summary, vendors]);
 
-  // =============== filter & pagination ===============
-  const filteredVendors = vendors.filter((vendor) =>
-    [vendor.name, vendor.userName, vendor.email]
-      .join(' ')
-      .toLowerCase()
-      .includes(searchQuery.toLowerCase()),
-  );
+  const filteredVendors = useMemo(() => {
+    const keyword = searchQuery.trim().toLowerCase();
 
-  const totalPages = Math.ceil(filteredVendors.length / itemsPerPage) || 1;
-  const startIndex = (currentPage - 1) * itemsPerPage;
+    if (!keyword) {
+      return vendors;
+    }
+
+    return vendors.filter((vendor) =>
+      [vendor.name, vendor.userName, vendor.email]
+        .join(' ')
+        .toLowerCase()
+        .includes(keyword),
+    );
+  }, [vendors, searchQuery]);
+
+  const totalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(filteredVendors.length / itemsPerPage));
+  }, [filteredVendors.length, itemsPerPage]);
+
+  const safeCurrentPage = useMemo(() => {
+    return Math.min(currentPage, totalPages);
+  }, [currentPage, totalPages]);
+
+  const startIndex = (safeCurrentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
-  const paginatedVendors = filteredVendors.slice(startIndex, endIndex);
 
-  const handleSearchChange = (value: string) => {
+  const paginatedVendors = useMemo(() => {
+    return filteredVendors.slice(startIndex, endIndex);
+  }, [filteredVendors, startIndex, endIndex]);
+
+  const paginationItems = useMemo(() => {
+    return getPaginationItems(safeCurrentPage, totalPages);
+  }, [safeCurrentPage, totalPages]);
+
+  const handleSearchChange = useCallback((value: string) => {
     setSearchQuery(value);
     setCurrentPage(1);
-  };
+  }, []);
 
-  const handleItemsPerPageChange = (value: string) => {
+  const handleItemsPerPageChange = useCallback((value: string) => {
     setItemsPerPage(Number(value));
     setCurrentPage(1);
-  };
+  }, []);
 
-  // =============== toggle access (API + refresh) ===============
-  const toggleAccess = async (vendorId: string) => {
-    const vendor = vendors.find((v) => v.id === vendorId);
-    if (!vendor) {
-      toast.error('Vendor not found');
-      return;
-    }
+  const toggleAccess = useCallback(
+    async (vendor: Vendor) => {
+      const normalizedVendorId = String(vendor.id ?? '').trim();
 
-    const newAccessState = !vendor.hasAccess;
-    setAccessLoadingId(vendorId);
-
-    try {
-      const res = await fetchWithAuth(API.ACCESSVENDOR(vendorId), {
-        method: 'POST',
-        headers: buildAuthHeaders(),
-        body: JSON.stringify({
-          IsAccess: newAccessState,
-        }),
-      });
-
-      if (!res.ok) {
-        throw new Error(await parseErrorResponse(res));
+      if (!isValidVendorId(normalizedVendorId)) {
+        console.error('Invalid vendorId:', normalizedVendorId, 'Vendor:', vendor);
+        toast.error(`Invalid vendor id: ${normalizedVendorId || '(empty)'}`);
+        return;
       }
 
-      const json = await res.json();
-      const msg =
-        json.message ||
-        json.msg ||
-        json.Message ||
-        `Access ${newAccessState ? 'granted' : 'revoked'} for ${vendor.name}`;
+      const newAccessState = !vendor.hasAccess;
+      const requestUrl = API.ACCESSVENDOR(normalizedVendorId);
 
-      toast.success(msg);
+      setAccessLoadingId(normalizedVendorId);
 
-      await fetchVendors();
-    } catch (err: any) {
-      if (err?.message !== 'Session expired') {
-        console.error(err);
-        toast.error(
-          `Failed to update access for ${vendor.name}: ${
-            err.message || err
-          }`,
-        );
+      try {
+        console.log('CLICKED VENDOR:', vendor);
+        console.log('ACCESS URL:', requestUrl);
+        console.log('vendorId:', normalizedVendorId);
+        console.log('vendor.hasAccess:', vendor.hasAccess);
+        console.log('newAccessState:', newAccessState);
+        console.log('payload:', { IsAccess: newAccessState });
+
+        const response = await fetchWithAuth(requestUrl, {
+          method: 'POST',
+          headers: buildAuthHeaders(),
+          body: JSON.stringify({
+            IsAccess: newAccessState,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(await parseErrorResponse(response));
+        }
+
+        const json = await response.json();
+        const message =
+          json?.message ||
+          json?.msg ||
+          json?.Message ||
+          `Access ${newAccessState ? 'granted' : 'revoked'} for ${vendor.name}`;
+
+        toast.success(message);
+        await fetchVendors();
+      } catch (error: any) {
+        if (error?.message !== 'Session expired') {
+          console.error(error);
+          toast.error(
+            `Failed to update access for ${vendor.name}: ${
+              error.message || error
+            }`,
+          );
+        }
+      } finally {
+        setAccessLoadingId(null);
       }
-    } finally {
-      setAccessLoadingId(null);
-    }
-  };
+    },
+    [fetchVendors],
+  );
 
-  // =============== render ===============
   return (
     <div className="p-4 sm:p-6 lg:p-8">
       <div className="mb-6 sm:mb-8">
         <h1 className="mb-2" style={{ color: '#014357' }}>
           Vendor Management
         </h1>
-        <p className="text-gray-600">
-          Manage and track all vendor relationships
-        </p>
+        <p className="text-gray-600">Manage and track all vendor relationships</p>
       </div>
 
       <div className="flex flex-col sm:flex-row sm:justify-between gap-3 mb-6">
         <div className="relative flex-1 sm:max-w-md">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
           <Input
             placeholder="Search vendors..."
             value={searchQuery}
@@ -332,9 +439,7 @@ export function VendorManagement() {
             >
               <UserCheck className="h-4 w-4" style={{ color: '#008383' }} />
             </div>
-            <div className="text-gray-600 text-sm">
-              Vendor with Access
-            </div>
+            <div className="text-gray-600 text-sm">Vendor with Access</div>
           </div>
           <div className="text-3xl" style={{ color: '#008383' }}>
             {vendorsWithAccess}
@@ -349,9 +454,7 @@ export function VendorManagement() {
             >
               <UserX className="h-4 w-4" style={{ color: '#ED832D' }} />
             </div>
-            <div className="text-gray-600 text-sm">
-              Vendor without Access
-            </div>
+            <div className="text-gray-600 text-sm">Vendor without Access</div>
           </div>
           <div className="text-3xl" style={{ color: '#ED832D' }}>
             {vendorsWithoutAccess}
@@ -387,27 +490,27 @@ export function VendorManagement() {
                 <TableHead>Action</TableHead>
               </TableRow>
             </TableHeader>
+
             <TableBody>
               {paginatedVendors.map((vendor) => (
-                <TableRow key={vendor.id}>
-                  <TableCell>{vendor.name}</TableCell>
-                  <TableCell>{vendor.userName}</TableCell>
+                <TableRow key={`${vendor.id}-${vendor.email}`}>
+                  <TableCell>{vendor.name || '-'}</TableCell>
+                  <TableCell>{vendor.userName || '-'}</TableCell>
                   <TableCell className="text-sm text-gray-600">
-                    {vendor.email}
+                    {vendor.email || '-'}
                   </TableCell>
+
                   <TableCell>
                     {vendor.hasAccess ? (
                       <div className="flex items-center gap-1.5">
-                        <Award
-                          className="h-4 w-4"
-                          style={{ color: '#6AA75D' }}
-                        />
+                        <Award className="h-4 w-4" style={{ color: '#6AA75D' }} />
                         <span>{vendor.score}%</span>
                       </div>
                     ) : (
                       'N/A'
                     )}
                   </TableCell>
+
                   <TableCell>
                     <Badge
                       variant={vendor.hasAccess ? 'default' : 'secondary'}
@@ -421,6 +524,7 @@ export function VendorManagement() {
                       {vendor.hasAccess ? 'Has Access' : 'No Access'}
                     </Badge>
                   </TableCell>
+
                   <TableCell>
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
@@ -448,35 +552,34 @@ export function VendorManagement() {
                           )}
                         </Button>
                       </AlertDialogTrigger>
+
                       <AlertDialogContent>
                         <AlertDialogHeader>
                           <AlertDialogTitle>
-                            {vendor.hasAccess
-                              ? 'Revoke Access'
-                              : 'Grant Access'}
+                            {vendor.hasAccess ? 'Revoke Access' : 'Grant Access'}
                           </AlertDialogTitle>
                           <AlertDialogDescription>
                             {vendor.hasAccess ? (
                               <>
                                 Are you sure you want to revoke access for{' '}
-                                <strong>{vendor.name}</strong>? They will no
-                                longer be able to access the procurement
-                                system.
+                                <strong>{vendor.name}</strong>? They will no longer
+                                be able to access the procurement system.
                               </>
                             ) : (
                               <>
                                 Are you sure you want to grant access to{' '}
-                                <strong>{vendor.name}</strong>? They will be
-                                able to access the procurement system and view
-                                relevant information.
+                                <strong>{vendor.name}</strong>? They will be able
+                                to access the procurement system and view relevant
+                                information.
                               </>
                             )}
                           </AlertDialogDescription>
                         </AlertDialogHeader>
+
                         <AlertDialogFooter>
                           <AlertDialogCancel>Cancel</AlertDialogCancel>
                           <AlertDialogAction
-                            onClick={() => toggleAccess(vendor.id)}
+                            onClick={() => toggleAccess(vendor)}
                             style={
                               vendor.hasAccess
                                 ? { backgroundColor: '#dc2626' }
@@ -484,9 +587,7 @@ export function VendorManagement() {
                             }
                             disabled={accessLoadingId === vendor.id}
                           >
-                            {vendor.hasAccess
-                              ? 'Revoke Access'
-                              : 'Grant Access'}
+                            {vendor.hasAccess ? 'Revoke Access' : 'Grant Access'}
                           </AlertDialogAction>
                         </AlertDialogFooter>
                       </AlertDialogContent>
@@ -505,12 +606,23 @@ export function VendorManagement() {
                   </TableCell>
                 </TableRow>
               )}
+
+              {isLoading && (
+                <TableRow>
+                  <TableCell
+                    colSpan={6}
+                    className="px-4 py-6 text-center text-sm text-gray-500"
+                  >
+                    Loading vendors...
+                  </TableCell>
+                </TableRow>
+              )}
             </TableBody>
           </Table>
         </div>
 
         {filteredVendors.length > 0 && (
-          <div className="flex items-center justify-between px-4 py-4 border-t gap-4">
+          <div className="flex items-center justify-between px-4 py-4 border-t gap-4 flex-wrap">
             <div className="flex items-center gap-2">
               <span className="text-sm text-gray-600 whitespace-nowrap">
                 Rows per page:
@@ -539,50 +651,38 @@ export function VendorManagement() {
                       setCurrentPage((prev) => Math.max(1, prev - 1))
                     }
                     className={
-                      currentPage === 1
+                      safeCurrentPage === 1
                         ? 'pointer-events-none opacity-50'
                         : 'cursor-pointer'
                     }
                   />
                 </PaginationItem>
 
-                {[...Array(totalPages)].map((_, index) => {
-                  const pageNumber = index + 1;
-                  if (
-                    pageNumber === 1 ||
-                    pageNumber === totalPages ||
-                    (pageNumber >= currentPage - 1 &&
-                      pageNumber <= currentPage + 1)
-                  ) {
-                    return (
-                      <PaginationItem key={pageNumber}>
-                        <PaginationLink
-                          onClick={() => setCurrentPage(pageNumber)}
-                          isActive={currentPage === pageNumber}
-                          className="cursor-pointer"
-                        >
-                          {pageNumber}
-                        </PaginationLink>
-                      </PaginationItem>
-                    );
-                  } else if (
-                    pageNumber === currentPage - 2 ||
-                    pageNumber === currentPage + 2
-                  ) {
-                    return <PaginationEllipsis key={pageNumber} />;
+                {paginationItems.map((item) => {
+                  if (item === 'ellipsis-left' || item === 'ellipsis-right') {
+                    return <PaginationEllipsis key={item} />;
                   }
-                  return null;
+
+                  return (
+                    <PaginationItem key={item}>
+                      <PaginationLink
+                        onClick={() => setCurrentPage(item)}
+                        isActive={safeCurrentPage === item}
+                        className="cursor-pointer"
+                      >
+                        {item}
+                      </PaginationLink>
+                    </PaginationItem>
+                  );
                 })}
 
                 <PaginationItem>
                   <PaginationNext
                     onClick={() =>
-                      setCurrentPage((prev) =>
-                        Math.min(totalPages, prev + 1),
-                      )
+                      setCurrentPage((prev) => Math.min(totalPages, prev + 1))
                     }
                     className={
-                      currentPage === totalPages
+                      safeCurrentPage === totalPages
                         ? 'pointer-events-none opacity-50'
                         : 'cursor-pointer'
                     }
@@ -592,7 +692,7 @@ export function VendorManagement() {
             </Pagination>
 
             <div className="text-sm text-gray-600 whitespace-nowrap">
-              Showing {startIndex + 1} to{' '}
+              Showing {filteredVendors.length === 0 ? 0 : startIndex + 1} to{' '}
               {Math.min(endIndex, filteredVendors.length)} of{' '}
               {filteredVendors.length} results
             </div>

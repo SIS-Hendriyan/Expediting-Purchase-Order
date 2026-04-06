@@ -3,7 +3,6 @@ import { format } from 'date-fns';
 import {
   AlertCircle,
   ArrowLeft,
-  ArrowRight,
   Calendar,
   CalendarDays,
   CheckCircle2,
@@ -51,7 +50,7 @@ type FlowStatus =
   | 'PO Submitted'
   | 'Work in Progress'
   | 'On Delivery'
-  | 'Fully Received';
+  | 'Received';
 
 type ApiStatusFlowRow = {
   Status?: string | null;
@@ -188,7 +187,7 @@ const FLOW_ORDER: FlowStatus[] = [
   'PO Submitted',
   'Work in Progress',
   'On Delivery',
-  'Fully Received',
+  'Received',
 ];
 
 const STATUS_LINE_TOP = 24;
@@ -201,13 +200,6 @@ const WIP_REETA_REQUIRED_ERROR =
 
 const WAITING_REETA_APPROVAL_MESSAGE =
   'Waiting for Re-ETA approval. Please wait until the request is reviewed before proceeding.';
-
-const warningPalette = {
-  border: '#F59E0B',
-  background: '#FFF7ED',
-  text: '#9A3412',
-  icon: '#D97706',
-};
 
 // ===================== Auth =====================
 const getAuthToken = (): string => {
@@ -251,6 +243,8 @@ const parseServerDate = (value?: string | number | null): Date | undefined => {
 };
 
 const startOfDay = (date: Date): Date => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+const todayStart = (): Date => startOfDay(new Date());
 
 const addDaysDateOnly = (date: Date, days: number): Date => {
   const base = startOfDay(date);
@@ -308,6 +302,12 @@ const formatDateTime = (dateTimeString: string): string => {
   });
 };
 
+const isDateBeforeToday = (value?: string | null): boolean => {
+  const date = parseServerDate(value);
+  if (!date) return false;
+  return startOfDay(date).getTime() < todayStart().getTime();
+};
+
 const mapFlowStatus = (backendStatus?: string | null): FlowStatus | null => {
   const s = trim(backendStatus);
   if (!s) return null;
@@ -317,12 +317,12 @@ const mapFlowStatus = (backendStatus?: string | null): FlowStatus | null => {
   if (u === 'SUBMITTED' || u === 'PO SUBMITTED') return 'PO Submitted';
   if (u === 'WORK IN PROGRESS') return 'Work in Progress';
   if (u === 'ON DELIVERY') return 'On Delivery';
-  if (u === 'FULLY RECEIVED' || u === 'RECEIVED') return 'Fully Received';
+  if (u === 'FULLY RECEIVED' || u === 'RECEIVED') return 'Received';
 
   if (s === 'Submitted') return 'PO Submitted';
   if (s === 'Work In Progress' || s === 'Work in Progress') return 'Work in Progress';
   if (s === 'On Delivery') return 'On Delivery';
-  if (s === 'Fully Received' || s === 'Received') return 'Fully Received';
+  if (s === 'Fully Received' || s === 'Received') return 'Received';
 
   return null;
 };
@@ -335,7 +335,7 @@ const getStatusColor = (status: string) => {
       return '#5C8CB6';
     case 'On Delivery':
       return '#008383';
-    case 'Fully Received':
+    case 'Received':
       return '#6AA75D';
     default:
       return '#014357';
@@ -363,7 +363,7 @@ const getStatusIcon = (statusName: string) => {
       return Package;
     case 'On Delivery':
       return Truck;
-    case 'Fully Received':
+    case 'Received':
       return PackageCheck;
     default:
       return FileText;
@@ -606,8 +606,7 @@ const extractIdPoItem = (detail: PoDetail | null, flowRows: ApiStatusFlowRow[]):
 };
 
 const diffDaysFromNow = (date: Date): number => {
-  const now = new Date();
-  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startToday = todayStart();
   const target = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   return Math.ceil((target.getTime() - startToday.getTime()) / (1000 * 60 * 60 * 24));
 };
@@ -616,8 +615,7 @@ const getDaysUntilDelivery = (value?: string | null): number | null => {
   const target = parseServerDate(value);
   if (!target) return null;
 
-  const today = new Date();
-  const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const startToday = todayStart();
   const startTarget = new Date(target.getFullYear(), target.getMonth(), target.getDate());
 
   const diffMs = startTarget.getTime() - startToday.getTime();
@@ -647,9 +645,7 @@ const getLastValidStatus = (rows: ApiStatusFlowRow[]): FlowStatus => {
 const getInitialServerEtd = (detail: PoDetail | null, rows: ApiStatusFlowRow[]): Date | undefined => {
   return (
     parseServerDate(detail?.CurrentETD ?? detail?.ETD) ??
-    parseServerDate(
-      rows.find((r) => mapFlowStatus(r.Status) === 'PO Submitted')?.StatusAt ?? undefined
-    )
+    parseServerDate(rows.find((r) => mapFlowStatus(r.Status) === 'PO Submitted')?.StatusAt ?? undefined)
   );
 };
 
@@ -999,11 +995,11 @@ function StatusRelatedInformation({
 
   const workInProgressColor = getStatusColor('Work in Progress');
   const onDeliveryColor = getStatusColor('On Delivery');
-  const receivedColor = getStatusColor('Fully Received');
+  const receivedColor = getStatusColor('Received');
 
   const WorkInProgressIcon = getStatusIcon('Work in Progress');
   const OnDeliveryIcon = getStatusIcon('On Delivery');
-  const ReceivedIcon = getStatusIcon('Fully Received');
+  const ReceivedIcon = getStatusIcon('Received');
 
   const awb = trim(poDetail?.AWB) || '-';
   const actualDeliveryDate = parseServerDate(poDetail?.FinalActualDeliveryDate) ?? null;
@@ -1022,11 +1018,10 @@ function StatusRelatedInformation({
   }, [actualDeliveryDate, onDeliveryLeadtimeNumber]);
 
   const showWorkInProgressSection =
-    status === 'Work in Progress' || status === 'On Delivery' || status === 'Fully Received';
+    status === 'Work in Progress' || status === 'On Delivery' || status === 'Received';
 
-  const showOnDeliverySection = status === 'On Delivery' || status === 'Fully Received';
-
-  const showReceivedSection = status === 'Fully Received';
+  const showOnDeliverySection = status === 'On Delivery' || status === 'Received';
+  const showReceivedSection = status === 'Received';
 
   const handleViewAwbFile = useCallback(() => {
     const base64 = trim(poDetail?.AWBBase64Data);
@@ -1170,7 +1165,7 @@ function StatusRelatedInformation({
           <div className="flex items-center gap-2">
             <ReceivedIcon className="h-5 w-5" style={{ color: receivedColor }} />
             <h3 className="text-[20px]" style={{ color: receivedColor }}>
-              Received / Fully Received
+              Received
             </h3>
           </div>
 
@@ -1230,19 +1225,20 @@ export function PurchaseOrderDetail({
 
   const [status, setStatus] = useState<FlowStatus>('PO Submitted');
   const [remarks, setRemarks] = useState('');
-  const [etd, setEtd] = useState<Date | undefined>(undefined);
+  const [etd, setEtd] = useState<Date | undefined>(todayStart());
   const [etaDays, setEtaDays] = useState('');
   const [awb, setAwb] = useState('');
   const [hasFilledUpdate, setHasFilledUpdate] = useState(false);
 
-  const [actualDeliveryDate, setActualDeliveryDate] = useState<Date | undefined>(undefined);
+  const [actualDeliveryDate, setActualDeliveryDate] = useState<Date | undefined>(todayStart());
   const [leadtimeDelivery, setLeadtimeDelivery] = useState('');
   const [quantity, setQuantity] = useState('');
   const [awbFile, setAwbFile] = useState<File | null>(null);
   const [awbFileInputKey, setAwbFileInputKey] = useState(0);
 
   const [rescheduleDialogOpen, setRescheduleDialogOpen] = useState(false);
-  const [newETADays, setNewETADays] = useState('');
+  const [newEtd, setNewEtd] = useState<Date | undefined>(undefined);
+  const [newLeadtimeDays, setNewLeadtimeDays] = useState('');
   const [rescheduleReason, setRescheduleReason] = useState('');
 
   const fetchDetail = useCallback(
@@ -1287,12 +1283,14 @@ export function PurchaseOrderDetail({
         setPoDetail(detail);
         setStatus(getLastValidStatus(flow));
 
-        const serverEtd = getInitialServerEtd(detail, flow);
+        const serverEtd = getInitialServerEtd(detail, flow) ?? todayStart();
+        const serverActualDeliveryDate = parseServerDate(detail?.FinalActualDeliveryDate) ?? todayStart();
         const serverRemarks = trim(detail?.['WIP Remark'] ?? detail?.WIPRemark);
         const serverAwb = trim(detail?.AWB);
         const serverEtaDays = getInitialServerEtaDays(detail, serverEtd);
 
         setEtd((prev) => prev ?? serverEtd);
+        setActualDeliveryDate((prev) => prev ?? serverActualDeliveryDate);
         setRemarks((prev) => prev || serverRemarks);
         setAwb((prev) => prev || serverAwb);
         setEtaDays((prev) => prev || serverEtaDays);
@@ -1346,13 +1344,35 @@ export function PurchaseOrderDetail({
     return approvedNewEta ?? poDetail?.DeliveryDate ?? poDetail?.['Delivery date'] ?? null;
   }, [latestApprovedReEtaDate, poDetail]);
 
-  const deliveryDate = useMemo(() => {
-    return parseServerDate(poDeliveryDateValue);
+  const deliveryDate = useMemo(() => parseServerDate(poDeliveryDateValue), [poDeliveryDateValue]);
+
+  const isRequiredDeliveryDatePassed = useMemo(() => {
+    return isDateBeforeToday(poDeliveryDateValue);
   }, [poDeliveryDateValue]);
 
-  const currentEtaForReschedule = useMemo(() => {
-    return safeDateOnly(poDeliveryDateValue);
-  }, [poDeliveryDateValue]);
+  const currentEtaForReschedule = useMemo(() => safeDateOnly(poDeliveryDateValue), [poDeliveryDateValue]);
+
+  const currentEtdForReschedule = useMemo(() => {
+    return etd ? format(etd, 'yyyy-MM-dd') : null;
+  }, [etd]);
+
+  const currentLeadtimeForReschedule = useMemo(() => {
+    return etaDays ? String(etaDays) : null;
+  }, [etaDays]);
+
+  const currentEtaDateForReschedule = useMemo(() => {
+    if (!etd) return null;
+    const days = parseInt(etaDays, 10);
+    if (!etaDays || Number.isNaN(days) || days <= 0) return null;
+    return addDaysDateOnly(etd, days);
+  }, [etd, etaDays]);
+
+  const newEtaDateForReschedule = useMemo(() => {
+    if (!newEtd) return null;
+    const days = parseInt(newLeadtimeDays, 10);
+    if (!newLeadtimeDays || Number.isNaN(days) || days <= 0) return null;
+    return addDaysDateOnly(newEtd, days);
+  }, [newEtd, newLeadtimeDays]);
 
   const calculatedEtaDate = useMemo(() => {
     const days = parseInt(etaDays, 10);
@@ -1379,17 +1399,33 @@ export function PurchaseOrderDetail({
       .sort((a, b) => (b.requestDate || '').localeCompare(a.requestDate || ''));
   }, [reEtaRequestsRaw]);
 
-  const hasPendingReEtaApproval = useMemo(() => {
-    return rescheduleRequests.some((request) => request.status === 'Pending');
-  }, [rescheduleRequests]);
+  const hasPendingReEtaApproval = useMemo(
+    () => rescheduleRequests.some((request) => request.status === 'Pending'),
+    [rescheduleRequests]
+  );
+
+  const shouldShowExpiredDeliveryAlert = useMemo(() => {
+    return isRequiredDeliveryDatePassed && !hasPendingReEtaApproval;
+  }, [isRequiredDeliveryDatePassed, hasPendingReEtaApproval]);
+
+  const shouldShowEtaExceededAlertInline = useMemo(() => {
+    return isEtaBeyondDeliveryDate && !isRequiredDeliveryDatePassed && !hasPendingReEtaApproval;
+  }, [isEtaBeyondDeliveryDate, isRequiredDeliveryDatePassed, hasPendingReEtaApproval]);
+
+  const shouldShowEtaExceededAlert = useMemo(() => {
+    if (hasPendingReEtaApproval) return false;
+    return isRequiredDeliveryDatePassed || isEtaBeyondDeliveryDate;
+  }, [hasPendingReEtaApproval, isRequiredDeliveryDatePassed, isEtaBeyondDeliveryDate]);
 
   const isPoSubmittedBlockedByEta = useMemo(() => {
-    return isEtaBeyondDeliveryDate;
-  }, [isEtaBeyondDeliveryDate]);
+    if (hasPendingReEtaApproval) return false;
+    return isRequiredDeliveryDatePassed || isEtaBeyondDeliveryDate;
+  }, [hasPendingReEtaApproval, isRequiredDeliveryDatePassed, isEtaBeyondDeliveryDate]);
 
-  const isPoSubmittedSubmitDisabled = useMemo(() => {
-    return isPoSubmittedBlockedByEta || hasPendingReEtaApproval;
-  }, [isPoSubmittedBlockedByEta, hasPendingReEtaApproval]);
+  const isPoSubmittedSubmitDisabled = useMemo(
+    () => isRequiredDeliveryDatePassed || isPoSubmittedBlockedByEta || hasPendingReEtaApproval,
+    [isRequiredDeliveryDatePassed, isPoSubmittedBlockedByEta, hasPendingReEtaApproval]
+  );
 
   const orderQuantity = useMemo(() => {
     return toNumberOrZero(poDetail?.['Qty Order'] ?? poDetail?.QtyOrder);
@@ -1416,15 +1452,33 @@ export function PurchaseOrderDetail({
     return startOfDay(calculatedLeadtimeDeliveryDate).getTime() > startOfDay(deliveryDate).getTime();
   }, [calculatedLeadtimeDeliveryDate, deliveryDate]);
 
+  const isWipSubmitDisabled = useMemo(() => {
+    return (
+      isRequiredDeliveryDatePassed ||
+      submittingPoStatus ||
+      isQuantityMismatch ||
+      isCalculatedDeliveryDateBeyondPoDeliveryDate ||
+      hasPendingReEtaApproval
+    );
+  }, [
+    isRequiredDeliveryDatePassed,
+    submittingPoStatus,
+    isQuantityMismatch,
+    isCalculatedDeliveryDateBeyondPoDeliveryDate,
+    hasPendingReEtaApproval,
+  ]);
+
   const handleOpenRescheduleDialog = useCallback(() => {
     setRescheduleDialogOpen(true);
-    setNewETADays('');
+    setNewEtd(etd ?? todayStart());
+    setNewLeadtimeDays(etaDays || '');
     setRescheduleReason('');
-  }, []);
+  }, [etd, etaDays]);
 
   const handleCloseRescheduleDialog = useCallback(() => {
     setRescheduleDialogOpen(false);
-    setNewETADays('');
+    setNewEtd(undefined);
+    setNewLeadtimeDays('');
     setRescheduleReason('');
   }, []);
 
@@ -1455,16 +1509,6 @@ export function PurchaseOrderDetail({
 
     setAwbFile(file);
   }, []);
-
-  const calculateNewETADate = useCallback((): string | null => {
-    if (!etd || !newETADays) return null;
-
-    const days = parseInt(newETADays, 10);
-    if (Number.isNaN(days) || days <= 0) return null;
-
-    const next = addDaysDateOnly(etd, days);
-    return Number.isNaN(next.getTime()) ? null : format(next, 'yyyy-MM-dd');
-  }, [etd, newETADays]);
 
   const submitPoStatusUpdate = useCallback(async (payload: Record<string, unknown>) => {
     const res = await fetchWithAuth(API.POSTATUS_UPSERT(), {
@@ -1538,6 +1582,11 @@ export function PurchaseOrderDetail({
         return;
       }
 
+      if (isRequiredDeliveryDatePassed) {
+        toast.error(ETA_DELIVERY_DATE_ERROR);
+        return;
+      }
+
       if (!idPoItem) {
         toast.error('ID PO Item not found.');
         return;
@@ -1585,6 +1634,7 @@ export function PurchaseOrderDetail({
     }
   }, [
     hasPendingReEtaApproval,
+    isRequiredDeliveryDatePassed,
     idPoItem,
     etd,
     etaDays,
@@ -1599,6 +1649,11 @@ export function PurchaseOrderDetail({
     try {
       if (hasPendingReEtaApproval) {
         toast.error(WAITING_REETA_APPROVAL_MESSAGE);
+        return;
+      }
+
+      if (isRequiredDeliveryDatePassed) {
+        toast.error(ETA_DELIVERY_DATE_ERROR);
         return;
       }
 
@@ -1659,7 +1714,7 @@ export function PurchaseOrderDetail({
       toast.success('Delivery information updated successfully.');
       setHasFilledUpdate(true);
 
-      setActualDeliveryDate(undefined);
+      setActualDeliveryDate(todayStart());
       setLeadtimeDelivery('');
       setQuantity('');
       setAwbFile(null);
@@ -1675,6 +1730,7 @@ export function PurchaseOrderDetail({
     }
   }, [
     hasPendingReEtaApproval,
+    isRequiredDeliveryDatePassed,
     idPoItem,
     awb,
     actualDeliveryDate,
@@ -1699,16 +1755,19 @@ export function PurchaseOrderDetail({
         return;
       }
 
-      const newDays = parseInt(newETADays, 10);
-      const curDays = parseInt(etaDays, 10);
-
-      if (!newETADays || Number.isNaN(newDays) || newDays <= 0) {
-        toast.error('Please enter a valid new ETA in days.');
+      if (!newEtd) {
+        toast.error('Please select a valid new ETD.');
         return;
       }
 
-      if (!Number.isNaN(curDays) && curDays > 0 && newDays <= curDays) {
-        toast.error('New ETA days must be greater than the current ETA days.');
+      const newLeadtime = parseInt(newLeadtimeDays, 10);
+      if (!newLeadtimeDays || Number.isNaN(newLeadtime) || newLeadtime <= 0) {
+        toast.error('Please enter a valid new lead time.');
+        return;
+      }
+
+      if (!newEtaDateForReschedule) {
+        toast.error('New ETA could not be calculated.');
         return;
       }
 
@@ -1717,12 +1776,14 @@ export function PurchaseOrderDetail({
         return;
       }
 
+      const proposedEtaDays = diffDaysDateOnly(newEtaDateForReschedule, startOfDay(newEtd));
+
       setSubmittingReschedule(true);
 
       await submitReEtaCreate({
         CurrentEta: currentEtaForReschedule,
         IdPoItem: idPoItem,
-        ProposedETADays: newDays,
+        ProposedETADays: proposedEtaDays,
         Reason: rescheduleReason.trim(),
       });
 
@@ -1739,8 +1800,9 @@ export function PurchaseOrderDetail({
   }, [
     idPoItem,
     currentEtaForReschedule,
-    newETADays,
-    etaDays,
+    newEtd,
+    newLeadtimeDays,
+    newEtaDateForReschedule,
     rescheduleReason,
     submitReEtaCreate,
     handleCloseRescheduleDialog,
@@ -1796,13 +1858,24 @@ export function PurchaseOrderDetail({
       return;
     }
 
-    if (isEtaBeyondDeliveryDate) {
+    if (isRequiredDeliveryDatePassed) {
+      toast.error(ETA_DELIVERY_DATE_ERROR);
+      return;
+    }
+
+    if (shouldShowEtaExceededAlert) {
       toast.error(ETA_DELIVERY_DATE_ERROR);
       return;
     }
 
     void handleSubmitOrderInformation();
-  }, [submittingPoStatus, hasPendingReEtaApproval, isEtaBeyondDeliveryDate, handleSubmitOrderInformation]);
+  }, [
+    submittingPoStatus,
+    hasPendingReEtaApproval,
+    isRequiredDeliveryDatePassed,
+    shouldShowEtaExceededAlert,
+    handleSubmitOrderInformation,
+  ]);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
@@ -1872,14 +1945,6 @@ export function PurchaseOrderDetail({
           <>
             {status === 'PO Submitted' &&
               (() => {
-                const etaExceedsDelivery =
-                  !!etd &&
-                  !!etaDays &&
-                  parseInt(etaDays, 10) > 0 &&
-                  !!deliveryDate &&
-                  addDaysDateOnly(etd, parseInt(etaDays, 10)).getTime() >
-                    startOfDay(deliveryDate).getTime();
-
                 const etaExceededDays =
                   calculatedEtaDate && deliveryDate
                     ? diffDaysDateOnly(calculatedEtaDate, deliveryDate)
@@ -1938,7 +2003,7 @@ export function PurchaseOrderDetail({
                               </div>
                             </div>
 
-                            {etaExceedsDelivery &&
+                            {shouldShowEtaExceededAlertInline &&
                               etd &&
                               deliveryDate &&
                               etaExceededDays !== null &&
@@ -1968,7 +2033,33 @@ export function PurchaseOrderDetail({
                         />
                       </div>
 
-                      {etaExceedsDelivery && (
+                      {shouldShowExpiredDeliveryAlert && (
+                        <div
+                          className="flex items-start gap-3 rounded-lg p-3"
+                          style={{
+                            backgroundColor: 'rgba(220, 38, 38, 0.06)',
+                            border: '1px solid rgba(220, 38, 38, 0.15)',
+                          }}
+                        >
+                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: '#DC2626' }} />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm text-gray-700">
+                              ETA exceeds the delivery date. Please{' '}
+                              <button
+                                type="button"
+                                className="btn-underlined-text inline cursor-pointer border-none bg-transparent p-0"
+                                style={{ color: '#014357' }}
+                                onClick={handleOpenRescheduleDialog}
+                              >
+                                submit a Reschedule ETA Request again
+                              </button>{' '}
+                              before proceeding.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {shouldShowEtaExceededAlertInline && (
                         <div
                           className="flex items-start gap-3 rounded-lg p-3"
                           style={{
@@ -2038,12 +2129,6 @@ export function PurchaseOrderDetail({
 
                 const etaDifference =
                   previousEta && newCalculatedEta ? diffDaysDateOnly(newCalculatedEta, previousEta) : null;
-
-                const isBlocked =
-                  submittingPoStatus ||
-                  isQuantityMismatch ||
-                  isCalculatedDeliveryDateBeyondPoDeliveryDate ||
-                  hasPendingReEtaApproval;
 
                 const etaExceededDays =
                   newCalculatedEta && deliveryDate
@@ -2244,7 +2329,7 @@ export function PurchaseOrderDetail({
                     </div>
 
                     <div className="mt-4">
-                      {isQuantityMismatch && (
+                      {shouldShowExpiredDeliveryAlert && (
                         <div
                           className="mb-4 flex items-start gap-3 rounded-lg p-3"
                           style={{
@@ -2253,14 +2338,24 @@ export function PurchaseOrderDetail({
                           }}
                         >
                           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: '#DC2626' }} />
-                          <p className="text-sm text-gray-700">
-                            Quantity must be exactly <span style={{ color: '#014357' }}>{orderQuantity} units</span>{' '}
-                            to match the order quantity.
-                          </p>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm text-gray-700">
+                              ETA exceeds the delivery date. Please{' '}
+                              <button
+                                className="btn-underlined-text inline cursor-pointer border-none bg-transparent p-0 underline"
+                                style={{ color: '#014357' }}
+                                onClick={handleOpenRescheduleDialog}
+                                type="button"
+                              >
+                                submit a Reschedule ETA Request again
+                              </button>{' '}
+                              before proceeding.
+                            </p>
+                          </div>
                         </div>
                       )}
 
-                      {isCalculatedDeliveryDateBeyondPoDeliveryDate && (
+                      {!shouldShowExpiredDeliveryAlert && isCalculatedDeliveryDateBeyondPoDeliveryDate && (
                         <div
                           className="mb-4 flex items-start gap-3 rounded-lg p-3"
                           style={{
@@ -2287,6 +2382,22 @@ export function PurchaseOrderDetail({
                         </div>
                       )}
 
+                      {isQuantityMismatch && (
+                        <div
+                          className="mb-4 flex items-start gap-3 rounded-lg p-3"
+                          style={{
+                            backgroundColor: 'rgba(220, 38, 38, 0.06)',
+                            border: '1px solid rgba(220, 38, 38, 0.15)',
+                          }}
+                        >
+                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: '#DC2626' }} />
+                          <p className="text-sm text-gray-700">
+                            Quantity must be exactly <span style={{ color: '#014357' }}>{orderQuantity} units</span>{' '}
+                            to match the order quantity.
+                          </p>
+                        </div>
+                      )}
+
                       {hasPendingReEtaApproval && (
                         <div
                           className="mb-4 flex items-start gap-3 rounded-lg p-3"
@@ -2302,8 +2413,8 @@ export function PurchaseOrderDetail({
 
                       <Button
                         className="w-full text-white"
-                        style={{ backgroundColor: isBlocked ? '#9CA3AF' : '#014357' }}
-                        disabled={isBlocked}
+                        style={{ backgroundColor: isWipSubmitDisabled ? '#9CA3AF' : '#014357' }}
+                        disabled={isWipSubmitDisabled}
                         onClick={handleSubmitAwb}
                       >
                         <Truck className="mr-2 h-4 w-4" />
@@ -2424,40 +2535,77 @@ export function PurchaseOrderDetail({
       </div>
 
       <Dialog open={rescheduleDialogOpen} onOpenChange={setRescheduleDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle style={{ color: '#014357' }}>Create Reschedule ETA Request</DialogTitle>
             <DialogDescription>
-              Submit a request to reschedule the ETA for this purchase order.
+              Review the current schedule and submit a request with New ETD and New Lead Time.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">
-            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-              <Label className="mb-2 block text-sm text-gray-600">Current ETA</Label>
-              <p className="text-lg" style={{ color: '#014357' }}>
-                {currentEtaForReschedule ? formatDate(currentEtaForReschedule) : 'Not set'}
-              </p>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <Label className="mb-2 block text-sm text-gray-600">Current ETD</Label>
+                <p className="text-lg" style={{ color: '#014357' }}>
+                  {currentEtdForReschedule ? formatDate(currentEtdForReschedule) : 'Not set'}
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <Label className="mb-2 block text-sm text-gray-600">Current Lead Time</Label>
+                <p className="text-lg" style={{ color: '#014357' }}>
+                  {currentLeadtimeForReschedule ? `${currentLeadtimeForReschedule} day(s)` : 'Not set'}
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <Label className="mb-2 block text-sm text-gray-600">Current ETA</Label>
+                <p className="text-lg" style={{ color: '#014357' }}>
+                  {currentEtaDateForReschedule ? format(currentEtaDateForReschedule, 'MMM dd, yyyy') : 'Not set'}
+                </p>
+              </div>
             </div>
 
-            <div>
-              <Label htmlFor="newETADays">
-                New ETA (in days from ETD) <span className="text-red-500">*</span>
-              </Label>
-              <Input
-                id="newETADays"
-                type="number"
-                value={newETADays}
-                onChange={(e) => setNewETADays(e.target.value)}
-                placeholder="Number of days"
-                className="mt-1"
-              />
-              {calculateNewETADate() && (
-                <p className="mt-2 text-sm text-gray-600">
-                  <Calendar className="mr-1 inline h-4 w-4" />
-                  New ETA Date: {formatDate(calculateNewETADate()!)}
-                </p>
-              )}
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <Label>
+                  New ETD <span className="text-red-500">*</span>
+                </Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="mt-1 w-full justify-start text-left" type="button">
+                      <Calendar className="mr-2 h-4 w-4" />
+                      {newEtd ? format(newEtd, 'PPP') : <span>Select new ETD</span>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <CalendarComponent mode="single" selected={newEtd} onSelect={setNewEtd} initialFocus />
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              <div>
+                <Label htmlFor="newLeadtimeDays">
+                  New Lead Time <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="newLeadtimeDays"
+                  type="number"
+                  min={1}
+                  value={newLeadtimeDays}
+                  onChange={(e) => setNewLeadtimeDays(e.target.value)}
+                  placeholder="Enter new lead time"
+                  className="mt-1"
+                />
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+              <Label className="mb-2 block text-sm text-gray-600">New ETA (New ETD + New Lead Time)</Label>
+              <p className="text-lg" style={{ color: '#014357' }}>
+                {newEtaDateForReschedule ? format(newEtaDateForReschedule, 'MMM dd, yyyy') : 'Not set'}
+              </p>
             </div>
 
             <div>
