@@ -38,6 +38,7 @@ import {
   Pencil,
   Clock,
   AlertTriangle,
+  Ban,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
@@ -69,10 +70,10 @@ interface PurchaseOrderProps {
   user: User;
 }
 
-type StatusTab = 'all' | 'created' | 'wip' | 'delivery' | 'received';
-type AttentionFilter = 'updates' | 'overdue' | null;
+type StatusTab = 'all' | 'created' | 'wip' | 'delivery' | 'cancel' | 'received';
+type AttentionFilter = 'updates' | 'delay' | null;
 
-type AttentionRaw = number | 'Need Update' | 'Overdue' | null | undefined;
+type AttentionRaw = number | 'Need Update' | 'Delay' | null | undefined;
 type AttentionNorm = 0 | 1 | 2;
 type OrderKey = string | number;
 
@@ -109,12 +110,13 @@ interface PurchaseOrderSummary {
   POSubmitted: number;
   POWorkInProgress: number;
   POOnDelivery: number;
-  POPartiallyReceived: number;
+  POCancel?: number;
+  POPartiallyReceived?: number;
   POFullyReceived: number;
   PONeedUpdate?: number;
-  POOverdue?: number;
+  PODelay?: number;
   PONeedUpdateFiltered?: number;
-  POOverdueFiltered?: number;
+  PODelayFiltered?: number;
   TotalFiltered?: number;
   PageSize?: number;
   PageNumber?: number;
@@ -184,12 +186,13 @@ const STATUS_TAB_TO_PARAM: Partial<Record<Exclude<StatusTab, 'all'>, string>> = 
   created: 'submitted',
   wip: 'workInProgress',
   delivery: 'onDelivery',
+  cancel: 'cancel',
   received: 'received',
 };
 
 const ATTENTION_UI_TO_BACKEND: Record<Exclude<AttentionFilter, null>, 1 | 2> = {
   updates: 1,
-  overdue: 2,
+  delay: 2,
 };
 
 const ALLOWED_EXCEL_EXTENSIONS = ['.xlsx', '.xls'];
@@ -339,7 +342,7 @@ const normalizeAttention = (v: AttentionRaw): AttentionNorm => {
   if (v === 1 || v === 2) return v;
   const s = (v ?? '').toString().trim().toLowerCase();
   if (s === 'need update') return 1;
-  if (s === 'overdue') return 2;
+  if (s === 'delay') return 2;
   return 0;
 };
 
@@ -389,6 +392,8 @@ const mapBackendStatusToDisplay = (status: string): string => {
       return 'Work in Progress';
     case 'On Delivery':
       return 'On Delivery';
+    case 'Cancel':
+      return 'Cancel';
     case 'Partially Received':
     case 'Fully Received':
       return 'Received';
@@ -408,6 +413,8 @@ const mapDisplayStatusToBackend = (status: string): string | null => {
       return 'workInProgress';
     case 'on delivery':
       return 'onDelivery';
+    case 'cancel':
+      return 'cancel';
     case 'received':
       return 'received';
     default:
@@ -428,6 +435,8 @@ const statusColor = (displayStatus: string) => {
       return '#5C8CB6';
     case 'On Delivery':
       return '#008383';
+    case 'Cancel':
+      return '#DC2626';
     case 'Received':
       return '#6AA75D';
     default:
@@ -442,7 +451,7 @@ const getInitialAttentionFilterFromQuery = (): AttentionFilter => {
   const attraction = params.get('attraction');
 
   if (attraction === '1') return 'updates';
-  if (attraction === '2') return 'overdue';
+  if (attraction === '2') return 'delay';
 
   return null;
 };
@@ -467,7 +476,7 @@ const vendorColumns: ColumnVis = {
   purchasingDocument: true,
   item: false,
   documentDate: false,
-  deliveryDate: false,
+  deliveryDate: true,
   etaDate: true,
   purchasingDocType: false,
   purchasingGroup: false,
@@ -493,7 +502,7 @@ const internalColumns: ColumnVis = {
   purchasingDocument: true,
   item: true,
   documentDate: true,
-  deliveryDate: false,
+  deliveryDate: true,
   etaDate: true,
   purchasingDocType: true,
   purchasingGroup: true,
@@ -554,7 +563,7 @@ const attentionBadge = (raw: AttentionRaw) => {
         variant="outline"
         className="text-red-600 border-red-600 flex items-center gap-1 bg-red-50 whitespace-nowrap"
       >
-        <AlertTriangle className="h-3 w-3" /> Overdue
+        <AlertTriangle className="h-3 w-3" /> Delay
       </Badge>
     );
   }
@@ -934,6 +943,8 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       list = list.filter((o) => mapBackendStatusToDisplay(o.status) === 'Work in Progress');
     } else if (activeTab === 'delivery') {
       list = list.filter((o) => mapBackendStatusToDisplay(o.status) === 'On Delivery');
+    } else if (activeTab === 'cancel') {
+      list = list.filter((o) => mapBackendStatusToDisplay(o.status) === 'Cancel');
     } else if (activeTab === 'received') {
       list = list.filter(
         (o) => isReceivedBackendStatus(o.status) || mapBackendStatusToDisplay(o.status) === 'Received'
@@ -981,7 +992,8 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
           (o.material ?? '').toLowerCase().includes(q) ||
           (o.qtyOrder ?? '').toString().toLowerCase().includes(q) ||
           (o.etaDate ?? '').toLowerCase().includes(q) ||
-          (o.reEtaDate ?? '').toLowerCase().includes(q)
+          (o.reEtaDate ?? '').toLowerCase().includes(q) ||
+          mapBackendStatusToDisplay(o.status).toLowerCase().includes(q)
       );
     }
 
@@ -998,11 +1010,17 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     return list;
   }, [scopedOrders, searchQuery, appliedFilters.status]);
 
-  const overdueCount = useMemo(() => {
-    const v = cardSummary?.POOverdue;
+  const delayCount = useMemo(() => {
+    const v = cardSummary?.PODelay;
     if (typeof v === 'number') return v;
     return orders.filter((o) => normalizeAttention(o.attention) === 2).length;
   }, [cardSummary, orders]);
+
+  const cancelCount = useMemo(() => {
+    const v = summary?.POCancel ?? cardSummary?.POCancel;
+    if (typeof v === 'number') return v;
+    return orders.filter((o) => mapBackendStatusToDisplay(o.status) === 'Cancel').length;
+  }, [summary, cardSummary, orders]);
 
   const receivedCount = useMemo(() => {
     if (summary) {
@@ -1457,7 +1475,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         if (typeof v === 'number' || typeof v === 'string') {
           const att = normalizeAttention(v as AttentionRaw);
           if (att === 1) return 'Need Update';
-          if (att === 2) return 'Overdue';
+          if (att === 2) return 'Delay';
         }
 
         const s = String(v);
@@ -1744,10 +1762,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             <Card
               className={[
                 'p-4 shadow-[0_2px_4px_rgba(220,38,38,0.25)] border-0 cursor-pointer transition-all w-full',
-                specialFilter === 'overdue' ? 'overdue-active' : '',
+                specialFilter === 'delay' ? 'overdue-active' : '',
               ].join(' ')}
               style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)' }}
-              onClick={() => handleToggleAttentionCard('overdue')}
+              onClick={() => handleToggleAttentionCard('delay')}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -1755,18 +1773,18 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                     <AlertTriangle className="h-4 w-4" style={{ color: '#DC2626' }} />
                   </div>
                   <div className="text-gray-900 text-sm" style={{ fontWeight: 600 }}>
-                    Overdue
+                    Delay
                   </div>
                 </div>
                 <div className="text-2xl font-bold" style={{ color: '#DC2626', fontWeight: 800 }}>
-                  {overdueCount}
+                  {delayCount}
                 </div>
               </div>
             </Card>
           </div>
 
-          <div className="flex gap-3 mb-6">
-            <Card className="flex-1 p-4">
+          <div className="flex gap-3 mb-6 flex-wrap">
+            <Card className="flex-1 min-w-[180px] p-4">
               <div className="flex items-center gap-2 mb-2">
                 <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(1, 67, 87, 0.1)' }}>
                   <Package className="h-4 w-4" style={{ color: '#014357' }} />
@@ -1778,7 +1796,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
               </div>
             </Card>
 
-            <Card className="flex-1 p-4">
+            <Card className="flex-1 min-w-[180px] p-4">
               <div className="flex items-center gap-2 mb-2">
                 <div
                   className="p-2 rounded-lg"
@@ -1793,7 +1811,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
               </div>
             </Card>
 
-            <Card className="flex-1 p-4">
+            <Card className="flex-1 min-w-[180px] p-4">
               <div className="flex items-center gap-2 mb-2">
                 <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(92, 140, 182, 0.1)' }}>
                   <Loader className="h-4 w-4" style={{ color: '#5C8CB6' }} />
@@ -1805,7 +1823,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
               </div>
             </Card>
 
-            <Card className="flex-1 p-4">
+            <Card className="flex-1 min-w-[180px] p-4">
               <div className="flex items-center gap-2 mb-2">
                 <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(0, 131, 131, 0.1)' }}>
                   <Truck className="h-4 w-4" style={{ color: '#008383' }} />
@@ -1817,7 +1835,19 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
               </div>
             </Card>
 
-            <Card className="flex-1 p-4">
+            <Card className="flex-1 min-w-[180px] p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)' }}>
+                  <Ban className="h-4 w-4" style={{ color: '#DC2626' }} />
+                </div>
+                <div className="text-gray-600 text-sm">Cancel</div>
+              </div>
+              <div className="text-3xl" style={{ color: '#DC2626' }}>
+                {cancelCount}
+              </div>
+            </Card>
+
+            <Card className="flex-1 min-w-[180px] p-4">
               <div className="flex items-center gap-2 mb-2">
                 <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(106, 167, 93, 0.1)' }}>
                   <CheckCircle2 className="h-4 w-4" style={{ color: '#6AA75D' }} />
@@ -1911,6 +1941,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                 <TabsTrigger value="created">PO Submitted</TabsTrigger>
                 <TabsTrigger value="wip">Work in Progress</TabsTrigger>
                 <TabsTrigger value="delivery">On Delivery</TabsTrigger>
+                <TabsTrigger value="cancel">Cancel</TabsTrigger>
                 <TabsTrigger value="received">Received</TabsTrigger>
               </TabsList>
 
@@ -2145,6 +2176,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             <TabsContent value="created">{renderTable()}</TabsContent>
             <TabsContent value="wip">{renderTable()}</TabsContent>
             <TabsContent value="delivery">{renderTable()}</TabsContent>
+            <TabsContent value="cancel">{renderTable()}</TabsContent>
             <TabsContent value="received">{renderTable()}</TabsContent>
           </Tabs>
 
