@@ -26,6 +26,7 @@ namespace EXPOAPI.Controllers
             ["partiallyReceived"] = "Partially Received",
             ["fullyReceived"] = "Fully Received",
             ["received"] = "Received",
+            ["cancel"] = "cancel",
         };
 
         public PurchaseOrderController(

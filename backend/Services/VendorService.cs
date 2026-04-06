@@ -2,6 +2,7 @@
 using Microsoft.IdentityModel.JsonWebTokens;
 using System.Data;
 using System.Security.Claims;
+using System.Text.Json;
 
 namespace EXPOAPI.Services
 {
@@ -85,9 +86,9 @@ namespace EXPOAPI.Services
         // =========================================================
         // DETAIL
         // =========================================================
-        public async Task<Dictionary<string, object?>?> GetVendorDetailAsync(int vendorId, CancellationToken ct = default)
+        public async Task<Dictionary<string, object?>?> GetVendorDetailAsync(string vendorId, CancellationToken ct = default)
         {
-            if (vendorId <= 0) return null;
+            if (string.IsNullOrWhiteSpace(vendorId)) return null;
 
             using var cn = _db.CreateMain();
 
@@ -151,7 +152,7 @@ namespace EXPOAPI.Services
             return ExecuteVendorIudAsync("INSERT", p, ct);
         }
 
-        public Task<Dictionary<string, object?>> UpdateVendorAsync(int vendorId, Dictionary<string, object?> payload, ClaimsPrincipal? user, CancellationToken ct = default)
+        public Task<Dictionary<string, object?>> UpdateVendorAsync(string vendorId, Dictionary<string, object?> payload, ClaimsPrincipal? user, CancellationToken ct = default)
         {
             var actor = GetActor(payload, "UpdatedBy", user);
 
@@ -172,7 +173,7 @@ namespace EXPOAPI.Services
         }
 
         public Task<Dictionary<string, object?>> UpdateVendorOtpAsync(
-            int vendorId,
+            string vendorId,
             string otp,
             DateTime otpExpiresAt,
             string updatedBy,
@@ -191,7 +192,7 @@ namespace EXPOAPI.Services
             );
         }
 
-        public Task<Dictionary<string, object?>> UpdateVendorAccessAsync(int vendorId, Dictionary<string, object?> payload, ClaimsPrincipal? user, CancellationToken ct = default)
+        public Task<Dictionary<string, object?>> UpdateVendorAccessAsync(string vendorId, Dictionary<string, object?> payload, ClaimsPrincipal? user, CancellationToken ct = default)
         {
             var actor = GetActor(payload, "UpdatedBy", user);
 
@@ -205,7 +206,7 @@ namespace EXPOAPI.Services
             return ExecuteVendorIudAsync("UpdateAccess", p, ct);
         }
 
-        public Task<Dictionary<string, object?>> DeleteVendorAsync(int vendorId, Dictionary<string, object?> payload, ClaimsPrincipal? user, CancellationToken ct = default)
+        public Task<Dictionary<string, object?>> DeleteVendorAsync(string vendorId, Dictionary<string, object?> payload, ClaimsPrincipal? user, CancellationToken ct = default)
         {
             var actor = GetActor(payload, "DeleteddBy", user);
 
@@ -221,33 +222,49 @@ namespace EXPOAPI.Services
         // =========================================================
         // Core: Execute Vendor IUD
         // =========================================================
-        private async Task<Dictionary<string, object?>> ExecuteVendorIudAsync(string action, Dictionary<string, object?> parameters, CancellationToken ct)
+        private async Task<Dictionary<string, object?>> ExecuteVendorIudAsync(
+     string action,
+     Dictionary<string, object?> parameters,
+     CancellationToken ct)
         {
-            using var cn = _db.CreateMain();
-
-            var dp = new DynamicParameters();
-            dp.Add("Action", (action ?? "").ToUpperInvariant());
-
-            foreach (var kv in parameters)
-                dp.Add(kv.Key, kv.Value);
-
-            using var grid = await cn.QueryMultipleAsync(
-                new CommandDefinition(
-                    SP_VENDOR_IUD,
-                    dp,
-                    commandType: CommandType.StoredProcedure,
-                    cancellationToken: ct
-                )
-            );
-
-            while (!grid.IsConsumed)
+            try
             {
-                var rows = (await grid.ReadAsync<dynamic>()).AsList();
-                if (rows.Count > 0)
-                    return ToDict(rows[0]);
-            }
+                using var cn = _db.CreateMain();
 
-            return new Dictionary<string, object?>();
+                var dp = new DynamicParameters();
+                dp.Add("Action", (action ?? string.Empty).ToUpperInvariant());
+
+                foreach (var kv in parameters)
+                    dp.Add(kv.Key, kv.Value);
+
+                using var grid = await cn.QueryMultipleAsync(
+                    new CommandDefinition(
+                        SP_VENDOR_IUD,
+                        dp,
+                        commandType: CommandType.StoredProcedure,
+                        cancellationToken: ct
+                    )
+                );
+
+                while (!grid.IsConsumed)
+                {
+                    var rows = (await grid.ReadAsync<dynamic>()).AsList();
+                    if (rows.Count > 0)
+                        return ToDict(rows[0]);
+                }
+
+                return new Dictionary<string, object?>();
+            }
+            catch (Exception ex)
+            {
+                var paramDump = string.Join(", ",
+                    parameters.Select(kv => $"{kv.Key}={(kv.Value is null ? "NULL" : kv.Value)}"));
+
+                throw new Exception(
+                    $"ExecuteVendorIudAsync failed. SP={SP_VENDOR_IUD}, Action={action}, Params=[{paramDump}]. Error: {ex.Message}",
+                    ex
+                );
+            }
         }
 
         // =========================================================
@@ -322,6 +339,20 @@ namespace EXPOAPI.Services
         private static object? NormalizeBool(object? value)
         {
             if (value is null) return null;
+
+            if (value is JsonElement je)
+            {
+                return je.ValueKind switch
+                {
+                    JsonValueKind.True => true,
+                    JsonValueKind.False => false,
+                    JsonValueKind.Number when je.TryGetInt64(out var n) => n != 0,
+                    JsonValueKind.String => NormalizeBool(je.GetString()),
+                    JsonValueKind.Null => null,
+                    _ => null
+                };
+            }
+
             if (value is bool b) return b;
             if (value is byte by) return by != 0;
             if (value is short sh) return sh != 0;
@@ -333,14 +364,15 @@ namespace EXPOAPI.Services
             if (value is string s)
             {
                 var lowered = s.Trim().ToLowerInvariant();
+
                 if (lowered is "true" or "1" or "yes" or "y") return true;
                 if (lowered is "false" or "0" or "no" or "n") return false;
-                return lowered.Length > 0;
+
+                return null;
             }
 
-            return true;
+            return null;
         }
-
         private static DateTime? ParseDateTime(object? value)
         {
             if (value is null) return null;
@@ -386,5 +418,7 @@ namespace EXPOAPI.Services
                 result[p.Name] = p.GetValue(row);
             return result;
         }
+
+      
     }
 }

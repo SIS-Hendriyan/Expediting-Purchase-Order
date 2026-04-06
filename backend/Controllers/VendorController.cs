@@ -22,7 +22,6 @@ namespace EXPOAPI.Controllers
             _svc = svc ?? throw new ArgumentNullException(nameof(svc));
         }
 
-        // GET /api/vendors?email=...
         [HttpGet]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
@@ -39,12 +38,11 @@ namespace EXPOAPI.Controllers
             }
         }
 
-        // GET /api/vendors/{vendorId}
-        [HttpGet("{vendorId:int}")]
+        [HttpGet("{vendorId}")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> Detail([FromRoute] int vendorId, CancellationToken ct)
+        public async Task<IActionResult> Detail([FromRoute] string vendorId, CancellationToken ct)
         {
             try
             {
@@ -60,7 +58,6 @@ namespace EXPOAPI.Controllers
             }
         }
 
-        // POST /api/vendors
         [HttpPost]
         [ProducesResponseType(StatusCodes.Status201Created)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -81,12 +78,11 @@ namespace EXPOAPI.Controllers
             }
         }
 
-        // PUT /api/vendors/{vendorId}
-        [HttpPut("{vendorId:int}")]
+        [HttpPut("{vendorId}")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> Update([FromRoute] int vendorId, [FromBody] Dictionary<string, object?>? payload, CancellationToken ct)
+        public async Task<IActionResult> Update([FromRoute] string vendorId, [FromBody] Dictionary<string, object?>? payload, CancellationToken ct)
         {
             if (payload == null || payload.Count == 0)
                 return BadRequestResponse("body is required");
@@ -102,12 +98,11 @@ namespace EXPOAPI.Controllers
             }
         }
 
-        // POST /api/vendors/{vendorId}/access
-        [HttpPost("{vendorId:int}/access")]
+        [HttpPost("{vendorId}/access")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> UpdateAccess([FromRoute] int vendorId, [FromBody] Dictionary<string, object?>? payload, CancellationToken ct)
+        public async Task<IActionResult> UpdateAccess([FromRoute] string vendorId, [FromBody] Dictionary<string, object?>? payload, CancellationToken ct)
         {
             if (payload == null || payload.Count == 0 || !payload.ContainsKey("IsAccess"))
                 return BadRequestResponse("IsAccess is required");
@@ -123,13 +118,12 @@ namespace EXPOAPI.Controllers
             }
         }
 
-        // DELETE /api/vendors/{vendorId}
-        [HttpDelete("{vendorId:int}")]
+        [HttpDelete("{vendorId}")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> Delete([FromRoute] int vendorId, [FromBody] Dictionary<string, object?>? payload, CancellationToken ct)
+        public async Task<IActionResult> Delete([FromRoute] string vendorId, [FromBody] Dictionary<string, object?>? payload, CancellationToken ct)
         {
-            payload ??= new Dictionary<string, object?>(); // python allow empty payload for delete
+            payload ??= new Dictionary<string, object?>();
 
             try
             {
@@ -142,9 +136,6 @@ namespace EXPOAPI.Controllers
             }
         }
 
-        // =========================================================
-        // Response helpers (responseCode ikut HTTP status)
-        // =========================================================
         private IActionResult OkResponse(string message, object? data)
             => Ok(ApiResponse.Ok(message, data, 200));
 
