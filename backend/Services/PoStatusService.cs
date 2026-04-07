@@ -23,9 +23,9 @@ namespace EXPOAPI.Services
         // UPSERT GENERAL STATUS
         // =========================================================
         public Task<Dictionary<string, object?>> UpsertPoStatusAsync(
-            Dictionary<string, object?> payload,
-            ClaimsPrincipal? user,
-            CancellationToken ct = default)
+     Dictionary<string, object?> payload,
+     ClaimsPrincipal? user,
+     CancellationToken ct = default)
         {
             try
             {
@@ -46,7 +46,10 @@ namespace EXPOAPI.Services
                                  ?? Get(payload, "WIP Remark"),
                     ["AWB"] = Get(payload, "AWB"),
                     ["DeliveryUpdate"] = Get(payload, "DeliveryUpdate")
-                                      ?? Get(payload, "Delivery Update")
+                                      ?? Get(payload, "Delivery Update"),
+                    ["IsScheduled"] = ParseBool(Get(payload, "IsScheduled")
+                                      ?? Get(payload, "isScheduled")
+                                      ?? Get(payload, "Is Scheduled"))
                 };
 
                 if (string.IsNullOrWhiteSpace(parameters["IDPOItem"]?.ToString()))
@@ -58,6 +61,21 @@ namespace EXPOAPI.Services
             {
                 throw new InvalidOperationException("Failed to prepare PO status upsert request.", ex);
             }
+        }
+        private static bool? ParseBool(object? value)
+        {
+            if (value == null) return null;
+
+            var s = value.ToString()?.Trim();
+            if (string.IsNullOrWhiteSpace(s)) return null;
+
+            if (bool.TryParse(s, out var b))
+                return b;
+
+            if (s == "1") return true;
+            if (s == "0") return false;
+
+            return null;
         }
 
         // =========================================================

@@ -16,7 +16,11 @@ namespace EXPOAPI.Services;
 
 public interface IPurchaseOrderImportService
 {
-    Task<Dictionary<string, int>> ImportPurchaseOrderTransactionsAsync(IFormFile upload, CancellationToken ct = default);
+    Task<Dictionary<string, int>> ImportPurchaseOrderTransactionsAsync(
+        IFormFile me2nFile,
+        IFormFile me5aFile,
+        IFormFile zmm013rFile,
+        CancellationToken ct = default);
 }
 
 public class PurchaseOrderImportService : IPurchaseOrderImportService
@@ -30,9 +34,6 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
         _db = db;
     }
 
-    // =========================
-    // Specs (mirror Python)
-    // =========================
     private sealed record SheetSpec(string[] Columns, string[] DateColumns, string[] NumericColumns);
 
     private static readonly SheetSpec ME2N_SPEC = new(
@@ -87,52 +88,24 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
         NumericColumns: Array.Empty<string>()
     );
 
-    private static readonly Dictionary<string, SheetSpec> SHEET_SPECS = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["ME2N"] = ME2N_SPEC,
-        ["ME5A"] = ME5A_SPEC,
-        ["ZMM013R"] = ZMM013R_SPEC
-    };
-
-    // UDT names (SQL Server)
     private const string UDT_ME2N = "exp.UDT_ME2N";
     private const string UDT_ME5A = "exp.UDT_ME5A";
     private const string UDT_ZMM = "exp.UDT_ZMM013R";
 
-    // =========================
-    // Entry point
-    // =========================
-    public async Task<Dictionary<string, int>> ImportPurchaseOrderTransactionsAsync(IFormFile upload, CancellationToken ct = default)
+    public async Task<Dictionary<string, int>> ImportPurchaseOrderTransactionsAsync(
+        IFormFile me2nFile,
+        IFormFile me5aFile,
+        IFormFile zmm013rFile,
+        CancellationToken ct = default)
     {
-        if (upload == null || string.IsNullOrWhiteSpace(upload.FileName))
-            throw new ArgumentException("file is required");
+        ValidateExcelFile(me2nFile, "ME2N");
+        ValidateExcelFile(me5aFile, "ME5A");
+        ValidateExcelFile(zmm013rFile, "ZMM013R");
 
-        if (!upload.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
-            throw new ArgumentException("file must be an .xlsx Excel file");
+        var me2nTable = await PrepareSingleFileAsDataTableAsync(me2nFile, "ME2N", ME2N_SPEC, ct);
+        var me5aTable = await PrepareSingleFileAsDataTableAsync(me5aFile, "ME5A", ME5A_SPEC, ct);
+        var zmmTable = await PrepareSingleFileAsDataTableAsync(zmm013rFile, "ZMM013R", ZMM013R_SPEC, ct);
 
-        if (upload.Length <= 0)
-            throw new ArgumentException("file is empty");
-         
-        using var ms = new MemoryStream();
-        await upload.CopyToAsync(ms, ct);
-        if (ms.Length == 0) throw new ArgumentException("file is empty");
-        ms.Position = 0;
-
-        using var wb = new XLWorkbook(ms);
-
-        // Ensure sheets exist
-        foreach (var sheetName in SHEET_SPECS.Keys)
-        {
-            if (!wb.Worksheets.Any(s => s.Name.Equals(sheetName, StringComparison.OrdinalIgnoreCase)))
-                throw new ArgumentException("excel file must contain sheets: ME2N, ME5A, ZMM013R");
-        }
-
-        // Prepare DataTables (TVP)
-        var me2nTable = PrepareSheetAsDataTable(wb, "ME2N", ME2N_SPEC);
-        var me5aTable = PrepareSheetAsDataTable(wb, "ME5A", ME5A_SPEC);
-        var zmmTable = PrepareSheetAsDataTable(wb, "ZMM013R", ZMM013R_SPEC);
-
-        // Execute import SP via TVP
         await ExecuteImportAsync(me2nTable, me5aTable, zmmTable, ct);
 
         return new Dictionary<string, int>
@@ -143,28 +116,62 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
         };
     }
 
-    // =========================
-    // Read & validate sheet -> DataTable
-    // =========================
-    private static DataTable PrepareSheetAsDataTable(XLWorkbook wb, string sheetName, SheetSpec spec)
+    private static void ValidateExcelFile(IFormFile? file, string label)
     {
-        var ws = wb.Worksheet(sheetName);
+        if (file == null || string.IsNullOrWhiteSpace(file.FileName))
+            throw new ArgumentException($"{label} file is required");
 
-        // Find header row (assume row 1)
+        // Penting:
+        // Frontend kamu menerima .xls juga, tapi ClosedXML hanya aman untuk .xlsx.
+        // Jadi sementara samakan validasinya ke .xlsx.
+        if (!file.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException($"{label} file must be an .xlsx Excel file");
+
+        if (file.Length <= 0)
+            throw new ArgumentException($"{label} file is empty");
+    }
+
+    private static async Task<DataTable> PrepareSingleFileAsDataTableAsync(
+        IFormFile upload,
+        string expectedSheetName,
+        SheetSpec spec,
+        CancellationToken ct)
+    {
+        using var ms = new MemoryStream();
+        await upload.CopyToAsync(ms, ct);
+
+        if (ms.Length == 0)
+            throw new ArgumentException($"{expectedSheetName} file is empty");
+
+        ms.Position = 0;
+
+        using var wb = new XLWorkbook(ms);
+
+        if (!wb.Worksheets.Any())
+            throw new ArgumentException($"{expectedSheetName} file does not contain any worksheet");
+
+        // prioritas: sheet bernama sama, kalau tidak ada ambil sheet pertama
+        var ws =
+            wb.Worksheets.FirstOrDefault(x => x.Name.Equals(expectedSheetName, StringComparison.OrdinalIgnoreCase))
+            ?? wb.Worksheet(1);
+
+        return PrepareWorksheetAsDataTable(ws, expectedSheetName, spec);
+    }
+
+    private static DataTable PrepareWorksheetAsDataTable(IXLWorksheet ws, string sheetName, SheetSpec spec)
+    {
         var headerRow = ws.Row(1);
         var lastCol = headerRow.LastCellUsed()?.Address.ColumnNumber ?? 0;
         if (lastCol <= 0) return CreateEmptyTable(spec);
 
-        // map actual headers (case-insensitive)
         var normalized = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         for (int c = 1; c <= lastCol; c++)
         {
-            var header = headerRow.Cell(c).GetString()?.Trim();
+            var header = ws.Cell(1, c).GetString()?.Trim();
             if (!string.IsNullOrWhiteSpace(header))
                 normalized[header] = c;
         }
 
-        // resolve required columns
         var resolvedCols = new List<int>();
         var missing = new List<string>();
 
@@ -181,7 +188,6 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
 
         var dt = CreateEmptyTable(spec);
 
-        // data rows start at row 2
         var lastRow = ws.LastRowUsed()?.RowNumber() ?? 1;
         if (lastRow < 2) return dt;
 
@@ -191,8 +197,6 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
         for (int r = 2; r <= lastRow; r++)
         {
             var row = ws.Row(r);
-
-            // Build record following spec.Columns order
             var values = new object?[spec.Columns.Length];
             var allNull = true;
 
@@ -209,7 +213,6 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
                 if (cleaned != null) allNull = false;
             }
 
-            // dropna(how="all") like pandas
             if (allNull) continue;
 
             for (int i = 0; i < values.Length; i++)
@@ -233,7 +236,7 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
             Type t =
                 dateCols.Contains(col) ? typeof(DateTime) :
                 numCols.Contains(col) ? typeof(decimal) :
-                                         typeof(string);
+                typeof(string);
 
             dt.Columns.Add(col, t);
         }
@@ -254,37 +257,32 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
             _ => cell.GetString()
         };
     }
-    // =========================
-    // Clean value (mirror Python _clean_value)
-    // =========================
+
     private static object? CleanValue(
         string column,
         object? value,
         HashSet<string> dateColumns,
-        HashSet<string> numericColumns
-    )
+        HashSet<string> numericColumns)
     {
         if (value == null) return null;
 
-        // Date columns
         if (dateColumns.Contains(column))
         {
-            // ClosedXML may give DateTime, or string/number
             if (value is DateTime dt) return DateTime.SpecifyKind(dt, DateTimeKind.Unspecified);
 
-            // Excel numeric date
             if (value is double d)
             {
-                // try OADate
                 try
                 {
                     var od = DateTime.FromOADate(d);
                     return DateTime.SpecifyKind(od, DateTimeKind.Unspecified);
                 }
-                catch { return null; }
+                catch
+                {
+                    return null;
+                }
             }
 
-            // parse string
             var s = value.ToString()?.Trim();
             if (string.IsNullOrWhiteSpace(s)) return null;
 
@@ -297,7 +295,6 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
             return null;
         }
 
-        // Numeric columns -> decimal
         if (numericColumns.Contains(column))
         {
             if (value is decimal dec) return dec;
@@ -323,22 +320,18 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
             return outDec;
         }
 
-        // Other columns:
         if (value is DateTime dt2) return DateTime.SpecifyKind(dt2, DateTimeKind.Unspecified);
 
         if (value is double f)
         {
             if (double.IsNaN(f) || double.IsInfinity(f)) return null;
-            if (Math.Abs(f % 1) < 0.0000001) return (long)f; // integer-like
+            if (Math.Abs(f % 1) < 0.0000001) return (long)f;
         }
 
         var text = value.ToString()?.Trim();
         return string.IsNullOrWhiteSpace(text) ? null : text;
     }
 
-    // =========================
-    // Execute import SP using TVP
-    // =========================
     private async Task ExecuteImportAsync(DataTable me2n, DataTable me5a, DataTable zmm, CancellationToken ct)
     {
         try
