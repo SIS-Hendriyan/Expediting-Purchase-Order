@@ -1415,7 +1415,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
 
       <Card className="p-4 sm:p-6 mb-4 sm:mb-6">
         <h3 className="mb-0" style={{ color: '#014357', lineHeight: '1.2' }}>
-          Monthly Trends: Completion & Delay
+          Monthly Completion Trend
         </h3>
         <p className="text-sm text-gray-600 mb-4 sm:mb-6 mt-1">Monthly completion rate overview</p>
         <ResponsiveContainer width="100%" height={300}>

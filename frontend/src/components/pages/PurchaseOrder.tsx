@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { format } from 'date-fns';
 
 import { Card } from '../ui/card';
 import { Button } from '../ui/button';
@@ -20,6 +21,9 @@ import { Checkbox } from '../ui/checkbox';
 import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Textarea } from '../ui/textarea';
+import { Alert, AlertDescription } from '../ui/alert';
+import { Calendar as CalendarComponent } from '../ui/calendar';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import {
   Search,
   Upload,
@@ -39,6 +43,9 @@ import {
   Clock,
   AlertTriangle,
   Ban,
+  Calendar,
+  CalendarDays,
+  Info,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
@@ -72,10 +79,12 @@ interface PurchaseOrderProps {
 
 type StatusTab = 'all' | 'created' | 'wip' | 'delivery' | 'cancel' | 'received';
 type AttentionFilter = 'updates' | 'delay' | null;
+type UpdateScheduleStatus = 'yes' | 'no' | '';
 
 type AttentionRaw = number | 'Need Update' | 'Delay' | null | undefined;
 type AttentionNorm = 0 | 1 | 2;
 type OrderKey = string | number;
+type UploadFileType = 'ME2N' | 'ME5A' | 'ZMM013R';
 
 export interface PurchaseOrderItem {
   id?: OrderKey | null;
@@ -103,6 +112,8 @@ export interface PurchaseOrderItem {
   reEtaDate: string | null;
   status: string;
   attention?: AttentionRaw;
+  isScheduled?: boolean | null;
+  isApproveReETA?: boolean | null;
 }
 
 interface PurchaseOrderSummary {
@@ -199,6 +210,48 @@ const ALLOWED_EXCEL_EXTENSIONS = ['.xlsx', '.xls'];
 
 const toArray = (v: any): any[] => (Array.isArray(v) ? v : v ? [v] : []);
 const clampUploadProgress = (value: number) => Math.max(0, Math.min(99, value));
+const trim = (v: unknown): string => (v === null || v === undefined ? '' : String(v).trim());
+
+const parseServerDate = (value?: string | number | null): Date | undefined => {
+  const s = trim(value);
+  if (!s) return undefined;
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? undefined : d;
+};
+
+const startOfDay = (date: Date): Date =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+const todayStart = (): Date => startOfDay(new Date());
+
+const addDaysDateOnly = (date: Date, days: number): Date => {
+  const base = startOfDay(date);
+  const result = new Date(base);
+  result.setDate(result.getDate() + days);
+  return result;
+};
+
+const diffDaysDateOnly = (later: Date, earlier: Date): number => {
+  const laterOnly = startOfDay(later);
+  const earlierOnly = startOfDay(earlier);
+  return Math.ceil((laterOnly.getTime() - earlierOnly.getTime()) / (1000 * 60 * 60 * 24));
+};
+
+const safeDateOnly = (v: unknown): string | null => {
+  const d = parseServerDate(v as string | number | null | undefined);
+  return d ? format(d, 'yyyy-MM-dd') : null;
+};
+
+const getDaysUntilDelivery = (value?: string | null): number | null => {
+  const target = parseServerDate(value);
+  if (!target) return null;
+
+  const startToday = todayStart();
+  const startTarget = new Date(target.getFullYear(), target.getMonth(), target.getDate());
+
+  const diffMs = startTarget.getTime() - startToday.getTime();
+  return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+};
 
 const getAuthToken = (): string => {
   const local = localStorage.getItem('accessToken');
@@ -287,6 +340,12 @@ function unwrapPOPayload(json: AnyObj): {
   const normalizedItems = items.map((x: any) => ({
     ...x,
     id: normalizeItemId(x),
+    isScheduled: x?.isScheduled ?? x?.IsScheduled ?? x?.is_scheduled ?? null,
+    isApproveReETA:
+      x?.isApproveReETA ??
+      x?.IsApproveReETA ??
+      x?.is_approve_re_eta ??
+      null,
     deliveryDate: x?.deliveryDate ?? x?.DeliveryDate ?? x?.['Delivery Date'] ?? null,
     etaDate: x?.etaDate ?? x?.ETADate ?? x?.EtaDate ?? x?.['ETA Date'] ?? null,
     qtyOrder:
@@ -595,6 +654,136 @@ const normalizeDisplayStatusOptions = (rows: MasterOption[]): string[] => {
   return dedupeStrings(mapped);
 };
 
+function RequiredDeliveryDateCard({ deliveryDateValue }: { deliveryDateValue?: string | null }) {
+  const deliveryDate = parseServerDate(deliveryDateValue);
+  const daysLeft = getDaysUntilDelivery(deliveryDateValue);
+
+  const isOverdue = typeof daysLeft === 'number' && daysLeft < 0;
+  const isUrgent = typeof daysLeft === 'number' && daysLeft >= 0 && daysLeft <= 7;
+
+  return (
+    <div
+      className="mb-4 flex items-start gap-3 rounded-lg p-4"
+      style={{
+        backgroundColor: 'rgba(1, 67, 87, 0.05)',
+        border: '1px solid rgba(1, 67, 87, 0.12)',
+      }}
+    >
+      <div
+        className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+        style={{ backgroundColor: '#014357' }}
+      >
+        <CalendarDays className="h-5 w-5 text-white" />
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex items-center gap-2">
+          <Label className="text-sm" style={{ color: '#014357' }}>
+            Required Delivery Date
+          </Label>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" className="inline-flex">
+                <Info className="h-3.5 w-3.5 text-gray-400" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="max-w-[220px] text-xs">
+                This is the buyer&apos;s requested delivery date. Please plan your ETD and ETA accordingly.
+              </p>
+            </TooltipContent>
+          </Tooltip>
+        </div>
+
+        <p className="text-lg font-medium" style={{ color: '#014357' }}>
+          {deliveryDate ? format(deliveryDate, 'EEEE, MMMM dd, yyyy') : '-'}
+        </p>
+
+        {typeof daysLeft === 'number' && (
+          <div className="mt-1 flex items-center gap-1.5">
+            <Clock
+              className="h-3.5 w-3.5"
+              style={{
+                color: isOverdue ? '#DC2626' : isUrgent ? '#ED832D' : '#6AA75D',
+              }}
+            />
+            <span
+              className="text-sm"
+              style={{
+                color: isOverdue ? '#DC2626' : isUrgent ? '#ED832D' : '#6AA75D',
+              }}
+            >
+              {isOverdue
+                ? `${Math.abs(daysLeft)} days overdue`
+                : daysLeft === 0
+                  ? 'Delivery due today'
+                  : `${daysLeft} days remaining`}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function UploadFileField({
+  label,
+  file,
+  inputRef,
+  disabled,
+  onChange,
+  onClear,
+}: {
+  label: string;
+  file: File | null;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  disabled: boolean;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+
+      <Input
+        ref={inputRef}
+        type="file"
+        accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+        onChange={onChange}
+        disabled={disabled}
+      />
+
+      {file && (
+        <div className="mt-1 flex items-center justify-between rounded-md border bg-slate-50 px-3 py-2">
+          <div className="flex items-center gap-2">
+            <FileSpreadsheet className="h-4 w-4" style={{ color: '#014357' }} />
+            <div className="flex flex-col">
+              <span className="text-xs font-medium text-gray-800 truncate max-w-[220px]">
+                {file.name}
+              </span>
+              <span className="text-[11px] text-gray-500">
+                {(file.size / 1024).toFixed(1)} KB
+              </span>
+            </div>
+          </div>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            disabled={disabled}
+            onClick={onClear}
+          >
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ================== Component ==================
 export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const [selectedOrderId, setSelectedOrderId] = useState<OrderKey | null>(null);
@@ -646,15 +835,25 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
   const [orderToUpdate, setOrderToUpdate] = useState<PurchaseOrderItem | null>(null);
-  const [updateRemarks, setUpdateRemarks] = useState('');
+  const [updateScheduleStatus, setUpdateScheduleStatus] = useState<UpdateScheduleStatus>('');
+
+  const [rescheduleDialogOpen, setRescheduleDialogOpen] = useState(false);
+  const [rescheduleTargetOrder, setRescheduleTargetOrder] = useState<PurchaseOrderItem | null>(null);
+  const [newEtd, setNewEtd] = useState<Date | undefined>(todayStart());
+  const [newLeadtimeDays, setNewLeadtimeDays] = useState('');
+  const [rescheduleReason, setRescheduleReason] = useState('');
+  const [submittingReschedule, setSubmittingReschedule] = useState(false);
 
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadFileME2N, setUploadFileME2N] = useState<File | null>(null);
+  const [uploadFileME5A, setUploadFileME5A] = useState<File | null>(null);
+  const [uploadFileZMM013R, setUploadFileZMM013R] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatusText, setUploadStatusText] = useState('');
-  const [isDragOver, setIsDragOver] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const fileInputME2NRef = useRef<HTMLInputElement | null>(null);
+  const fileInputME5ARef = useRef<HTMLInputElement | null>(null);
+  const fileInputZMM013RRef = useRef<HTMLInputElement | null>(null);
 
   const [submittingUpdate, setSubmittingUpdate] = useState(false);
 
@@ -676,13 +875,57 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   }, [specialFilter]);
 
   const resetUploadState = useCallback(() => {
-    setUploadFile(null);
+    setUploadFileME2N(null);
+    setUploadFileME5A(null);
+    setUploadFileZMM013R(null);
     setUploading(false);
     setUploadProgress(0);
     setUploadStatusText('');
-    setIsDragOver(false);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+
+    if (fileInputME2NRef.current) fileInputME2NRef.current.value = '';
+    if (fileInputME5ARef.current) fileInputME5ARef.current.value = '';
+    if (fileInputZMM013RRef.current) fileInputZMM013RRef.current.value = '';
   }, []);
+
+  const clearUploadFile = useCallback((type: UploadFileType) => {
+    switch (type) {
+      case 'ME2N':
+        setUploadFileME2N(null);
+        if (fileInputME2NRef.current) fileInputME2NRef.current.value = '';
+        break;
+      case 'ME5A':
+        setUploadFileME5A(null);
+        if (fileInputME5ARef.current) fileInputME5ARef.current.value = '';
+        break;
+      case 'ZMM013R':
+        setUploadFileZMM013R(null);
+        if (fileInputZMM013RRef.current) fileInputZMM013RRef.current.value = '';
+        break;
+    }
+  }, []);
+
+  const getIdPoItem = useCallback((order: PurchaseOrderItem | null): string => {
+    if (!order) return '';
+    return order.id !== null && order.id !== undefined && order.id !== ''
+      ? String(order.id)
+      : String(order.purchasingDocument || '');
+  }, []);
+
+  const getOrderRequiredDeliveryDate = useCallback((order: PurchaseOrderItem | null): string | null => {
+    if (!order) return null;
+    return order.reEtaDate || order.deliveryDate || null;
+  }, []);
+
+  const currentEtaForReschedule = useMemo(() => {
+    return safeDateOnly(getOrderRequiredDeliveryDate(rescheduleTargetOrder));
+  }, [getOrderRequiredDeliveryDate, rescheduleTargetOrder]);
+
+  const newEtaDateForReschedule = useMemo(() => {
+    if (!newEtd) return null;
+    const days = parseInt(newLeadtimeDays, 10);
+    if (!newLeadtimeDays || Number.isNaN(days) || days <= 0) return null;
+    return addDaysDateOnly(newEtd, days);
+  }, [newEtd, newLeadtimeDays]);
 
   const submitPoStatusUpdate = useCallback(async (payload: Record<string, unknown>) => {
     const res = await fetchWithAuth(API.POSTATUS_UPSERT(), {
@@ -701,6 +944,29 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     if (!res.ok) {
       throw new Error(
         data?.message || data?.Message || data?.title || 'Failed to update PO status'
+      );
+    }
+
+    return data;
+  }, []);
+
+  const submitReEtaCreate = useCallback(async (payload: Record<string, unknown>) => {
+    const res = await fetchWithAuth(API.REETA_CREATE(), {
+      method: 'POST',
+      headers: buildAuthHeaders(),
+      body: JSON.stringify(payload),
+    });
+
+    let data: any = null;
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
+
+    if (!res.ok) {
+      throw new Error(
+        data?.message || data?.Message || data?.title || 'Failed to create reschedule ETA request'
       );
     }
 
@@ -1079,7 +1345,14 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     return filteredOrders
       .filter((o) => {
         const displayStatus = mapBackendStatusToDisplay(o.status);
-        if (displayStatus !== 'On Delivery') return false;
+
+        const isExcludedStatus =
+          displayStatus === 'Received' ||
+          displayStatus === 'Cancel' ||
+          isReceivedBackendStatus(o.status);
+
+        if (isExcludedStatus) return false;
+        if (o.isScheduled === true) return false;
 
         const eta = parseDdMmmYyyy(o.reEtaDate);
         if (!eta) return false;
@@ -1110,9 +1383,112 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
   const handleOpenUpdateDialog = useCallback((order: PurchaseOrderItem) => {
     setOrderToUpdate(order);
-    setUpdateRemarks('');
+    setUpdateScheduleStatus('');
     setIsUpdateDialogOpen(true);
   }, []);
+
+  const handleOpenRescheduleDialog = useCallback((order?: PurchaseOrderItem | null) => {
+    const target = order ?? orderToUpdate ?? rescheduleTargetOrder ?? null;
+
+    if (!target) {
+      toast.error('Purchase order not found');
+      return;
+    }
+
+    setRescheduleTargetOrder(target);
+    setNewEtd(todayStart());
+    setNewLeadtimeDays('');
+    setRescheduleReason('');
+    setRescheduleDialogOpen(true);
+  }, [orderToUpdate, rescheduleTargetOrder]);
+
+  const handleCloseRescheduleDialog = useCallback(() => {
+    setRescheduleDialogOpen(false);
+    setNewEtd(todayStart());
+    setNewLeadtimeDays('');
+    setRescheduleReason('');
+  }, []);
+
+  const handleSubmitReschedule = useCallback(async () => {
+    try {
+      const idPoItem = getIdPoItem(rescheduleTargetOrder);
+
+      if (!idPoItem) {
+        toast.error('ID PO Item not found.');
+        return;
+      }
+
+      if (!currentEtaForReschedule) {
+        toast.error('Required delivery date is not set.');
+        return;
+      }
+
+      if (!newEtd) {
+        toast.error('Please select a valid new ETD.');
+        return;
+      }
+
+      const newLeadtime = parseInt(newLeadtimeDays, 10);
+      if (!newLeadtimeDays || Number.isNaN(newLeadtime) || newLeadtime <= 0) {
+        toast.error('Please enter a valid new lead time.');
+        return;
+      }
+
+      if (!newEtaDateForReschedule) {
+        toast.error('New ETA could not be calculated.');
+        return;
+      }
+
+      if (!rescheduleReason.trim()) {
+        toast.error('Please provide a reason for rescheduling.');
+        return;
+      }
+
+      const proposedEtaDays = diffDaysDateOnly(newEtaDateForReschedule, startOfDay(newEtd));
+
+      setSubmittingReschedule(true);
+
+      await submitReEtaCreate({
+        CurrentEta: currentEtaForReschedule,
+        IdPoItem: idPoItem,
+        ProposedETADays: proposedEtaDays,
+        Reason: rescheduleReason.trim(),
+      });
+
+      toast.success('Reschedule request submitted successfully.');
+
+      setRescheduleDialogOpen(false);
+      setNewEtd(todayStart());
+      setNewLeadtimeDays('');
+      setRescheduleReason('');
+
+      await fetchCardSummary();
+      await fetchPurchaseOrders(activeTab, currentAttentionParam, currentPage, itemsPerPage);
+      await fetchMasterFilters();
+    } catch (error: any) {
+      if (error?.message !== 'Session expired') {
+        toast.error(error?.message || 'Failed to submit reschedule request.');
+      }
+    } finally {
+      setSubmittingReschedule(false);
+    }
+  }, [
+    activeTab,
+    currentAttentionParam,
+    currentEtaForReschedule,
+    currentPage,
+    fetchCardSummary,
+    fetchMasterFilters,
+    fetchPurchaseOrders,
+    getIdPoItem,
+    itemsPerPage,
+    newEtd,
+    newEtaDateForReschedule,
+    newLeadtimeDays,
+    rescheduleReason,
+    rescheduleTargetOrder,
+    submitReEtaCreate,
+  ]);
 
   const handleSubmitUpdate = useCallback(async () => {
     try {
@@ -1121,17 +1497,20 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         return;
       }
 
-      if (!updateRemarks.trim()) {
-        toast.error('Please enter update remarks');
+      if (!updateScheduleStatus) {
+        toast.error('Please select update confirmation');
         return;
       }
 
-      const idPoItem =
-        orderToUpdate.id !== null &&
-        orderToUpdate.id !== undefined &&
-        orderToUpdate.id !== ''
-          ? orderToUpdate.id
-          : orderToUpdate.purchasingDocument;
+      if (updateScheduleStatus === 'no') {
+        return;
+      }
+
+      if (orderToUpdate.isApproveReETA === false) {
+        return;
+      }
+
+      const idPoItem = getIdPoItem(orderToUpdate);
 
       if (!idPoItem) {
         toast.error('ID PO Item not found');
@@ -1142,14 +1521,15 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
       await submitPoStatusUpdate({
         IDPOItem: idPoItem,
-        DeliveryUpdate: updateRemarks.trim(),
+        IsScheduled: true,
+        DeliveryUpdate: 'On Schedule',
       });
 
       toast.success(`Update submitted for PO ${orderToUpdate.purchasingDocument}`);
 
       setIsUpdateDialogOpen(false);
       setOrderToUpdate(null);
-      setUpdateRemarks('');
+      setUpdateScheduleStatus('');
 
       await fetchCardSummary();
       await fetchPurchaseOrders(activeTab, currentAttentionParam, currentPage, itemsPerPage);
@@ -1164,7 +1544,8 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     }
   }, [
     orderToUpdate,
-    updateRemarks,
+    updateScheduleStatus,
+    getIdPoItem,
     submitPoStatusUpdate,
     fetchCardSummary,
     fetchPurchaseOrders,
@@ -1210,60 +1591,79 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     });
   }, []);
 
-  const processFile = useCallback((file: File | null, input?: HTMLInputElement | null) => {
-    if (!file) {
-      setUploadFile(null);
-      if (input) input.value = '';
-      return;
-    }
+  const processUploadFile = useCallback(
+    (
+      file: File | null,
+      setter: React.Dispatch<React.SetStateAction<File | null>>,
+      input?: HTMLInputElement | null
+    ) => {
+      if (!file) {
+        setter(null);
+        if (input) input.value = '';
+        return;
+      }
 
-    if (!isExcelFile(file)) {
-      toast.error('File must be an Excel file (.xlsx or .xls)');
-      setUploadFile(null);
-      if (input) input.value = '';
-      return;
-    }
+      if (!isExcelFile(file)) {
+        toast.error('File must be an Excel file (.xlsx or .xls)');
+        setter(null);
+        if (input) input.value = '';
+        return;
+      }
 
-    setUploadFile(file);
-  }, []);
-
-  const handleFileChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0] || null;
-      processFile(file, e.target);
+      setter(file);
     },
-    [processFile]
+    []
   );
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setIsDragOver(false);
-      const file = e.dataTransfer.files?.[0] || null;
-      processFile(file);
+  const handleFileChangeME2N = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0] || null;
+      processUploadFile(file, setUploadFileME2N, e.target);
     },
-    [processFile]
+    [processUploadFile]
+  );
+
+  const handleFileChangeME5A = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0] || null;
+      processUploadFile(file, setUploadFileME5A, e.target);
+    },
+    [processUploadFile]
+  );
+
+  const handleFileChangeZMM013R = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0] || null;
+      processUploadFile(file, setUploadFileZMM013R, e.target);
+    },
+    [processUploadFile]
   );
 
   const handleSubmitUploadPO = useCallback(async () => {
-    if (!uploadFile) {
-      toast.error('Please select an Excel file first');
+    if (!uploadFileME2N) {
+      toast.error('Please select ME2N file first');
       return;
     }
 
-    if (!isExcelFile(uploadFile)) {
-      toast.error('File must be an Excel file (.xlsx or .xls)');
+    if (!uploadFileME5A) {
+      toast.error('Please select ME5A file first');
+      return;
+    }
+
+    if (!uploadFileZMM013R) {
+      toast.error('Please select ZMM013R file first');
       return;
     }
 
     setUploading(true);
     setUploadProgress(0);
-    setUploadStatusText('Preparing upload....');
+    setUploadStatusText('Preparing upload...');
 
     try {
       const formData = new FormData();
-      formData.append('file', uploadFile);
+      formData.append('ME2NFile', uploadFileME2N);
+      formData.append('ME5AFile', uploadFileME5A);
+      formData.append('ZMM013RFile', uploadFileZMM013R);
 
       const token = getAuthToken();
 
@@ -1370,7 +1770,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       setUploading(false);
     }
   }, [
-    uploadFile,
+    uploadFileME2N,
+    uploadFileME5A,
+    uploadFileZMM013R,
     fetchPurchaseOrders,
     fetchCardSummary,
     fetchMasterFilters,
@@ -1709,7 +2111,11 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   return (
     <div className="p-4 sm:p-6 lg:p-8 h-full overflow-x-hidden">
       {selectedOrderId !== null ? (
-        <PurchaseOrderDetail user={user} orderId={selectedOrderId} onBack={() => setSelectedOrderId(null)} />
+        <PurchaseOrderDetail
+          user={user}
+          orderId={String(selectedOrderId)}
+          onBack={() => setSelectedOrderId(null)}
+        />
       ) : (
         <>
           <div className="mb-6 sm:mb-8">
@@ -1868,8 +2274,8 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
               </div>
 
               <p className="text-sm text-gray-600 mb-4">
-                These orders have a Re-ETA Date within 2 days. Please provide updates on their delivery
-                status.
+                These orders have a ETA Date within 2 days and require vendor confirmation whether
+                they are still on track or need re-ETA.
               </p>
 
               <div className="overflow-x-auto">
@@ -2180,12 +2586,21 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             <TabsContent value="received">{renderTable()}</TabsContent>
           </Tabs>
 
-          <Dialog open={isUpdateDialogOpen} onOpenChange={setIsUpdateDialogOpen}>
+          <Dialog
+            open={isUpdateDialogOpen}
+            onOpenChange={(open) => {
+              setIsUpdateDialogOpen(open);
+              if (!open) {
+                setOrderToUpdate(null);
+                setUpdateScheduleStatus('');
+              }
+            }}
+          >
             <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden">
               <DialogHeader>
                 <DialogTitle style={{ color: '#014357' }}>Update Purchase Order</DialogTitle>
                 <DialogDescription>
-                  Provide updates for the delivery status of this purchase order
+                  Confirm whether this PO item is still on track with the current ETA or needs re-ETA.
                 </DialogDescription>
                 {orderToUpdate && (
                   <div className="flex items-center gap-2 pt-2">
@@ -2270,20 +2685,97 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         >
                           <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#014357' }} />
                           <h3 className="text-lg tracking-wide" style={{ color: '#014357' }}>
-                            Update Details
+                            Update Confirmation
                           </h3>
                         </div>
 
-                        <div className="space-y-2">
-                          <Label htmlFor="update-remarks">Remarks / Additional Information</Label>
-                          <Textarea
-                            id="update-remarks"
-                            value={updateRemarks}
-                            onChange={(e) => setUpdateRemarks(e.target.value)}
-                            placeholder="Enter any additional notes or comments about this delivery..."
-                            rows={6}
-                            className="resize-none"
-                          />
+                        <div className="space-y-4">
+                          <Label>Delivery Confirmation</Label>
+
+                          <div className="space-y-3">
+                            <label
+                              className={[
+                                'flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition',
+                                updateScheduleStatus === 'yes'
+                                  ? 'border-[#014357] bg-slate-50'
+                                  : 'border-gray-200 hover:border-[#014357]/50',
+                              ].join(' ')}
+                            >
+                              <input
+                                type="radio"
+                                name="scheduleStatus"
+                                value="yes"
+                                checked={updateScheduleStatus === 'yes'}
+                                onChange={() => setUpdateScheduleStatus('yes')}
+                                className="mt-1"
+                              />
+                              <div>
+                                <div className="font-medium text-sm" style={{ color: '#014357' }}>
+                                  Ya, masih sesuai ETA
+                                </div>
+                              </div>
+                            </label>
+
+                            <label
+                              className={[
+                                'flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition',
+                                updateScheduleStatus === 'no'
+                                  ? 'border-[#014357] bg-slate-50'
+                                  : 'border-gray-200 hover:border-[#014357]/50',
+                              ].join(' ')}
+                            >
+                              <input
+                                type="radio"
+                                name="scheduleStatus"
+                                value="no"
+                                checked={updateScheduleStatus === 'no'}
+                                onChange={() => setUpdateScheduleStatus('no')}
+                                className="mt-1"
+                              />
+                              <div>
+                                <div className="font-medium text-sm" style={{ color: '#014357' }}>
+                                  Tidak, lakukan Re-ETA
+                                </div>
+                              </div>
+                            </label>
+                          </div>
+
+                          {updateScheduleStatus === 'no' && (
+                            <Alert
+                              style={{
+                                borderColor: '#DC2626',
+                                backgroundColor: 'rgba(220, 38, 38, 0.06)',
+                              }}
+                            >
+                              <AlertCircle className="h-4 w-4" style={{ color: '#DC2626' }} />
+                              <AlertDescription className="text-sm text-gray-700">
+                                ETA exceeds the delivery date. Please{' '}
+                                <button
+                                  type="button"
+                                  className="btn-underlined-text inline border-none bg-transparent p-0 underline cursor-pointer"
+                                  style={{ color: '#014357' }}
+                                  onClick={() => handleOpenRescheduleDialog(orderToUpdate)}
+                                >
+                                  submit a Reschedule ETA Request again
+                                </button>{' '}
+                                before proceeding.
+                              </AlertDescription>
+                            </Alert>
+                          )}
+
+                          {orderToUpdate.isApproveReETA === false && (
+                            <Alert
+                              style={{
+                                borderColor: '#DC2626',
+                                backgroundColor: 'rgba(220, 38, 38, 0.06)',
+                              }}
+                            >
+                              <AlertCircle className="h-4 w-4" style={{ color: '#DC2626' }} />
+                              <AlertDescription className="text-sm text-gray-700">
+                                Waiting for Re-ETA approval. Please wait until the request is reviewed before proceeding.
+                              </AlertDescription>
+                            </Alert>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -2297,13 +2789,104 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       style={{ backgroundColor: '#014357' }}
                       className="text-white hover:opacity-90"
                       onClick={handleSubmitUpdate}
-                      disabled={submittingUpdate}
+                      disabled={
+                        submittingUpdate ||
+                        !updateScheduleStatus ||
+                        updateScheduleStatus === 'no' ||
+                        orderToUpdate.isApproveReETA === false
+                      }
                     >
                       {submittingUpdate ? 'Submitting...' : 'Submit Update'}
                     </Button>
                   </DialogFooter>
                 </>
               )}
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={rescheduleDialogOpen} onOpenChange={setRescheduleDialogOpen}>
+            <DialogContent className="sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle style={{ color: '#014357' }}>Create Reschedule ETA Request</DialogTitle>
+                <DialogDescription>
+                  Review the current schedule and submit a request with New ETD and New Lead Time.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-4 py-4">
+                <RequiredDeliveryDateCard
+                  deliveryDateValue={getOrderRequiredDeliveryDate(rescheduleTargetOrder)}
+                />
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div>
+                    <Label>
+                      New ETD <span className="text-red-500">*</span>
+                    </Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="mt-1 w-full justify-start text-left" type="button">
+                          <Calendar className="mr-2 h-4 w-4" />
+                          {newEtd ? format(newEtd, 'PPP') : <span>Select new ETD</span>}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0">
+                        <CalendarComponent mode="single" selected={newEtd} onSelect={setNewEtd} initialFocus />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="newLeadtimeDays">
+                      New Lead Time <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="newLeadtimeDays"
+                      type="number"
+                      min={1}
+                      value={newLeadtimeDays}
+                      onChange={(e) => setNewLeadtimeDays(e.target.value)}
+                      placeholder="Enter new lead time"
+                      className="mt-1"
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <Label className="mb-2 block text-sm text-gray-600">New ETA (New ETD + New Lead Time)</Label>
+                  <p className="text-lg" style={{ color: '#014357' }}>
+                    {newEtaDateForReschedule ? format(newEtaDateForReschedule, 'MMM dd, yyyy') : 'Not set'}
+                  </p>
+                </div>
+
+                <div>
+                  <Label htmlFor="rescheduleReason">
+                    Reason for Rescheduling <span className="text-red-500">*</span>
+                  </Label>
+                  <Textarea
+                    id="rescheduleReason"
+                    value={rescheduleReason}
+                    onChange={(e) => setRescheduleReason(e.target.value)}
+                    placeholder="Provide a detailed reason for the reschedule request..."
+                    className="mt-1"
+                    rows={4}
+                  />
+                </div>
+              </div>
+
+              <DialogFooter>
+                <Button variant="outline" onClick={handleCloseRescheduleDialog} disabled={submittingReschedule}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleSubmitReschedule}
+                  style={{ backgroundColor: '#014357' }}
+                  className="text-white hover:opacity-90"
+                  disabled={submittingReschedule}
+                >
+                  {submittingReschedule ? 'Submitting...' : 'Submit Request'}
+                </Button>
+              </DialogFooter>
             </DialogContent>
           </Dialog>
 
@@ -2316,94 +2899,41 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
               }
             }}
           >
-            <DialogContent className="max-w-md">
+            <DialogContent className="max-w-xl">
               <DialogHeader>
                 <DialogTitle style={{ color: '#014357' }}>Upload Purchase Order</DialogTitle>
                 <DialogDescription>
-                  Upload Excel file yang berisi 3 sheet: <b>ME2N</b>, <b>ME5A</b>, dan <b>ZMM013R</b>.
+                  Upload 3 file Excel terpisah untuk <b>ME2N</b>, <b>ME5A</b>, dan <b>ZMM013R</b>.
                 </DialogDescription>
               </DialogHeader>
 
-              <div className="space-y-3 py-2">
-                <Label>Excel File (.xlsx / .xls)</Label>
+              <div className="space-y-4 py-2">
+                <UploadFileField
+                  label="ME2N File (.xlsx / .xls)"
+                  file={uploadFileME2N}
+                  inputRef={fileInputME2NRef}
+                  disabled={uploading}
+                  onChange={handleFileChangeME2N}
+                  onClear={() => clearUploadFile('ME2N')}
+                />
 
-                <div
-                  onClick={() => !uploading && fileInputRef.current?.click()}
-                  onDragOver={(e) => {
-                    if (uploading) return;
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setIsDragOver(true);
-                  }}
-                  onDragLeave={(e) => {
-                    if (uploading) return;
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setIsDragOver(false);
-                  }}
-                  onDrop={(e) => {
-                    if (uploading) return;
-                    handleDrop(e);
-                  }}
-                  className={[
-                    'border-2 border-dashed rounded-lg p-6 text-center transition',
-                    'flex flex-col items-center justify-center gap-2',
-                    uploading ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer',
-                    isDragOver
-                      ? 'border-[#014357] bg-slate-50'
-                      : 'border-slate-300 bg-slate-50/40 hover:border-[#014357]/70 hover:bg-slate-50',
-                  ].join(' ')}
-                >
-                  <Upload className="h-8 w-8 mb-1" style={{ color: '#014357' }} />
-                  <p className="text-sm font-medium" style={{ color: '#014357' }}>
-                    Drag &amp; drop Excel file di sini
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    atau <span className="underline">klik untuk memilih file</span>
-                  </p>
-                  <p className="text-[11px] text-gray-400 mt-1">
-                    Hanya format <b>.xlsx</b> atau <b>.xls</b> yang diperbolehkan.
-                  </p>
+                <UploadFileField
+                  label="ME5A File (.xlsx / .xls)"
+                  file={uploadFileME5A}
+                  inputRef={fileInputME5ARef}
+                  disabled={uploading}
+                  onChange={handleFileChangeME5A}
+                  onClear={() => clearUploadFile('ME5A')}
+                />
 
-                  <input
-                    ref={fileInputRef}
-                    id="po-file"
-                    type="file"
-                    accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-                    onChange={handleFileChange}
-                    className="hidden"
-                  />
-                </div>
-
-                {uploadFile && (
-                  <div className="mt-1 flex items-center justify-between rounded-md border bg-slate-50 px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <FileSpreadsheet className="h-4 w-4" style={{ color: '#014357' }} />
-                      <div className="flex flex-col">
-                        <span className="text-xs font-medium text-gray-800 truncate max-w-[180px]">
-                          {uploadFile.name}
-                        </span>
-                        <span className="text-[11px] text-gray-500">
-                          {(uploadFile.size / 1024).toFixed(1)} KB
-                        </span>
-                      </div>
-                    </div>
-
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6"
-                      disabled={uploading}
-                      onClick={() => {
-                        setUploadFile(null);
-                        if (fileInputRef.current) fileInputRef.current.value = '';
-                      }}
-                    >
-                      <X className="h-3 w-3" />
-                    </Button>
-                  </div>
-                )}
+                <UploadFileField
+                  label="ZMM013R File (.xlsx / .xls)"
+                  file={uploadFileZMM013R}
+                  inputRef={fileInputZMM013RRef}
+                  disabled={uploading}
+                  onChange={handleFileChangeZMM013R}
+                  onClear={() => clearUploadFile('ZMM013R')}
+                />
 
                 {uploading && (
                   <div className="space-y-2">
@@ -2425,6 +2955,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                     </div>
                   </div>
                 )}
+
+                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  Pastikan setiap file sesuai jenisnya: <b>ME2N</b>, <b>ME5A</b>, dan <b>ZMM013R</b>.
+                </div>
               </div>
 
               <DialogFooter>
@@ -2436,7 +2970,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   style={{ backgroundColor: '#014357' }}
                   className="text-white hover:opacity-90"
                   onClick={handleSubmitUploadPO}
-                  disabled={uploading || !uploadFile}
+                  disabled={uploading || !uploadFileME2N || !uploadFileME5A || !uploadFileZMM013R}
                 >
                   {uploading ? 'Uploading...' : 'Upload'}
                 </Button>

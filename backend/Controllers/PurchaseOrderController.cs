@@ -263,26 +263,44 @@ namespace EXPOAPI.Controllers
             }
         }
 
-        // POST /api/purchase-order/import
         [HttpPost("import")]
         [Consumes("multipart/form-data")]
         [ProducesResponseType(StatusCodes.Status201Created)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> Import(
-            [FromForm] PurchaseOrderImportRequest request,
-            CancellationToken ct)
+     [FromForm] PurchaseOrderImportRequest request,
+     CancellationToken ct)
         {
-            var file = request?.File;
-
-            if (file == null || file.Length == 0)
+            if (request == null)
             {
-                return BadRequestResponse("file is required");
+                return BadRequestResponse("request is required");
+            }
+
+            if (request.ME2NFile == null || request.ME2NFile.Length == 0)
+            {
+                return BadRequestResponse("ME2N file is required");
+            }
+
+            if (request.ME5AFile == null || request.ME5AFile.Length == 0)
+            {
+                return BadRequestResponse("ME5A file is required");
+            }
+
+            if (request.ZMM013RFile == null || request.ZMM013RFile.Length == 0)
+            {
+                return BadRequestResponse("ZMM013R file is required");
             }
 
             try
             {
-                var result = await _import.ImportPurchaseOrderTransactionsAsync(file, ct);
+                var result = await _import.ImportPurchaseOrderTransactionsAsync(
+                    request.ME2NFile,
+                    request.ME5AFile,
+                    request.ZMM013RFile,
+                    ct
+                );
+
                 return CreatedResponse("purchase order data imported", result);
             }
             catch (ArgumentException ex)
@@ -338,9 +356,9 @@ namespace EXPOAPI.Controllers
             );
     }
 
-    public sealed class PurchaseOrderImportRequest
-    {
-        [FromForm(Name = "file")]
-        public IFormFile? File { get; set; }
-    }
+    //public sealed class PurchaseOrderImportRequest
+    //{
+    //    [FromForm(Name = "file")]
+    //    public IFormFile? File { get; set; }
+    //}
 }
