@@ -1,4 +1,4 @@
-﻿using ClosedXML.Excel; // IDbConnectionFactory
+﻿using ClosedXML.Excel;
 using Dapper;
 using EXPOAPI.Services;
 using Microsoft.AspNetCore.Http;
@@ -34,8 +34,33 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
         _db = db;
     }
 
-    private sealed record SheetSpec(string[] Columns, string[] DateColumns, string[] NumericColumns);
+    /// <param name="Columns">Nama kolom sesuai UDT SQL (dipakai sebagai nama kolom DataTable).</param>
+    /// <param name="DateColumns">Subset Columns yang bertipe DateTime.</param>
+    /// <param name="NumericColumns">Subset Columns yang bertipe decimal/float.</param>
+    /// <param name="SourceAliases">
+    ///   Pemetaan: UDT column name → nama kolom di file CSV/Excel.
+    ///   Diisi jika nama header di file berbeda dengan nama kolom UDT.
+    /// </param>
+    /// <param name="OptionalColumns">
+    ///   Kolom UDT yang boleh tidak ada di file (diisi NULL jika tidak ditemukan).
+    /// </param>
+    private sealed record SheetSpec(
+        string[] Columns,
+        string[] DateColumns,
+        string[] NumericColumns,
+        Dictionary<string, string>? SourceAliases = null,
+        string[]? OptionalColumns = null);
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // ME2N
+    //   Perbedaan nama kolom CSV vs UDT:
+    //     "Supplier/Supplying Plant"     → UDT: "Name of Supplier"
+    //     "Order Quantity"               → UDT: "Qty Order"
+    //     "Delivery Date"                → UDT: "Delivery date"  (casing)
+    //     "Still to be delivered (value)"→ UDT: "Still to be delivered (qty)"
+    //   Kolom opsional (tidak ada di CSV, diisi NULL):
+    //     "Quantity Received", "Storage location"
+    // ─────────────────────────────────────────────────────────────────────────
     private static readonly SheetSpec ME2N_SPEC = new(
         Columns: new[]
         {
@@ -57,9 +82,20 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
             "Storage location",
         },
         DateColumns: new[] { "Document Date", "Delivery date" },
-        NumericColumns: new[] { "Quantity Received", "Still to be delivered (qty)" }
+        NumericColumns: new[] { "Quantity Received", "Still to be delivered (qty)" },
+        SourceAliases: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Name of Supplier"] = "Supplier/Supplying Plant",
+            ["Qty Order"] = "Order Quantity",
+            ["Delivery date"] = "Delivery Date",
+            ["Still to be delivered (qty)"] = "Still to be delivered (value)",
+        },
+        OptionalColumns: new[] { "Quantity Received", "Storage location" }
     );
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // ME5A — semua nama kolom cocok dengan CSV (case-insensitive match cukup)
+    // ─────────────────────────────────────────────────────────────────────────
     private static readonly SheetSpec ME5A_SPEC = new(
         Columns: new[]
         {
@@ -76,6 +112,9 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
         NumericColumns: Array.Empty<string>()
     );
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // ZMM013R — semua nama kolom cocok dengan CSV
+    // ─────────────────────────────────────────────────────────────────────────
     private static readonly SheetSpec ZMM013R_SPEC = new(
         Columns: new[]
         {
@@ -91,6 +130,8 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
     private const string UDT_ME2N = "exp.UDT_ME2N";
     private const string UDT_ME5A = "exp.UDT_ME5A";
     private const string UDT_ZMM = "exp.UDT_ZMM013R";
+
+    // =========================================================================
 
     public async Task<Dictionary<string, int>> ImportPurchaseOrderTransactionsAsync(
         IFormFile me2nFile,
@@ -112,18 +153,17 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
         {
             ["ME2N"] = me2nTable.Rows.Count,
             ["ME5A"] = me5aTable.Rows.Count,
-            ["ZMM013R"] = zmmTable.Rows.Count
+            ["ZMM013R"] = zmmTable.Rows.Count,
         };
     }
+
+    // =========================================================================
 
     private static void ValidateExcelFile(IFormFile? file, string label)
     {
         if (file == null || string.IsNullOrWhiteSpace(file.FileName))
             throw new ArgumentException($"{label} file is required");
 
-        // Penting:
-        // Frontend kamu menerima .xls juga, tapi ClosedXML hanya aman untuk .xlsx.
-        // Jadi sementara samakan validasinya ke .xlsx.
         if (!file.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException($"{label} file must be an .xlsx Excel file");
 
@@ -150,7 +190,6 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
         if (!wb.Worksheets.Any())
             throw new ArgumentException($"{expectedSheetName} file does not contain any worksheet");
 
-        // prioritas: sheet bernama sama, kalau tidak ada ambil sheet pertama
         var ws =
             wb.Worksheets.FirstOrDefault(x => x.Name.Equals(expectedSheetName, StringComparison.OrdinalIgnoreCase))
             ?? wb.Worksheet(1);
@@ -164,6 +203,7 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
         var lastCol = headerRow.LastCellUsed()?.Address.ColumnNumber ?? 0;
         if (lastCol <= 0) return CreateEmptyTable(spec);
 
+        // Bangun map: header (case-insensitive) → nomor kolom
         var normalized = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         for (int c = 1; c <= lastCol; c++)
         {
@@ -172,22 +212,45 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
                 normalized[header] = c;
         }
 
-        var resolvedCols = new List<int>();
+        var optionalCols = new HashSet<string>(
+            spec.OptionalColumns ?? Array.Empty<string>(),
+            StringComparer.OrdinalIgnoreCase);
+
+        var resolvedCols = new List<int>();   // -1 = kolom opsional tidak ditemukan
         var missing = new List<string>();
 
         foreach (var canonical in spec.Columns)
         {
-            if (normalized.TryGetValue(canonical, out var colIndex))
+            // Cek alias dulu, fallback ke nama canonical
+            var lookupName = (spec.SourceAliases?.TryGetValue(canonical, out var alias) == true)
+                ? alias!
+                : canonical;
+
+            if (normalized.TryGetValue(lookupName, out var colIndex))
+            {
                 resolvedCols.Add(colIndex);
+            }
+            else if (!string.Equals(lookupName, canonical, StringComparison.OrdinalIgnoreCase)
+                     && normalized.TryGetValue(canonical, out colIndex))
+            {
+                // Alias tidak ditemukan, tapi canonical ada — pakai canonical
+                resolvedCols.Add(colIndex);
+            }
+            else if (optionalCols.Contains(canonical))
+            {
+                resolvedCols.Add(-1);   // opsional → NULL
+            }
             else
+            {
                 missing.Add(canonical);
+            }
         }
 
         if (missing.Count > 0)
-            throw new ArgumentException($"sheet '{sheetName}' is missing column(s): {string.Join(", ", missing)}");
+            throw new ArgumentException(
+                $"sheet '{sheetName}' is missing column(s): {string.Join(", ", missing)}");
 
         var dt = CreateEmptyTable(spec);
-
         var lastRow = ws.LastRowUsed()?.RowNumber() ?? 1;
         if (lastRow < 2) return dt;
 
@@ -204,8 +267,14 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
             {
                 var columnName = spec.Columns[i];
                 var colIndex = resolvedCols[i];
-                var cell = row.Cell(colIndex);
 
+                if (colIndex < 0)   // kolom opsional tidak ada di file
+                {
+                    values[i] = null;
+                    continue;
+                }
+
+                var cell = row.Cell(colIndex);
                 object? raw = GetCellRawValue(cell);
                 var cleaned = CleanValue(columnName, raw, dateCols, numCols);
                 values[i] = cleaned;
@@ -227,7 +296,6 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
     private static DataTable CreateEmptyTable(SheetSpec spec)
     {
         var dt = new DataTable();
-
         var dateCols = new HashSet<string>(spec.DateColumns, StringComparer.OrdinalIgnoreCase);
         var numCols = new HashSet<string>(spec.NumericColumns, StringComparer.OrdinalIgnoreCase);
 
@@ -236,7 +304,7 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
             Type t =
                 dateCols.Contains(col) ? typeof(DateTime) :
                 numCols.Contains(col) ? typeof(decimal) :
-                typeof(string);
+                                          typeof(string);
 
             dt.Columns.Add(col, t);
         }
@@ -254,7 +322,7 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
             XLDataType.Number => cell.GetDouble(),
             XLDataType.Boolean => cell.GetBoolean(),
             XLDataType.Text => cell.GetString(),
-            _ => cell.GetString()
+            _ => cell.GetString(),
         };
     }
 
@@ -268,19 +336,13 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
 
         if (dateColumns.Contains(column))
         {
-            if (value is DateTime dt) return DateTime.SpecifyKind(dt, DateTimeKind.Unspecified);
+            if (value is DateTime dt)
+                return DateTime.SpecifyKind(dt, DateTimeKind.Unspecified);
 
             if (value is double d)
             {
-                try
-                {
-                    var od = DateTime.FromOADate(d);
-                    return DateTime.SpecifyKind(od, DateTimeKind.Unspecified);
-                }
-                catch
-                {
-                    return null;
-                }
+                try { return DateTime.SpecifyKind(DateTime.FromOADate(d), DateTimeKind.Unspecified); }
+                catch { return null; }
             }
 
             var s = value.ToString()?.Trim();
@@ -288,9 +350,7 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
 
             if (DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed) ||
                 DateTime.TryParse(s, CultureInfo.CurrentCulture, DateTimeStyles.None, out parsed))
-            {
                 return DateTime.SpecifyKind(parsed, DateTimeKind.Unspecified);
-            }
 
             return null;
         }
@@ -313,9 +373,7 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
 
             if (!decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var outDec) &&
                 !decimal.TryParse(s, NumberStyles.Any, CultureInfo.CurrentCulture, out outDec))
-            {
                 throw new ArgumentException($"invalid numeric value for column '{column}': {s}");
-            }
 
             return outDec;
         }
@@ -332,7 +390,8 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
         return string.IsNullOrWhiteSpace(text) ? null : text;
     }
 
-    private async Task ExecuteImportAsync(DataTable me2n, DataTable me5a, DataTable zmm, CancellationToken ct)
+    private async Task ExecuteImportAsync(
+        DataTable me2n, DataTable me5a, DataTable zmm, CancellationToken ct)
     {
         try
         {
@@ -347,23 +406,16 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
                 SP_PURCHASE_ORDER_TRANSACTION_LOAD,
                 p,
                 commandType: CommandType.StoredProcedure,
-                cancellationToken: ct
-            ));
+                cancellationToken: ct));
         }
         catch (SqlException ex)
         {
-            var inputInfo =
-                $"ME2N rows={me2n?.Rows.Count ?? 0}, cols={me2n?.Columns.Count ?? 0}; " +
-                $"ME5A rows={me5a?.Rows.Count ?? 0}, cols={me5a?.Columns.Count ?? 0}; " +
-                $"ZMM rows={zmm?.Rows.Count ?? 0}, cols={zmm?.Columns.Count ?? 0}";
-
+            var info = BuildInputInfo(me2n, me5a, zmm);
             throw new Exception(
                 $"Import failed (SQL). SP={SP_PURCHASE_ORDER_TRANSACTION_LOAD}. " +
-                $"UDTs=[{UDT_ME2N},{UDT_ME5A},{UDT_ZMM}]. {inputInfo}. " +
+                $"UDTs=[{UDT_ME2N},{UDT_ME5A},{UDT_ZMM}]. {info}. " +
                 $"SQL#{ex.Number} State={ex.State} Proc={ex.Procedure} Line={ex.LineNumber}. " +
-                $"Message={ex.Message}",
-                ex
-            );
+                $"Message={ex.Message}", ex);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -371,15 +423,14 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
         }
         catch (Exception ex)
         {
-            var inputInfo =
-                $"ME2N rows={me2n?.Rows.Count ?? 0}, cols={me2n?.Columns.Count ?? 0}; " +
-                $"ME5A rows={me5a?.Rows.Count ?? 0}, cols={me5a?.Columns.Count ?? 0}; " +
-                $"ZMM rows={zmm?.Rows.Count ?? 0}, cols={zmm?.Columns.Count ?? 0}";
-
+            var info = BuildInputInfo(me2n, me5a, zmm);
             throw new Exception(
-                $"Import failed. SP={SP_PURCHASE_ORDER_TRANSACTION_LOAD}. {inputInfo}. Message={ex.Message}",
-                ex
-            );
+                $"Import failed. SP={SP_PURCHASE_ORDER_TRANSACTION_LOAD}. {info}. Message={ex.Message}", ex);
         }
     }
+
+    private static string BuildInputInfo(DataTable? me2n, DataTable? me5a, DataTable? zmm) =>
+        $"ME2N rows={me2n?.Rows.Count ?? 0}, cols={me2n?.Columns.Count ?? 0}; " +
+        $"ME5A rows={me5a?.Rows.Count ?? 0}, cols={me5a?.Columns.Count ?? 0}; " +
+        $"ZMM  rows={zmm?.Rows.Count ?? 0}, cols={zmm?.Columns.Count ?? 0}";
 }
