@@ -1,12 +1,25 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { format } from 'date-fns';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { format } from "date-fns";
 
-import { Card } from '../ui/card';
-import { Button } from '../ui/button';
-import { Input } from '../ui/input';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
-import { Badge } from '../ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
+import { Card } from "../ui/card";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../ui/table";
+import { Badge } from "../ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -15,15 +28,21 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from '../ui/dialog';
-import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
-import { Checkbox } from '../ui/checkbox';
-import { Label } from '../ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { Textarea } from '../ui/textarea';
-import { Alert, AlertDescription } from '../ui/alert';
-import { Calendar as CalendarComponent } from '../ui/calendar';
-import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
+} from "../ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { Checkbox } from "../ui/checkbox";
+import { Label } from "../ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
+import { Textarea } from "../ui/textarea";
+import { Alert, AlertDescription } from "../ui/alert";
+import { Calendar as CalendarComponent } from "../ui/calendar";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import {
   Search,
   Upload,
@@ -46,11 +65,11 @@ import {
   Calendar,
   CalendarDays,
   Info,
-} from 'lucide-react';
-import * as XLSX from 'xlsx';
-import { toast } from 'sonner';
-import { ScrollArea } from '../ui/scroll-area';
-import { Separator } from '../ui/separator';
+} from "lucide-react";
+import * as XLSX from "xlsx";
+import { toast } from "sonner";
+import { ScrollArea } from "../ui/scroll-area";
+import { Separator } from "../ui/separator";
 import {
   Pagination,
   PaginationContent,
@@ -59,32 +78,32 @@ import {
   PaginationNext,
   PaginationPrevious,
   PaginationEllipsis,
-} from '../ui/pagination';
+} from "../ui/pagination";
 
-import type { User } from './Login';
-import { PurchaseOrderDetail } from './PurchaseOrderDetail';
-import { API } from '../../config';
+import type { User } from "./Login";
+import { PurchaseOrderDetail } from "./PurchaseOrderDetail";
+import { API } from "../../config";
 
 import {
   getAuthSession,
   getAccessToken,
   isVendorSession,
   redirectToLoginExpired,
-} from '../../utils/authSession';
+} from "../../utils/authSession";
 
 // ================== Types ==================
 interface PurchaseOrderProps {
   user: User;
 }
 
-type StatusTab = 'all' | 'created' | 'wip' | 'delivery' | 'cancel' | 'received';
-type AttentionFilter = 'updates' | 'delay' | null;
-type UpdateScheduleStatus = 'yes' | 'no' | '';
+type StatusTab = "all" | "created" | "wip" | "delivery" | "cancel" | "received";
+type AttentionFilter = "updates" | "delay" | null;
+type UpdateScheduleStatus = "yes" | "no" | "";
 
-type AttentionRaw = number | 'Need Update' | 'Delay' | null | undefined;
+type AttentionRaw = number | "Need Update" | "Delay" | null | undefined;
 type AttentionNorm = 0 | 1 | 2;
 type OrderKey = string | number;
-type UploadFileType = 'ME2N' | 'ME5A' | 'ZMM013R';
+type UploadFileType = "ME2N" | "ME5A" | "ZMM013R";
 
 export interface PurchaseOrderItem {
   id?: OrderKey | null;
@@ -143,29 +162,29 @@ interface PurchaseOrderPagination {
 }
 
 type ColumnKey =
-  | 'purchaseRequisition'
-  | 'itemOfRequisition'
-  | 'purchasingDocument'
-  | 'item'
-  | 'documentDate'
-  | 'deliveryDate'
-  | 'etaDate'
-  | 'purchasingDocType'
-  | 'purchasingGroup'
-  | 'shortText'
-  | 'material'
-  | 'qtyOrder'
-  | 'nameOfSupplier'
-  | 'quantityReceived'
-  | 'stillToBeDelivered'
-  | 'plant'
-  | 'storageLocation'
-  | 'order'
-  | 'changedOn'
-  | 'grCreatedDate'
-  | 'remarks'
-  | 'reEtaDate'
-  | 'attention';
+  | "purchaseRequisition"
+  | "itemOfRequisition"
+  | "purchasingDocument"
+  | "item"
+  | "documentDate"
+  | "deliveryDate"
+  | "etaDate"
+  | "purchasingDocType"
+  | "purchasingGroup"
+  | "shortText"
+  | "material"
+  | "qtyOrder"
+  | "nameOfSupplier"
+  | "quantityReceived"
+  | "stillToBeDelivered"
+  | "plant"
+  | "storageLocation"
+  | "order"
+  | "changedOn"
+  | "grCreatedDate"
+  | "remarks"
+  | "reEtaDate"
+  | "attention";
 
 type ColumnVis = Record<ColumnKey, boolean>;
 type AnyObj = Record<string, any>;
@@ -193,24 +212,26 @@ type AppliedAdvancedFilters = {
 };
 
 // ================== Constants / Helpers ==================
-const STATUS_TAB_TO_PARAM: Partial<Record<Exclude<StatusTab, 'all'>, string>> = {
-  created: 'submitted',
-  wip: 'workInProgress',
-  delivery: 'onDelivery',
-  cancel: 'cancel',
-  received: 'received',
-};
+const STATUS_TAB_TO_PARAM: Partial<Record<Exclude<StatusTab, "all">, string>> =
+  {
+    created: "submitted",
+    wip: "workInProgress",
+    delivery: "onDelivery",
+    cancel: "cancel",
+    received: "received",
+  };
 
 const ATTENTION_UI_TO_BACKEND: Record<Exclude<AttentionFilter, null>, 1 | 2> = {
   updates: 1,
   delay: 2,
 };
 
-const ALLOWED_EXCEL_EXTENSIONS = ['.xlsx', '.xls'];
+const ALLOWED_EXCEL_EXTENSIONS = [".xlsx", ".xls"];
 
 const toArray = (v: any): any[] => (Array.isArray(v) ? v : v ? [v] : []);
 const clampUploadProgress = (value: number) => Math.max(0, Math.min(99, value));
-const trim = (v: unknown): string => (v === null || v === undefined ? '' : String(v).trim());
+const trim = (v: unknown): string =>
+  v === null || v === undefined ? "" : String(v).trim();
 
 const parseServerDate = (value?: string | number | null): Date | undefined => {
   const s = trim(value);
@@ -234,12 +255,14 @@ const addDaysDateOnly = (date: Date, days: number): Date => {
 const diffDaysDateOnly = (later: Date, earlier: Date): number => {
   const laterOnly = startOfDay(later);
   const earlierOnly = startOfDay(earlier);
-  return Math.ceil((laterOnly.getTime() - earlierOnly.getTime()) / (1000 * 60 * 60 * 24));
+  return Math.ceil(
+    (laterOnly.getTime() - earlierOnly.getTime()) / (1000 * 60 * 60 * 24),
+  );
 };
 
 const safeDateOnly = (v: unknown): string | null => {
   const d = parseServerDate(v as string | number | null | undefined);
-  return d ? format(d, 'yyyy-MM-dd') : null;
+  return d ? format(d, "yyyy-MM-dd") : null;
 };
 
 const getDaysUntilDelivery = (value?: string | null): number | null => {
@@ -247,22 +270,26 @@ const getDaysUntilDelivery = (value?: string | null): number | null => {
   if (!target) return null;
 
   const startToday = todayStart();
-  const startTarget = new Date(target.getFullYear(), target.getMonth(), target.getDate());
+  const startTarget = new Date(
+    target.getFullYear(),
+    target.getMonth(),
+    target.getDate(),
+  );
 
   const diffMs = startTarget.getTime() - startToday.getTime();
   return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 };
 
 const getAuthToken = (): string => {
-  const local = localStorage.getItem('accessToken');
+  const local = localStorage.getItem("accessToken");
   const sessionToken = getAccessToken();
-  return local || sessionToken || '';
+  return local || sessionToken || "";
 };
 
 const buildAuthHeaders = (): HeadersInit => {
   const token = getAuthToken();
   return {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 };
@@ -272,7 +299,7 @@ const fetchWithAuth = async (input: RequestInfo | URL, init?: RequestInit) => {
 
   if (res.status === 401) {
     redirectToLoginExpired();
-    throw new Error('Session expired');
+    throw new Error("Session expired");
   }
 
   return res;
@@ -283,7 +310,13 @@ const parseErrorResponse = async (res: Response): Promise<string> => {
 
   try {
     const json = text ? JSON.parse(text) : {};
-    return json.message || json.Message || json.error || json.title || `HTTP ${res.status}`;
+    return (
+      json.message ||
+      json.Message ||
+      json.error ||
+      json.title ||
+      `HTTP ${res.status}`
+    );
   } catch {
     return text || `HTTP ${res.status}`;
   }
@@ -291,25 +324,34 @@ const parseErrorResponse = async (res: Response): Promise<string> => {
 
 const normalizeItemId = (it: any): OrderKey | null => {
   const v = it?.id ?? it?.ID ?? it?.Id ?? null;
-  if (v === null || v === undefined || v === '') return null;
+  if (v === null || v === undefined || v === "") return null;
   return v as OrderKey;
 };
 
 const getOrderKey = (o: PurchaseOrderItem): OrderKey =>
-  o.id !== null && o.id !== undefined && o.id !== '' ? o.id : o.purchasingDocument;
+  o.id !== null && o.id !== undefined && o.id !== ""
+    ? o.id
+    : o.purchasingDocument;
 
 function unwrapPOPayload(json: AnyObj): {
   summary: PurchaseOrderSummary | null;
   pagination: PurchaseOrderPagination | null;
   items: PurchaseOrderItem[];
 } {
-  const lvl1 = (json?.data ?? json?.Data ?? json?.payload ?? json?.result ?? json) as AnyObj;
+  const lvl1 = (json?.data ??
+    json?.Data ??
+    json?.payload ??
+    json?.result ??
+    json) as AnyObj;
   const lvl2 = (lvl1?.Data ?? lvl1?.data ?? lvl1) as AnyObj;
 
-  const summary = (lvl2?.summary ?? lvl2?.Summary ?? null) as PurchaseOrderSummary | null;
+  const summary = (lvl2?.summary ??
+    lvl2?.Summary ??
+    null) as PurchaseOrderSummary | null;
 
-  const paginationFromNode =
-    (lvl2?.pagination ?? lvl2?.Pagination ?? null) as PurchaseOrderPagination | null;
+  const paginationFromNode = (lvl2?.pagination ??
+    lvl2?.Pagination ??
+    null) as PurchaseOrderPagination | null;
 
   const paginationFromSummary = summary
     ? {
@@ -335,23 +377,23 @@ function unwrapPOPayload(json: AnyObj): {
     lvl2?.List ??
     [];
 
-  const items = (Array.isArray(itemsRaw) ? itemsRaw : toArray(itemsRaw)) as PurchaseOrderItem[];
+  const items = (
+    Array.isArray(itemsRaw) ? itemsRaw : toArray(itemsRaw)
+  ) as PurchaseOrderItem[];
 
   const normalizedItems = items.map((x: any) => ({
     ...x,
     id: normalizeItemId(x),
     isScheduled: x?.isScheduled ?? x?.IsScheduled ?? x?.is_scheduled ?? null,
     isApproveReETA:
-      x?.isApproveReETA ??
-      x?.IsApproveReETA ??
-      x?.is_approve_re_eta ??
-      null,
-    deliveryDate: x?.deliveryDate ?? x?.DeliveryDate ?? x?.['Delivery Date'] ?? null,
-    etaDate: x?.etaDate ?? x?.ETADate ?? x?.EtaDate ?? x?.['ETA Date'] ?? null,
+      x?.isApproveReETA ?? x?.IsApproveReETA ?? x?.is_approve_re_eta ?? null,
+    deliveryDate:
+      x?.deliveryDate ?? x?.DeliveryDate ?? x?.["Delivery Date"] ?? null,
+    etaDate: x?.etaDate ?? x?.ETADate ?? x?.EtaDate ?? x?.["ETA Date"] ?? null,
     qtyOrder:
       x?.qtyOrder ??
       x?.QtyOrder ??
-      x?.['Qty Order'] ??
+      x?.["Qty Order"] ??
       x?.quantityOrder ??
       x?.QuantityOrder ??
       x?.orderQty ??
@@ -360,7 +402,7 @@ function unwrapPOPayload(json: AnyObj): {
     reEtaDate:
       x?.reEtaDate ??
       x?.ReEtaDate ??
-      x?.['Re-ETA Date'] ??
+      x?.["Re-ETA Date"] ??
       x?.latestReEtaDate ??
       x?.LatestReEtaDate ??
       x?.proposedETA ??
@@ -372,7 +414,11 @@ function unwrapPOPayload(json: AnyObj): {
 }
 
 function unwrapPOMasterPayload(json: AnyObj): PurchaseOrderMasterResponse {
-  const lvl1 = (json?.data ?? json?.Data ?? json?.payload ?? json?.result ?? json) as AnyObj;
+  const lvl1 = (json?.data ??
+    json?.Data ??
+    json?.payload ??
+    json?.result ??
+    json) as AnyObj;
   const lvl2 = (lvl1?.Data ?? lvl1?.data ?? lvl1) as AnyObj;
 
   const normalizeList = (rows: any): MasterOption[] => {
@@ -380,8 +426,8 @@ function unwrapPOMasterPayload(json: AnyObj): PurchaseOrderMasterResponse {
 
     return arr
       .map((x: any) => ({
-        value: String(x?.value ?? x?.Value ?? '').trim(),
-        text: String(x?.text ?? x?.Text ?? x?.value ?? x?.Value ?? '').trim(),
+        value: String(x?.value ?? x?.Value ?? "").trim(),
+        text: String(x?.text ?? x?.Text ?? x?.value ?? x?.Value ?? "").trim(),
       }))
       .filter((x: MasterOption) => x.value);
   };
@@ -392,16 +438,16 @@ function unwrapPOMasterPayload(json: AnyObj): PurchaseOrderMasterResponse {
     listLocation: normalizeList(lvl2?.listLocation ?? lvl2?.ListLocation),
     listDocType: normalizeList(lvl2?.listDocType ?? lvl2?.ListDocType),
     listPurchasingGroup: normalizeList(
-      lvl2?.listPurchasingGroup ?? lvl2?.ListPurchasingGroup
+      lvl2?.listPurchasingGroup ?? lvl2?.ListPurchasingGroup,
     ),
   };
 }
 
 const normalizeAttention = (v: AttentionRaw): AttentionNorm => {
   if (v === 1 || v === 2) return v;
-  const s = (v ?? '').toString().trim().toLowerCase();
-  if (s === 'need update') return 1;
-  if (s === 'delay') return 2;
+  const s = (v ?? "").toString().trim().toLowerCase();
+  if (s === "need update") return 1;
+  if (s === "delay") return 2;
   return 0;
 };
 
@@ -438,95 +484,103 @@ const parseDdMmmYyyy = (s?: string | null): Date | null => {
 
 const diffDaysFromToday = (date: Date): number => {
   const now = new Date();
-  const a = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const b = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const a = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  ).getTime();
+  const b = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+  ).getTime();
   return Math.round((b - a) / 86400000);
 };
 
 const mapBackendStatusToDisplay = (status: string): string => {
-  switch ((status || '').trim()) {
-    case 'Submitted':
-      return 'PO Submitted';
-    case 'Work In Progress':
-      return 'Work in Progress';
-    case 'On Delivery':
-      return 'On Delivery';
-    case 'Cancel':
-      return 'Cancel';
-    case 'Partially Received':
-    case 'Fully Received':
-      return 'Received';
+  switch ((status || "").trim()) {
+    case "Submitted":
+      return "PO Submitted";
+    case "Work In Progress":
+      return "Work in Progress";
+    case "On Delivery":
+      return "On Delivery";
+    case "Cancel":
+      return "Cancel";
+    case "Partially Received":
+    case "Fully Received":
+      return "Received";
     default:
-      return status || '-';
+      return status || "-";
   }
 };
 
 const mapDisplayStatusToBackend = (status: string): string | null => {
-  const normalized = (status || '').trim().toLowerCase();
+  const normalized = (status || "").trim().toLowerCase();
 
   switch (normalized) {
-    case 'po submitted':
-    case 'submitted':
-      return 'submitted';
-    case 'work in progress':
-      return 'workInProgress';
-    case 'on delivery':
-      return 'onDelivery';
-    case 'cancel':
-      return 'cancel';
-    case 'received':
-      return 'received';
+    case "po submitted":
+    case "submitted":
+      return "submitted";
+    case "work in progress":
+      return "workInProgress";
+    case "on delivery":
+      return "onDelivery";
+    case "cancel":
+      return "cancel";
+    case "received":
+      return "received";
     default:
       return null;
   }
 };
 
 const isReceivedBackendStatus = (status: string): boolean => {
-  const s = (status || '').trim();
-  return s === 'Partially Received' || s === 'Fully Received';
+  const s = (status || "").trim();
+  return s === "Partially Received" || s === "Fully Received";
 };
 
 const statusColor = (displayStatus: string) => {
   switch (displayStatus) {
-    case 'PO Submitted':
-      return '#ED832D';
-    case 'Work in Progress':
-      return '#5C8CB6';
-    case 'On Delivery':
-      return '#008383';
-    case 'Cancel':
-      return '#DC2626';
-    case 'Received':
-      return '#6AA75D';
+    case "PO Submitted":
+      return "#ED832D";
+    case "Work in Progress":
+      return "#5C8CB6";
+    case "On Delivery":
+      return "#008383";
+    case "Cancel":
+      return "#DC2626";
+    case "Received":
+      return "#6AA75D";
     default:
-      return '#014357';
+      return "#014357";
   }
 };
 
 const getInitialAttentionFilterFromQuery = (): AttentionFilter => {
-  if (typeof window === 'undefined') return null;
+  if (typeof window === "undefined") return null;
 
   const params = new URLSearchParams(window.location.search);
-  const attraction = params.get('attraction');
+  const attraction = params.get("attraction");
 
-  if (attraction === '1') return 'updates';
-  if (attraction === '2') return 'delay';
+  if (attraction === "1") return "updates";
+  if (attraction === "2") return "delay";
 
   return null;
 };
 
 const syncAttractionQuery = (value: 1 | 2 | null) => {
-  if (typeof window === 'undefined') return;
+  if (typeof window === "undefined") return;
 
   const url = new URL(window.location.href);
 
   if (value === 1 || value === 2) {
-    url.searchParams.set('attraction', String(value));
+    url.searchParams.set("attraction", String(value));
   } else {
-    url.searchParams.delete('attraction');
+    url.searchParams.delete("attraction");
   }
 
-  window.history.replaceState({}, '', url.toString());
+  window.history.replaceState({}, "", url.toString());
 };
 
 const vendorColumns: ColumnVis = {
@@ -581,34 +635,34 @@ const internalColumns: ColumnVis = {
   attention: true,
 };
 
-const initialColumnsForRole = (role: User['role']): ColumnVis =>
-  role === 'vendor' ? vendorColumns : internalColumns;
+const initialColumnsForRole = (role: User["role"]): ColumnVis =>
+  role === "vendor" ? vendorColumns : internalColumns;
 
-const columnLabel = (k: ColumnKey, role: User['role']) => {
+const columnLabel = (k: ColumnKey, role: User["role"]) => {
   const map: Record<ColumnKey, string> = {
-    purchaseRequisition: 'Purchase Requisition',
-    itemOfRequisition: 'Item of Requisition',
-    purchasingDocument: 'Purchasing Document',
-    item: 'Item',
-    documentDate: 'Document Date',
-    deliveryDate: 'Delivery Date',
-    etaDate: 'ETA Date',
-    purchasingDocType: 'Purchasing Doc. Type',
-    purchasingGroup: 'Purchasing Group',
-    shortText: 'Short Text',
-    material: 'Material',
-    qtyOrder: 'Qty Order',
-    nameOfSupplier: 'Name of Supplier',
-    quantityReceived: 'Qty Received',
-    stillToBeDelivered: 'Still to be Delivered',
-    plant: 'Plant',
-    storageLocation: 'Storage Location',
-    order: 'Order',
-    changedOn: role === 'vendor' ? 'Last Updated' : 'Changed On',
-    grCreatedDate: 'GR Created Date',
-    remarks: 'Remarks',
-    reEtaDate: 'Re-ETA Date',
-    attention: 'Attention',
+    purchaseRequisition: "Purchase Requisition",
+    itemOfRequisition: "Item of Requisition",
+    purchasingDocument: "Purchasing Document",
+    item: "Item",
+    documentDate: "Document Date",
+    deliveryDate: "Delivery Date",
+    etaDate: "ETA Date",
+    purchasingDocType: "Purchasing Doc. Type",
+    purchasingGroup: "Purchasing Group",
+    shortText: "Short Text",
+    material: "Material",
+    qtyOrder: "Qty Order",
+    nameOfSupplier: "Name of Supplier",
+    quantityReceived: "Qty Received",
+    stillToBeDelivered: "Still to be Delivered",
+    plant: "Plant",
+    storageLocation: "Storage Location",
+    order: "Order",
+    changedOn: role === "vendor" ? "Last Updated" : "Changed On",
+    grCreatedDate: "GR Created Date",
+    remarks: "Remarks",
+    reEtaDate: "Re-ETA Date",
+    attention: "Attention",
   };
   return map[k];
 };
@@ -647,38 +701,50 @@ const isExcelFile = (file: File): boolean => {
 };
 
 const dedupeStrings = (arr: (string | null | undefined)[]) =>
-  Array.from(new Set(arr.filter(Boolean).map((v) => String(v).trim()).filter(Boolean)));
+  Array.from(
+    new Set(
+      arr
+        .filter(Boolean)
+        .map((v) => String(v).trim())
+        .filter(Boolean),
+    ),
+  );
 
 const normalizeDisplayStatusOptions = (rows: MasterOption[]): string[] => {
   const mapped = rows.map((x) => mapBackendStatusToDisplay(x.text || x.value));
   return dedupeStrings(mapped);
 };
 
-function RequiredDeliveryDateCard({ deliveryDateValue }: { deliveryDateValue?: string | null }) {
+function RequiredDeliveryDateCard({
+  deliveryDateValue,
+}: {
+  deliveryDateValue?: string | null;
+}) {
   const deliveryDate = parseServerDate(deliveryDateValue);
   const daysLeft = getDaysUntilDelivery(deliveryDateValue);
 
-  const isOverdue = typeof daysLeft === 'number' && daysLeft < 0;
-  const isUrgent = typeof daysLeft === 'number' && daysLeft >= 0 && daysLeft <= 7;
+  const isOverdue = typeof daysLeft === "number" && daysLeft < 0;
+  const isUrgent =
+    typeof daysLeft === "number" && daysLeft >= 0 && daysLeft <= 7;
 
   return (
     <div
       className="mb-4 flex items-start gap-3 rounded-lg p-4"
       style={{
-        backgroundColor: 'rgba(1, 67, 87, 0.05)',
-        border: '1px solid rgba(1, 67, 87, 0.12)',
+        backgroundColor: "rgba(1, 67, 87, 0.05)",
+        border: "1px solid rgba(1, 67, 87, 0.12)",
       }}
     >
       <div
         className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
-        style={{ backgroundColor: '#014357' }}
+        style={{ backgroundColor: "#014357" }}
       >
         <CalendarDays className="h-5 w-5 text-white" />
       </div>
 
       <div className="min-w-0 flex-1">
         <div className="mb-1 flex items-center gap-2">
-          <Label className="text-sm" style={{ color: '#014357' }}>
+          <Label className="text-sm" style={{ color: "#014357" }}>
             Required Delivery Date
           </Label>
 
@@ -690,34 +756,35 @@ function RequiredDeliveryDateCard({ deliveryDateValue }: { deliveryDateValue?: s
             </TooltipTrigger>
             <TooltipContent>
               <p className="max-w-[220px] text-xs">
-                This is the buyer&apos;s requested delivery date. Please plan your ETD and ETA accordingly.
+                This is the buyer&apos;s requested delivery date. Please plan
+                your ETD and ETA accordingly.
               </p>
             </TooltipContent>
           </Tooltip>
         </div>
 
-        <p className="text-lg font-medium" style={{ color: '#014357' }}>
-          {deliveryDate ? format(deliveryDate, 'EEEE, MMMM dd, yyyy') : '-'}
+        <p className="text-lg font-medium" style={{ color: "#014357" }}>
+          {deliveryDate ? format(deliveryDate, "EEEE, MMMM dd, yyyy") : "-"}
         </p>
 
-        {typeof daysLeft === 'number' && (
+        {typeof daysLeft === "number" && (
           <div className="mt-1 flex items-center gap-1.5">
             <Clock
               className="h-3.5 w-3.5"
               style={{
-                color: isOverdue ? '#DC2626' : isUrgent ? '#ED832D' : '#6AA75D',
+                color: isOverdue ? "#DC2626" : isUrgent ? "#ED832D" : "#6AA75D",
               }}
             />
             <span
               className="text-sm"
               style={{
-                color: isOverdue ? '#DC2626' : isUrgent ? '#ED832D' : '#6AA75D',
+                color: isOverdue ? "#DC2626" : isUrgent ? "#ED832D" : "#6AA75D",
               }}
             >
               {isOverdue
                 ? `${Math.abs(daysLeft)} days overdue`
                 : daysLeft === 0
-                  ? 'Delivery due today'
+                  ? "Delivery due today"
                   : `${daysLeft} days remaining`}
             </span>
           </div>
@@ -742,23 +809,60 @@ function UploadFileField({
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onClear: () => void;
 }) {
+  const [isDragging, setIsDragging] = React.useState(false);
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!disabled) setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    if (disabled) return;
+
+    const dropped = e.dataTransfer.files?.[0];
+    if (!dropped) return;
+
+    const syntheticEvent = {
+      target: { files: e.dataTransfer.files, value: dropped.name },
+    } as unknown as React.ChangeEvent<HTMLInputElement>;
+    onChange(syntheticEvent);
+  };
+
+  const handleClick = () => {
+    if (!disabled) inputRef.current?.click();
+  };
+
   return (
     <div className="space-y-2">
-      <Label>{label}</Label>
+      <Label style={{ color: "#014357", fontWeight: 600 }}>{label}</Label>
 
-      <Input
+      <input
         ref={inputRef}
         type="file"
         accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
         onChange={onChange}
         disabled={disabled}
+        className="hidden"
       />
 
-      {file && (
-        <div className="mt-1 flex items-center justify-between rounded-md border bg-slate-50 px-3 py-2">
-          <div className="flex items-center gap-2">
-            <FileSpreadsheet className="h-4 w-4" style={{ color: '#014357' }} />
-            <div className="flex flex-col">
+      {file ? (
+        <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+          <div className="flex items-center gap-2 min-w-0">
+            <FileSpreadsheet
+              className="h-5 w-5 shrink-0"
+              style={{ color: "#014357" }}
+            />
+            <div className="flex flex-col min-w-0">
               <span className="text-xs font-medium text-gray-800 truncate max-w-[220px]">
                 {file.name}
               </span>
@@ -767,17 +871,47 @@ function UploadFileField({
               </span>
             </div>
           </div>
-
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="h-6 w-6"
+            className="h-6 w-6 shrink-0 ml-2"
             disabled={disabled}
             onClick={onClear}
           >
             <X className="h-3 w-3" />
           </Button>
+        </div>
+      ) : (
+        <div
+          onClick={handleClick}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-6 text-center transition-colors"
+          style={{
+            borderColor: isDragging ? "#014357" : "#CBD5E1",
+            backgroundColor: isDragging ? "rgba(1, 67, 87, 0.04)" : "#F8FAFC",
+            cursor: disabled ? "not-allowed" : "pointer",
+            opacity: disabled ? 0.6 : 1,
+          }}
+        >
+          <Upload
+            className="h-7 w-7"
+            style={{ color: isDragging ? "#014357" : "#94A3B8" }}
+          />
+          <div>
+            <p className="text-sm font-medium" style={{ color: "#014357" }}>
+              Drag & drop your file here
+            </p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              or{" "}
+              <span className="underline" style={{ color: "#014357" }}>
+                browse to upload
+              </span>
+            </p>
+          </div>
+          <p className="text-[11px] text-gray-400">.xlsx or .xls only</p>
         </div>
       )}
     </div>
@@ -788,60 +922,69 @@ function UploadFileField({
 export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const [selectedOrderId, setSelectedOrderId] = useState<OrderKey | null>(null);
 
-  const [activeTab, setActiveTab] = useState<StatusTab>('all');
+  const [activeTab, setActiveTab] = useState<StatusTab>("all");
   const [specialFilter, setSpecialFilter] = useState<AttentionFilter>(() =>
-    getInitialAttentionFilterFromQuery()
+    getInitialAttentionFilterFromQuery(),
   );
 
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
 
   const [appliedFilters, setAppliedFilters] = useState<AppliedAdvancedFilters>({
-    status: '',
-    storageLocation: '',
-    plant: '',
-    purchasingGroup: '',
-    supplier: '',
-    purchasingDocType: '',
+    status: "",
+    storageLocation: "",
+    plant: "",
+    purchasingGroup: "",
+    supplier: "",
+    purchasingDocType: "",
   });
 
   const [draftFilters, setDraftFilters] = useState<AppliedAdvancedFilters>({
-    status: '',
-    storageLocation: '',
-    plant: '',
-    purchasingGroup: '',
-    supplier: '',
-    purchasingDocType: '',
+    status: "",
+    storageLocation: "",
+    plant: "",
+    purchasingGroup: "",
+    supplier: "",
+    purchasingDocType: "",
   });
 
   const [orders, setOrders] = useState<PurchaseOrderItem[]>([]);
   const [summary, setSummary] = useState<PurchaseOrderSummary | null>(null);
-  const [cardSummary, setCardSummary] = useState<PurchaseOrderSummary | null>(null);
-  const [pagination, setPagination] = useState<PurchaseOrderPagination | null>(null);
+  const [cardSummary, setCardSummary] = useState<PurchaseOrderSummary | null>(
+    null,
+  );
+  const [pagination, setPagination] = useState<PurchaseOrderPagination | null>(
+    null,
+  );
 
-  const [masterFilters, setMasterFilters] = useState<PurchaseOrderMasterResponse>({
-    listStatus: [],
-    listPlant: [],
-    listLocation: [],
-    listDocType: [],
-    listPurchasingGroup: [],
-  });
+  const [masterFilters, setMasterFilters] =
+    useState<PurchaseOrderMasterResponse>({
+      listStatus: [],
+      listPlant: [],
+      listLocation: [],
+      listDocType: [],
+      listPurchasingGroup: [],
+    });
   const [loadingMasterFilters, setLoadingMasterFilters] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
-  const [orderToUpdate, setOrderToUpdate] = useState<PurchaseOrderItem | null>(null);
-  const [updateScheduleStatus, setUpdateScheduleStatus] = useState<UpdateScheduleStatus>('');
+  const [orderToUpdate, setOrderToUpdate] = useState<PurchaseOrderItem | null>(
+    null,
+  );
+  const [updateScheduleStatus, setUpdateScheduleStatus] =
+    useState<UpdateScheduleStatus>("");
 
   const [rescheduleDialogOpen, setRescheduleDialogOpen] = useState(false);
-  const [rescheduleTargetOrder, setRescheduleTargetOrder] = useState<PurchaseOrderItem | null>(null);
+  const [rescheduleTargetOrder, setRescheduleTargetOrder] =
+    useState<PurchaseOrderItem | null>(null);
   const [newEtd, setNewEtd] = useState<Date | undefined>(todayStart());
-  const [newLeadtimeDays, setNewLeadtimeDays] = useState('');
-  const [rescheduleReason, setRescheduleReason] = useState('');
+  const [newLeadtimeDays, setNewLeadtimeDays] = useState("");
+  const [rescheduleReason, setRescheduleReason] = useState("");
   const [submittingReschedule, setSubmittingReschedule] = useState(false);
 
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
@@ -850,7 +993,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const [uploadFileZMM013R, setUploadFileZMM013R] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadStatusText, setUploadStatusText] = useState('');
+  const [uploadStatusText, setUploadStatusText] = useState("");
   const fileInputME2NRef = useRef<HTMLInputElement | null>(null);
   const fileInputME5ARef = useRef<HTMLInputElement | null>(null);
   const fileInputZMM013RRef = useRef<HTMLInputElement | null>(null);
@@ -858,12 +1001,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const [submittingUpdate, setSubmittingUpdate] = useState(false);
 
   const [visibleColumns, setVisibleColumns] = useState<ColumnVis>(() =>
-    initialColumnsForRole(user.role)
+    initialColumnsForRole(user.role),
   );
 
   const vendorName = useMemo(() => {
     const s = getAuthSession();
-    return isVendorSession(s) ? s.vendorName : '';
+    return isVendorSession(s) ? s.vendorName : "";
   }, [user.role]);
 
   const toggleColumn = useCallback((column: ColumnKey) => {
@@ -880,41 +1023,44 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     setUploadFileZMM013R(null);
     setUploading(false);
     setUploadProgress(0);
-    setUploadStatusText('');
+    setUploadStatusText("");
 
-    if (fileInputME2NRef.current) fileInputME2NRef.current.value = '';
-    if (fileInputME5ARef.current) fileInputME5ARef.current.value = '';
-    if (fileInputZMM013RRef.current) fileInputZMM013RRef.current.value = '';
+    if (fileInputME2NRef.current) fileInputME2NRef.current.value = "";
+    if (fileInputME5ARef.current) fileInputME5ARef.current.value = "";
+    if (fileInputZMM013RRef.current) fileInputZMM013RRef.current.value = "";
   }, []);
 
   const clearUploadFile = useCallback((type: UploadFileType) => {
     switch (type) {
-      case 'ME2N':
+      case "ME2N":
         setUploadFileME2N(null);
-        if (fileInputME2NRef.current) fileInputME2NRef.current.value = '';
+        if (fileInputME2NRef.current) fileInputME2NRef.current.value = "";
         break;
-      case 'ME5A':
+      case "ME5A":
         setUploadFileME5A(null);
-        if (fileInputME5ARef.current) fileInputME5ARef.current.value = '';
+        if (fileInputME5ARef.current) fileInputME5ARef.current.value = "";
         break;
-      case 'ZMM013R':
+      case "ZMM013R":
         setUploadFileZMM013R(null);
-        if (fileInputZMM013RRef.current) fileInputZMM013RRef.current.value = '';
+        if (fileInputZMM013RRef.current) fileInputZMM013RRef.current.value = "";
         break;
     }
   }, []);
 
   const getIdPoItem = useCallback((order: PurchaseOrderItem | null): string => {
-    if (!order) return '';
-    return order.id !== null && order.id !== undefined && order.id !== ''
+    if (!order) return "";
+    return order.id !== null && order.id !== undefined && order.id !== ""
       ? String(order.id)
-      : String(order.purchasingDocument || '');
+      : String(order.purchasingDocument || "");
   }, []);
 
-  const getOrderRequiredDeliveryDate = useCallback((order: PurchaseOrderItem | null): string | null => {
-    if (!order) return null;
-    return order.reEtaDate || order.deliveryDate || null;
-  }, []);
+  const getOrderRequiredDeliveryDate = useCallback(
+    (order: PurchaseOrderItem | null): string | null => {
+      if (!order) return null;
+      return order.reEtaDate || order.deliveryDate || null;
+    },
+    [],
+  );
 
   const currentEtaForReschedule = useMemo(() => {
     return safeDateOnly(getOrderRequiredDeliveryDate(rescheduleTargetOrder));
@@ -927,51 +1073,63 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     return addDaysDateOnly(newEtd, days);
   }, [newEtd, newLeadtimeDays]);
 
-  const submitPoStatusUpdate = useCallback(async (payload: Record<string, unknown>) => {
-    const res = await fetchWithAuth(API.POSTATUS_UPSERT(), {
-      method: 'POST',
-      headers: buildAuthHeaders(),
-      body: JSON.stringify(payload),
-    });
+  const submitPoStatusUpdate = useCallback(
+    async (payload: Record<string, unknown>) => {
+      const res = await fetchWithAuth(API.POSTATUS_UPSERT(), {
+        method: "POST",
+        headers: buildAuthHeaders(),
+        body: JSON.stringify(payload),
+      });
 
-    let data: any = null;
-    try {
-      data = await res.json();
-    } catch {
-      data = null;
-    }
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
 
-    if (!res.ok) {
-      throw new Error(
-        data?.message || data?.Message || data?.title || 'Failed to update PO status'
-      );
-    }
+      if (!res.ok) {
+        throw new Error(
+          data?.message ||
+            data?.Message ||
+            data?.title ||
+            "Failed to update PO status",
+        );
+      }
 
-    return data;
-  }, []);
+      return data;
+    },
+    [],
+  );
 
-  const submitReEtaCreate = useCallback(async (payload: Record<string, unknown>) => {
-    const res = await fetchWithAuth(API.REETA_CREATE(), {
-      method: 'POST',
-      headers: buildAuthHeaders(),
-      body: JSON.stringify(payload),
-    });
+  const submitReEtaCreate = useCallback(
+    async (payload: Record<string, unknown>) => {
+      const res = await fetchWithAuth(API.REETA_CREATE(), {
+        method: "POST",
+        headers: buildAuthHeaders(),
+        body: JSON.stringify(payload),
+      });
 
-    let data: any = null;
-    try {
-      data = await res.json();
-    } catch {
-      data = null;
-    }
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
 
-    if (!res.ok) {
-      throw new Error(
-        data?.message || data?.Message || data?.title || 'Failed to create reschedule ETA request'
-      );
-    }
+      if (!res.ok) {
+        throw new Error(
+          data?.message ||
+            data?.Message ||
+            data?.title ||
+            "Failed to create reschedule ETA request",
+        );
+      }
 
-    return data;
-  }, []);
+      return data;
+    },
+    [],
+  );
 
   useEffect(() => {
     if (isFilterOpen) {
@@ -985,64 +1143,66 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       attention: 1 | 2 | null,
       pageNumber: number,
       pageSize: number,
-      filters: AppliedAdvancedFilters
+      filters: AppliedAdvancedFilters,
     ) => {
       const url = new URL(API.SUMMARYPO());
 
       const tabStatusParam =
-        tab === 'all' ? null : STATUS_TAB_TO_PARAM[tab as Exclude<StatusTab, 'all'>] ?? null;
+        tab === "all"
+          ? null
+          : (STATUS_TAB_TO_PARAM[tab as Exclude<StatusTab, "all">] ?? null);
 
       const filterStatusParam =
-        filters.status && filters.status !== 'all'
+        filters.status && filters.status !== "all"
           ? mapDisplayStatusToBackend(filters.status)
           : null;
 
       const effectiveStatusParam = filterStatusParam ?? tabStatusParam;
 
       if (effectiveStatusParam) {
-        url.searchParams.set('status', effectiveStatusParam);
+        url.searchParams.set("status", effectiveStatusParam);
       }
 
       if (attention === 1 || attention === 2) {
-        url.searchParams.set('attention', String(attention));
-        url.searchParams.set('attraction', String(attention));
+        url.searchParams.set("attention", String(attention));
+        url.searchParams.set("attraction", String(attention));
       }
 
-      if (user.role === 'vendor' && vendorName) {
-        url.searchParams.set('vendorName', vendorName);
-      } else if (filters.supplier && filters.supplier !== 'all') {
-        url.searchParams.set('vendorName', filters.supplier);
+      if (user.role === "vendor" && vendorName) {
+        url.searchParams.set("vendorName", vendorName);
+      } else if (filters.supplier && filters.supplier !== "all") {
+        url.searchParams.set("vendorName", filters.supplier);
       }
 
-      if (filters.plant && filters.plant !== 'all') {
-        url.searchParams.set('plant', filters.plant);
+      if (filters.plant && filters.plant !== "all") {
+        url.searchParams.set("plant", filters.plant);
       }
 
-      if (filters.storageLocation && filters.storageLocation !== 'all') {
-        url.searchParams.set('storageLocation', filters.storageLocation);
+      if (filters.storageLocation && filters.storageLocation !== "all") {
+        url.searchParams.set("storageLocation", filters.storageLocation);
       }
 
-      if (filters.purchasingGroup && filters.purchasingGroup !== 'all') {
-        url.searchParams.set('purchasingGroup', filters.purchasingGroup);
+      if (filters.purchasingGroup && filters.purchasingGroup !== "all") {
+        url.searchParams.set("purchasingGroup", filters.purchasingGroup);
       }
 
-      if (filters.purchasingDocType && filters.purchasingDocType !== 'all') {
-        url.searchParams.set('purchasingDocType', filters.purchasingDocType);
+      if (filters.purchasingDocType && filters.purchasingDocType !== "all") {
+        url.searchParams.set("purchasingDocType", filters.purchasingDocType);
       }
 
-      url.searchParams.set('pageNumber', String(pageNumber));
-      url.searchParams.set('pageSize', String(pageSize));
+      url.searchParams.set("pageNumber", String(pageNumber));
+      url.searchParams.set("pageSize", String(pageSize));
 
       return url;
     },
-    [user.role, vendorName]
+    [user.role, vendorName],
   );
 
   const buildCardsUrl = useCallback(() => {
     const url = new URL(API.SUMMARYPO());
 
-    if (user.role === 'vendor' && vendorName) {
-      url.searchParams.set('vendorName', vendorName);
+    if (user.role === "vendor" && vendorName) {
+      url.searchParams.set("vendorName", vendorName);
     }
 
     return url;
@@ -1052,29 +1212,29 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     const url = new URL(API.MASTERPO());
 
     const tabStatusParam =
-      activeTab === 'all'
+      activeTab === "all"
         ? null
-        : STATUS_TAB_TO_PARAM[activeTab as Exclude<StatusTab, 'all'>] ?? null;
+        : (STATUS_TAB_TO_PARAM[activeTab as Exclude<StatusTab, "all">] ?? null);
 
     const filterStatusParam =
-      appliedFilters.status && appliedFilters.status !== 'all'
+      appliedFilters.status && appliedFilters.status !== "all"
         ? mapDisplayStatusToBackend(appliedFilters.status)
         : null;
 
     const effectiveStatusParam = filterStatusParam ?? tabStatusParam;
 
     if (effectiveStatusParam) {
-      url.searchParams.set('status', effectiveStatusParam);
+      url.searchParams.set("status", effectiveStatusParam);
     }
 
     if (currentAttentionParam === 1 || currentAttentionParam === 2) {
-      url.searchParams.set('attention', String(currentAttentionParam));
+      url.searchParams.set("attention", String(currentAttentionParam));
     }
 
-    if (user.role === 'vendor' && vendorName) {
-      url.searchParams.set('vendorName', vendorName);
-    } else if (appliedFilters.supplier && appliedFilters.supplier !== 'all') {
-      url.searchParams.set('vendorName', appliedFilters.supplier);
+    if (user.role === "vendor" && vendorName) {
+      url.searchParams.set("vendorName", vendorName);
+    } else if (appliedFilters.supplier && appliedFilters.supplier !== "all") {
+      url.searchParams.set("vendorName", appliedFilters.supplier);
     }
 
     return url;
@@ -1084,13 +1244,13 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     try {
       const url = buildCardsUrl();
       const res = await fetchWithAuth(url.toString(), {
-        method: 'GET',
+        method: "GET",
         headers: buildAuthHeaders(),
       });
 
       if (!res.ok) {
         const msg = await parseErrorResponse(res);
-        console.error('[PO] cardSummary HTTP error', msg);
+        console.error("[PO] cardSummary HTTP error", msg);
         return;
       }
 
@@ -1098,26 +1258,37 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       const unwrapped = unwrapPOPayload(json);
       setCardSummary(unwrapped.summary ?? null);
     } catch (e: any) {
-      if (e?.message !== 'Session expired') {
-        console.error('[PO] cardSummary fetch failed', e);
+      if (e?.message !== "Session expired") {
+        console.error("[PO] cardSummary fetch failed", e);
       }
     }
   }, [buildCardsUrl]);
 
   const fetchPurchaseOrders = useCallback(
-    async (tab: StatusTab, attention: 1 | 2 | null, pageNumber: number, pageSize: number) => {
+    async (
+      tab: StatusTab,
+      attention: 1 | 2 | null,
+      pageNumber: number,
+      pageSize: number,
+    ) => {
       setLoading(true);
       setLoadError(null);
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 60_000);
 
-      const effectiveTab: StatusTab = attention ? 'all' : tab;
-      const url = buildListUrl(effectiveTab, attention, pageNumber, pageSize, appliedFilters);
+      const effectiveTab: StatusTab = attention ? "all" : tab;
+      const url = buildListUrl(
+        effectiveTab,
+        attention,
+        pageNumber,
+        pageSize,
+        appliedFilters,
+      );
 
       try {
         const res = await fetchWithAuth(url.toString(), {
-          method: 'GET',
+          method: "GET",
           headers: buildAuthHeaders(),
           signal: controller.signal,
         });
@@ -1133,24 +1304,32 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         setPagination(unwrapped.pagination ?? null);
         setOrders(Array.isArray(unwrapped.items) ? unwrapped.items : []);
       } catch (err: any) {
-        if (err?.message === 'Session expired') {
+        if (err?.message === "Session expired") {
           return;
         }
 
-        console.error('[PO] list fetch failed:', err);
-        const isAbort = err?.name === 'AbortError';
+        console.error("[PO] list fetch failed:", err);
+        const isAbort = err?.name === "AbortError";
 
-        setLoadError(isAbort ? 'Request timeout. Please try again.' : 'Failed to load purchase orders');
+        setLoadError(
+          isAbort
+            ? "Request timeout. Please try again."
+            : "Failed to load purchase orders",
+        );
         setSummary(null);
         setOrders([]);
         setPagination(null);
-        toast.error(isAbort ? 'Request timeout' : err?.message || 'Failed to load purchase orders');
+        toast.error(
+          isAbort
+            ? "Request timeout"
+            : err?.message || "Failed to load purchase orders",
+        );
       } finally {
         clearTimeout(timeout);
         setLoading(false);
       }
     },
-    [buildListUrl, appliedFilters]
+    [buildListUrl, appliedFilters],
   );
 
   const fetchMasterFilters = useCallback(async () => {
@@ -1159,7 +1338,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     try {
       const url = buildMasterUrl();
       const res = await fetchWithAuth(url.toString(), {
-        method: 'GET',
+        method: "GET",
         headers: buildAuthHeaders(),
       });
 
@@ -1172,9 +1351,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
       setMasterFilters(data);
     } catch (err: any) {
-      if (err?.message !== 'Session expired') {
-        console.error('[PO] master filters fetch failed', err);
-        toast.error(err?.message || 'Failed to load filter options');
+      if (err?.message !== "Session expired") {
+        console.error("[PO] master filters fetch failed", err);
+        toast.error(err?.message || "Failed to load filter options");
         setMasterFilters({
           listStatus: [],
           listPlant: [],
@@ -1193,8 +1372,19 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   }, [fetchCardSummary]);
 
   useEffect(() => {
-    void fetchPurchaseOrders(activeTab, currentAttentionParam, currentPage, itemsPerPage);
-  }, [activeTab, currentAttentionParam, currentPage, itemsPerPage, fetchPurchaseOrders]);
+    void fetchPurchaseOrders(
+      activeTab,
+      currentAttentionParam,
+      currentPage,
+      itemsPerPage,
+    );
+  }, [
+    activeTab,
+    currentAttentionParam,
+    currentPage,
+    itemsPerPage,
+    fetchPurchaseOrders,
+  ]);
 
   useEffect(() => {
     void fetchMasterFilters();
@@ -1203,23 +1393,35 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const scopedOrders = useMemo(() => {
     let list = orders;
 
-    if (activeTab === 'created') {
-      list = list.filter((o) => mapBackendStatusToDisplay(o.status) === 'PO Submitted');
-    } else if (activeTab === 'wip') {
-      list = list.filter((o) => mapBackendStatusToDisplay(o.status) === 'Work in Progress');
-    } else if (activeTab === 'delivery') {
-      list = list.filter((o) => mapBackendStatusToDisplay(o.status) === 'On Delivery');
-    } else if (activeTab === 'cancel') {
-      list = list.filter((o) => mapBackendStatusToDisplay(o.status) === 'Cancel');
-    } else if (activeTab === 'received') {
+    if (activeTab === "created") {
       list = list.filter(
-        (o) => isReceivedBackendStatus(o.status) || mapBackendStatusToDisplay(o.status) === 'Received'
+        (o) => mapBackendStatusToDisplay(o.status) === "PO Submitted",
+      );
+    } else if (activeTab === "wip") {
+      list = list.filter(
+        (o) => mapBackendStatusToDisplay(o.status) === "Work in Progress",
+      );
+    } else if (activeTab === "delivery") {
+      list = list.filter(
+        (o) => mapBackendStatusToDisplay(o.status) === "On Delivery",
+      );
+    } else if (activeTab === "cancel") {
+      list = list.filter(
+        (o) => mapBackendStatusToDisplay(o.status) === "Cancel",
+      );
+    } else if (activeTab === "received") {
+      list = list.filter(
+        (o) =>
+          isReceivedBackendStatus(o.status) ||
+          mapBackendStatusToDisplay(o.status) === "Received",
       );
     }
 
     if (specialFilter) {
       const attentionValue = ATTENTION_UI_TO_BACKEND[specialFilter];
-      list = list.filter((o) => normalizeAttention(o.attention) === attentionValue);
+      list = list.filter(
+        (o) => normalizeAttention(o.attention) === attentionValue,
+      );
     }
 
     return list;
@@ -1227,20 +1429,38 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
   const filterOptions = useMemo(() => {
     const supplierOptions =
-      user.role !== 'vendor'
-        ? ['all', ...dedupeStrings(scopedOrders.map((o) => o.nameOfSupplier))]
+      user.role !== "vendor"
+        ? ["all", ...dedupeStrings(scopedOrders.map((o) => o.nameOfSupplier))]
         : [];
 
     return {
-      status: ['all', ...normalizeDisplayStatusOptions(masterFilters.listStatus)],
-      storage: ['all', ...dedupeStrings(masterFilters.listLocation.map((x) => x.text || x.value))],
-      plant: ['all', ...dedupeStrings(masterFilters.listPlant.map((x) => x.text || x.value))],
+      status: [
+        "all",
+        ...normalizeDisplayStatusOptions(masterFilters.listStatus),
+      ],
+      storage: [
+        "all",
+        ...dedupeStrings(
+          masterFilters.listLocation.map((x) => x.text || x.value),
+        ),
+      ],
+      plant: [
+        "all",
+        ...dedupeStrings(masterFilters.listPlant.map((x) => x.text || x.value)),
+      ],
       group: [
-        'all',
-        ...dedupeStrings(masterFilters.listPurchasingGroup.map((x) => x.text || x.value)),
+        "all",
+        ...dedupeStrings(
+          masterFilters.listPurchasingGroup.map((x) => x.text || x.value),
+        ),
       ],
       supplier: supplierOptions,
-      docType: ['all', ...dedupeStrings(masterFilters.listDocType.map((x) => x.text || x.value))],
+      docType: [
+        "all",
+        ...dedupeStrings(
+          masterFilters.listDocType.map((x) => x.text || x.value),
+        ),
+      ],
     };
   }, [masterFilters, scopedOrders, user.role]);
 
@@ -1251,25 +1471,27 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       const q = searchQuery.toLowerCase();
       list = list.filter(
         (o) =>
-          (o.purchasingDocument ?? '').toLowerCase().includes(q) ||
-          (o.purchaseRequisition ?? '').toLowerCase().includes(q) ||
-          (o.shortText ?? '').toLowerCase().includes(q) ||
-          (o.nameOfSupplier ?? '').toLowerCase().includes(q) ||
-          (o.material ?? '').toLowerCase().includes(q) ||
-          (o.qtyOrder ?? '').toString().toLowerCase().includes(q) ||
-          (o.etaDate ?? '').toLowerCase().includes(q) ||
-          (o.reEtaDate ?? '').toLowerCase().includes(q) ||
-          mapBackendStatusToDisplay(o.status).toLowerCase().includes(q)
+          (o.purchasingDocument ?? "").toLowerCase().includes(q) ||
+          (o.purchaseRequisition ?? "").toLowerCase().includes(q) ||
+          (o.shortText ?? "").toLowerCase().includes(q) ||
+          (o.nameOfSupplier ?? "").toLowerCase().includes(q) ||
+          (o.material ?? "").toLowerCase().includes(q) ||
+          (o.qtyOrder ?? "").toString().toLowerCase().includes(q) ||
+          (o.etaDate ?? "").toLowerCase().includes(q) ||
+          (o.reEtaDate ?? "").toLowerCase().includes(q) ||
+          mapBackendStatusToDisplay(o.status).toLowerCase().includes(q),
       );
     }
 
     if (
       appliedFilters.status &&
-      appliedFilters.status !== 'all' &&
-      appliedFilters.status === 'Received'
+      appliedFilters.status !== "all" &&
+      appliedFilters.status === "Received"
     ) {
       list = list.filter(
-        (o) => isReceivedBackendStatus(o.status) || mapBackendStatusToDisplay(o.status) === 'Received'
+        (o) =>
+          isReceivedBackendStatus(o.status) ||
+          mapBackendStatusToDisplay(o.status) === "Received",
       );
     }
 
@@ -1278,19 +1500,23 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
   const delayCount = useMemo(() => {
     const v = cardSummary?.PODelay;
-    if (typeof v === 'number') return v;
+    if (typeof v === "number") return v;
     return orders.filter((o) => normalizeAttention(o.attention) === 2).length;
   }, [cardSummary, orders]);
 
   const cancelCount = useMemo(() => {
     const v = summary?.POCancel ?? cardSummary?.POCancel;
-    if (typeof v === 'number') return v;
-    return orders.filter((o) => mapBackendStatusToDisplay(o.status) === 'Cancel').length;
+    if (typeof v === "number") return v;
+    return orders.filter(
+      (o) => mapBackendStatusToDisplay(o.status) === "Cancel",
+    ).length;
   }, [summary, cardSummary, orders]);
 
   const receivedCount = useMemo(() => {
     if (summary) {
-      return (summary.POPartiallyReceived ?? 0) + (summary.POFullyReceived ?? 0);
+      return (
+        (summary.POPartiallyReceived ?? 0) + (summary.POFullyReceived ?? 0)
+      );
     }
 
     return orders.filter((o) => isReceivedBackendStatus(o.status)).length;
@@ -1298,7 +1524,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
   const isServerPagination = pagination !== null;
 
-  const totalOrders = isServerPagination ? pagination.totalFiltered : filteredOrders.length;
+  const totalOrders = isServerPagination
+    ? pagination.totalFiltered
+    : filteredOrders.length;
 
   const totalPages = isServerPagination
     ? Math.max(1, pagination.totalPages)
@@ -1306,7 +1534,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
   const pageOrders = isServerPagination
     ? filteredOrders
-    : filteredOrders.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+    : filteredOrders.slice(
+        (currentPage - 1) * itemsPerPage,
+        currentPage * itemsPerPage,
+      );
 
   const startIndex = totalOrders === 0 ? 0 : (currentPage - 1) * itemsPerPage;
   const endIndex = Math.min(startIndex + pageOrders.length, totalOrders);
@@ -1314,55 +1545,56 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const hasActiveFilters = useMemo(
     () =>
       !!(
-        (appliedFilters.status && appliedFilters.status !== 'all') ||
-        (appliedFilters.storageLocation && appliedFilters.storageLocation !== 'all') ||
-        (appliedFilters.plant && appliedFilters.plant !== 'all') ||
-        (appliedFilters.purchasingGroup && appliedFilters.purchasingGroup !== 'all') ||
-        (user.role !== 'vendor' &&
+        (appliedFilters.status && appliedFilters.status !== "all") ||
+        (appliedFilters.storageLocation &&
+          appliedFilters.storageLocation !== "all") ||
+        (appliedFilters.plant && appliedFilters.plant !== "all") ||
+        (appliedFilters.purchasingGroup &&
+          appliedFilters.purchasingGroup !== "all") ||
+        (user.role !== "vendor" &&
           appliedFilters.supplier &&
-          appliedFilters.supplier !== 'all') ||
-        (appliedFilters.purchasingDocType && appliedFilters.purchasingDocType !== 'all')
+          appliedFilters.supplier !== "all") ||
+        (appliedFilters.purchasingDocType &&
+          appliedFilters.purchasingDocType !== "all")
       ),
-    [user.role, appliedFilters]
+    [user.role, appliedFilters],
   );
 
   const activeFilterCount = useMemo(
     () =>
       [
-        appliedFilters.status && appliedFilters.status !== 'all',
-        appliedFilters.storageLocation && appliedFilters.storageLocation !== 'all',
-        appliedFilters.plant && appliedFilters.plant !== 'all',
-        appliedFilters.purchasingGroup && appliedFilters.purchasingGroup !== 'all',
-        user.role !== 'vendor' && appliedFilters.supplier && appliedFilters.supplier !== 'all',
-        appliedFilters.purchasingDocType && appliedFilters.purchasingDocType !== 'all',
+        appliedFilters.status && appliedFilters.status !== "all",
+        appliedFilters.storageLocation &&
+          appliedFilters.storageLocation !== "all",
+        appliedFilters.plant && appliedFilters.plant !== "all",
+        appliedFilters.purchasingGroup &&
+          appliedFilters.purchasingGroup !== "all",
+        user.role !== "vendor" &&
+          appliedFilters.supplier &&
+          appliedFilters.supplier !== "all",
+        appliedFilters.purchasingDocType &&
+          appliedFilters.purchasingDocType !== "all",
       ].filter(Boolean).length,
-    [user.role, appliedFilters]
+    [user.role, appliedFilters],
   );
 
   const ordersNeedingUpdate = useMemo(() => {
-    if (user.role !== 'vendor') return [];
+    if (user.role !== "vendor") return [];
 
     return filteredOrders
       .filter((o) => {
         const displayStatus = mapBackendStatusToDisplay(o.status);
 
         const isExcludedStatus =
-          displayStatus === 'Received' ||
-          displayStatus === 'Cancel' ||
+          displayStatus === "Received" ||
+          displayStatus === "Cancel" ||
           isReceivedBackendStatus(o.status);
 
-        if (isExcludedStatus) return false;
-        if (o.isScheduled === true) return false;
-
-        const eta = parseDdMmmYyyy(o.reEtaDate);
-        if (!eta) return false;
-
-        const diffDays = diffDaysFromToday(eta);
-        return diffDays >= 0 && diffDays <= 2;
+        return !isExcludedStatus;
       })
       .sort((a, b) => {
-        const da = parseDdMmmYyyy(a.reEtaDate);
-        const db = parseDdMmmYyyy(b.reEtaDate);
+        const da = parseDdMmmYyyy(a.etaDate);
+        const db = parseDdMmmYyyy(b.etaDate);
 
         const va = da ? diffDaysFromToday(da) : 9999;
         const vb = db ? diffDaysFromToday(db) : 9999;
@@ -1383,30 +1615,33 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
   const handleOpenUpdateDialog = useCallback((order: PurchaseOrderItem) => {
     setOrderToUpdate(order);
-    setUpdateScheduleStatus('');
+    setUpdateScheduleStatus("");
     setIsUpdateDialogOpen(true);
   }, []);
 
-  const handleOpenRescheduleDialog = useCallback((order?: PurchaseOrderItem | null) => {
-    const target = order ?? orderToUpdate ?? rescheduleTargetOrder ?? null;
+  const handleOpenRescheduleDialog = useCallback(
+    (order?: PurchaseOrderItem | null) => {
+      const target = order ?? orderToUpdate ?? rescheduleTargetOrder ?? null;
 
-    if (!target) {
-      toast.error('Purchase order not found');
-      return;
-    }
+      if (!target) {
+        toast.error("Purchase order not found");
+        return;
+      }
 
-    setRescheduleTargetOrder(target);
-    setNewEtd(todayStart());
-    setNewLeadtimeDays('');
-    setRescheduleReason('');
-    setRescheduleDialogOpen(true);
-  }, [orderToUpdate, rescheduleTargetOrder]);
+      setRescheduleTargetOrder(target);
+      setNewEtd(todayStart());
+      setNewLeadtimeDays("");
+      setRescheduleReason("");
+      setRescheduleDialogOpen(true);
+    },
+    [orderToUpdate, rescheduleTargetOrder],
+  );
 
   const handleCloseRescheduleDialog = useCallback(() => {
     setRescheduleDialogOpen(false);
     setNewEtd(todayStart());
-    setNewLeadtimeDays('');
-    setRescheduleReason('');
+    setNewLeadtimeDays("");
+    setRescheduleReason("");
   }, []);
 
   const handleSubmitReschedule = useCallback(async () => {
@@ -1414,37 +1649,40 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       const idPoItem = getIdPoItem(rescheduleTargetOrder);
 
       if (!idPoItem) {
-        toast.error('ID PO Item not found.');
+        toast.error("ID PO Item not found.");
         return;
       }
 
       if (!currentEtaForReschedule) {
-        toast.error('Required delivery date is not set.');
+        toast.error("Required delivery date is not set.");
         return;
       }
 
       if (!newEtd) {
-        toast.error('Please select a valid new ETD.');
+        toast.error("Please select a valid new ETD.");
         return;
       }
 
       const newLeadtime = parseInt(newLeadtimeDays, 10);
       if (!newLeadtimeDays || Number.isNaN(newLeadtime) || newLeadtime <= 0) {
-        toast.error('Please enter a valid new lead time.');
+        toast.error("Please enter a valid new lead time.");
         return;
       }
 
       if (!newEtaDateForReschedule) {
-        toast.error('New ETA could not be calculated.');
+        toast.error("New ETA could not be calculated.");
         return;
       }
 
       if (!rescheduleReason.trim()) {
-        toast.error('Please provide a reason for rescheduling.');
+        toast.error("Please provide a reason for rescheduling.");
         return;
       }
 
-      const proposedEtaDays = diffDaysDateOnly(newEtaDateForReschedule, startOfDay(newEtd));
+      const proposedEtaDays = diffDaysDateOnly(
+        newEtaDateForReschedule,
+        startOfDay(newEtd),
+      );
 
       setSubmittingReschedule(true);
 
@@ -1455,19 +1693,24 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         Reason: rescheduleReason.trim(),
       });
 
-      toast.success('Reschedule request submitted successfully.');
+      toast.success("Reschedule request submitted successfully.");
 
       setRescheduleDialogOpen(false);
       setNewEtd(todayStart());
-      setNewLeadtimeDays('');
-      setRescheduleReason('');
+      setNewLeadtimeDays("");
+      setRescheduleReason("");
 
       await fetchCardSummary();
-      await fetchPurchaseOrders(activeTab, currentAttentionParam, currentPage, itemsPerPage);
+      await fetchPurchaseOrders(
+        activeTab,
+        currentAttentionParam,
+        currentPage,
+        itemsPerPage,
+      );
       await fetchMasterFilters();
     } catch (error: any) {
-      if (error?.message !== 'Session expired') {
-        toast.error(error?.message || 'Failed to submit reschedule request.');
+      if (error?.message !== "Session expired") {
+        toast.error(error?.message || "Failed to submit reschedule request.");
       }
     } finally {
       setSubmittingReschedule(false);
@@ -1493,16 +1736,16 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const handleSubmitUpdate = useCallback(async () => {
     try {
       if (!orderToUpdate) {
-        toast.error('No purchase order selected');
+        toast.error("No purchase order selected");
         return;
       }
 
       if (!updateScheduleStatus) {
-        toast.error('Please select update confirmation');
+        toast.error("Please select update confirmation");
         return;
       }
 
-      if (updateScheduleStatus === 'no') {
+      if (updateScheduleStatus === "no") {
         return;
       }
 
@@ -1513,7 +1756,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       const idPoItem = getIdPoItem(orderToUpdate);
 
       if (!idPoItem) {
-        toast.error('ID PO Item not found');
+        toast.error("ID PO Item not found");
         return;
       }
 
@@ -1522,22 +1765,29 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       await submitPoStatusUpdate({
         IDPOItem: idPoItem,
         IsScheduled: true,
-        DeliveryUpdate: 'On Schedule',
+        DeliveryUpdate: "On Schedule",
       });
 
-      toast.success(`Update submitted for PO ${orderToUpdate.purchasingDocument}`);
+      toast.success(
+        `Update submitted for PO ${orderToUpdate.purchasingDocument}`,
+      );
 
       setIsUpdateDialogOpen(false);
       setOrderToUpdate(null);
-      setUpdateScheduleStatus('');
+      setUpdateScheduleStatus("");
 
       await fetchCardSummary();
-      await fetchPurchaseOrders(activeTab, currentAttentionParam, currentPage, itemsPerPage);
+      await fetchPurchaseOrders(
+        activeTab,
+        currentAttentionParam,
+        currentPage,
+        itemsPerPage,
+      );
       await fetchMasterFilters();
     } catch (err: any) {
-      if (err?.message !== 'Session expired') {
-        console.error('[PO] submit delivery update failed', err);
-        toast.error(err?.message || 'Failed to submit update');
+      if (err?.message !== "Session expired") {
+        console.error("[PO] submit delivery update failed", err);
+        toast.error(err?.message || "Failed to submit update");
       }
     } finally {
       setSubmittingUpdate(false);
@@ -1558,12 +1808,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
   const clearFilters = useCallback(() => {
     setDraftFilters({
-      status: '',
-      storageLocation: '',
-      plant: '',
-      purchasingGroup: '',
-      supplier: '',
-      purchasingDocType: '',
+      status: "",
+      storageLocation: "",
+      plant: "",
+      purchasingGroup: "",
+      supplier: "",
+      purchasingDocType: "",
     });
   }, []);
 
@@ -1580,39 +1830,42 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     setCurrentPage(1);
   }, []);
 
-  const handleToggleAttentionCard = useCallback((type: Exclude<AttentionFilter, null>) => {
-    setCurrentPage(1);
-    setActiveTab('all');
+  const handleToggleAttentionCard = useCallback(
+    (type: Exclude<AttentionFilter, null>) => {
+      setCurrentPage(1);
+      setActiveTab("all");
 
-    setSpecialFilter((prev) => {
-      const next: AttentionFilter = prev === type ? null : type;
-      syncAttractionQuery(next ? ATTENTION_UI_TO_BACKEND[next] : null);
-      return next;
-    });
-  }, []);
+      setSpecialFilter((prev) => {
+        const next: AttentionFilter = prev === type ? null : type;
+        syncAttractionQuery(next ? ATTENTION_UI_TO_BACKEND[next] : null);
+        return next;
+      });
+    },
+    [],
+  );
 
   const processUploadFile = useCallback(
     (
       file: File | null,
       setter: React.Dispatch<React.SetStateAction<File | null>>,
-      input?: HTMLInputElement | null
+      input?: HTMLInputElement | null,
     ) => {
       if (!file) {
         setter(null);
-        if (input) input.value = '';
+        if (input) input.value = "";
         return;
       }
 
       if (!isExcelFile(file)) {
-        toast.error('File must be an Excel file (.xlsx or .xls)');
+        toast.error("File must be an Excel file (.xlsx or .xls)");
         setter(null);
-        if (input) input.value = '';
+        if (input) input.value = "";
         return;
       }
 
       setter(file);
     },
-    []
+    [],
   );
 
   const handleFileChangeME2N = useCallback(
@@ -1620,7 +1873,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       const file = e.target.files?.[0] || null;
       processUploadFile(file, setUploadFileME2N, e.target);
     },
-    [processUploadFile]
+    [processUploadFile],
   );
 
   const handleFileChangeME5A = useCallback(
@@ -1628,7 +1881,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       const file = e.target.files?.[0] || null;
       processUploadFile(file, setUploadFileME5A, e.target);
     },
-    [processUploadFile]
+    [processUploadFile],
   );
 
   const handleFileChangeZMM013R = useCallback(
@@ -1636,48 +1889,48 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       const file = e.target.files?.[0] || null;
       processUploadFile(file, setUploadFileZMM013R, e.target);
     },
-    [processUploadFile]
+    [processUploadFile],
   );
 
   const handleSubmitUploadPO = useCallback(async () => {
     if (!uploadFileME2N) {
-      toast.error('Please select ME2N file first');
+      toast.error("Please select ME2N file first");
       return;
     }
 
     if (!uploadFileME5A) {
-      toast.error('Please select ME5A file first');
+      toast.error("Please select ME5A file first");
       return;
     }
 
     if (!uploadFileZMM013R) {
-      toast.error('Please select ZMM013R file first');
+      toast.error("Please select ZMM013R file first");
       return;
     }
 
     setUploading(true);
     setUploadProgress(0);
-    setUploadStatusText('Preparing upload...');
+    setUploadStatusText("Preparing upload...");
 
     try {
       const formData = new FormData();
-      formData.append('ME2NFile', uploadFileME2N);
-      formData.append('ME5AFile', uploadFileME5A);
-      formData.append('ZMM013RFile', uploadFileZMM013R);
+      formData.append("ME2NFile", uploadFileME2N);
+      formData.append("ME5AFile", uploadFileME5A);
+      formData.append("ZMM013RFile", uploadFileZMM013R);
 
       const token = getAuthToken();
 
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
-        xhr.open('POST', API.IMPORT_PO(), true);
+        xhr.open("POST", API.IMPORT_PO(), true);
 
         if (token) {
-          xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+          xhr.setRequestHeader("Authorization", `Bearer ${token}`);
         }
 
         xhr.upload.onloadstart = () => {
           setUploadProgress(0);
-          setUploadStatusText('Starting upload...');
+          setUploadStatusText("Starting upload...");
         };
 
         xhr.upload.onprogress = (event) => {
@@ -1687,7 +1940,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             setUploadProgress(percent);
             setUploadStatusText(`Uploading... ${percent}%`);
           } else {
-            setUploadStatusText('Uploading...');
+            setUploadStatusText("Uploading...");
           }
         };
 
@@ -1695,33 +1948,33 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
           if (xhr.readyState === XMLHttpRequest.HEADERS_RECEIVED) {
             if (xhr.status === 401) {
               redirectToLoginExpired();
-              reject(new Error('Session expired'));
+              reject(new Error("Session expired"));
               return;
             }
 
             setUploadProgress(99);
-            setUploadStatusText('Processing file on server...');
+            setUploadStatusText("Processing file on server...");
           }
         };
 
         xhr.onerror = () => {
-          reject(new Error('Network error while uploading file'));
+          reject(new Error("Network error while uploading file"));
         };
 
         xhr.ontimeout = () => {
-          reject(new Error('Upload timeout'));
+          reject(new Error("Upload timeout"));
         };
 
         xhr.onload = () => {
           if (xhr.status === 401) {
             redirectToLoginExpired();
-            reject(new Error('Session expired'));
+            reject(new Error("Session expired"));
             return;
           }
 
           if (xhr.status >= 200 && xhr.status < 300) {
             setUploadProgress(100);
-            setUploadStatusText('Upload completed');
+            setUploadStatusText("Upload completed");
             resolve();
             return;
           }
@@ -1745,26 +1998,31 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         xhr.send(formData);
       });
 
-      toast.success('Purchase order data imported successfully');
+      toast.success("Purchase order data imported successfully");
 
       setUploadProgress(100);
-      setUploadStatusText('Upload completed');
+      setUploadStatusText("Upload completed");
 
       await new Promise((resolve) => setTimeout(resolve, 400));
 
-      setUploadStatusText('Refreshing data...');
+      setUploadStatusText("Refreshing data...");
 
       await fetchCardSummary();
-      await fetchPurchaseOrders(activeTab, currentAttentionParam, currentPage, itemsPerPage);
+      await fetchPurchaseOrders(
+        activeTab,
+        currentAttentionParam,
+        currentPage,
+        itemsPerPage,
+      );
       await fetchMasterFilters();
 
       setIsUploadDialogOpen(false);
       resetUploadState();
     } catch (err: any) {
-      if (err?.message !== 'Session expired') {
-        console.error('[PO] import failed', err);
-        toast.error(err?.message || 'Failed to import purchase order data');
-        setUploadStatusText('');
+      if (err?.message !== "Session expired") {
+        console.error("[PO] import failed", err);
+        toast.error(err?.message || "Failed to import purchase order data");
+        setUploadStatusText("");
       }
     } finally {
       setUploading(false);
@@ -1786,98 +2044,112 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const handleDownloadTemplate = useCallback(() => {
     try {
       const me2nHeaders = [
-        'Purchase Requisition',
-        'Item of requisition',
-        'Purchasing Document',
-        'Item',
-        'Document Date',
-        'Delivery date',
-        'Purchasing Doc. Type',
-        'Purchasing Group',
-        'Short Text',
-        'Material',
-        'Qty Order',
-        'Name of Supplier',
-        'Quantity Received',
-        'Still to be delivered (qty)',
-        'Plant',
-        'Storage location',
+        "Purchase Requisition",
+        "Item of requisition",
+        "Purchasing Document",
+        "Item",
+        "Document Date",
+        "Delivery date",
+        "Purchasing Doc. Type",
+        "Purchasing Group",
+        "Short Text",
+        "Material",
+        "Qty Order",
+        "Name of Supplier",
+        "Quantity Received",
+        "Still to be delivered (qty)",
+        "Plant",
+        "Storage location",
       ];
 
       const zmm013rHeaders = [
-        'Purchase Order',
-        'Purchase Requisition',
-        'Purchase Order Item',
-        'GR Created Date',
+        "Purchase Order",
+        "Purchase Requisition",
+        "Purchase Order Item",
+        "GR Created Date",
       ];
 
       const me5aHeaders = [
-        'Order',
-        'Changed On',
-        'Purchase order',
-        'Purchase Requisition',
-        'Item of requisition',
-        'Material',
-        'Purchase Order Date',
-        'Created by',
+        "Order",
+        "Changed On",
+        "Purchase order",
+        "Purchase Requisition",
+        "Item of requisition",
+        "Material",
+        "Purchase Order Date",
+        "Created by",
       ];
 
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([me2nHeaders]), 'ME2N');
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([me5aHeaders]), 'ME5A');
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([zmm013rHeaders]), 'ZMM013R');
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.aoa_to_sheet([me2nHeaders]),
+        "ME2N",
+      );
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.aoa_to_sheet([me5aHeaders]),
+        "ME5A",
+      );
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.aoa_to_sheet([zmm013rHeaders]),
+        "ZMM013R",
+      );
 
       const now = new Date();
-      const dd = String(now.getDate()).padStart(2, '0');
-      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, "0");
+      const mm = String(now.getMonth() + 1).padStart(2, "0");
       const yyyy = now.getFullYear();
 
       XLSX.writeFile(wb, `TemplatePO_${dd}-${mm}-${yyyy}.xlsx`);
-      toast.success('Template downloaded');
+      toast.success("Template downloaded");
     } catch (err) {
-      console.error('[PO] template export failed', err);
-      toast.error('Failed to download template');
+      console.error("[PO] template export failed", err);
+      toast.error("Failed to download template");
     }
   }, []);
 
   const handleDownloadPOData = useCallback(() => {
     try {
       const orderedKeys: ColumnKey[] = [
-        'purchaseRequisition',
-        'itemOfRequisition',
-        'purchasingDocument',
-        'item',
-        'documentDate',
-        'deliveryDate',
-        'etaDate',
-        'purchasingDocType',
-        'purchasingGroup',
-        'shortText',
-        'material',
-        'qtyOrder',
-        'nameOfSupplier',
-        'quantityReceived',
-        'stillToBeDelivered',
-        'plant',
-        'storageLocation',
-        'order',
-        'changedOn',
-        'grCreatedDate',
-        'remarks',
-        'reEtaDate',
-        'attention',
+        "purchaseRequisition",
+        "itemOfRequisition",
+        "purchasingDocument",
+        "item",
+        "documentDate",
+        "deliveryDate",
+        "etaDate",
+        "purchasingDocType",
+        "purchasingGroup",
+        "shortText",
+        "material",
+        "qtyOrder",
+        "nameOfSupplier",
+        "quantityReceived",
+        "stillToBeDelivered",
+        "plant",
+        "storageLocation",
+        "order",
+        "changedOn",
+        "grCreatedDate",
+        "remarks",
+        "reEtaDate",
+        "attention",
       ];
 
       const cols = orderedKeys.filter((k) => visibleColumns[k]);
-      const headers = cols.map((k) => columnLabel(k, user.role)).concat(['Status']);
+      const headers = cols
+        .map((k) => columnLabel(k, user.role))
+        .concat(["Status"]);
 
       const escapeCell = (v: any) => {
-        if (v === null || v === undefined) return '';
+        if (v === null || v === undefined) return "";
 
-        if (typeof v === 'number' || typeof v === 'string') {
+        if (typeof v === "number" || typeof v === "string") {
           const att = normalizeAttention(v as AttentionRaw);
-          if (att === 1) return 'Need Update';
-          if (att === 2) return 'Delay';
+          if (att === 1) return "Need Update";
+          if (att === 2) return "Delay";
         }
 
         const s = String(v);
@@ -1889,71 +2161,100 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       const rows = filteredOrders.map((o) => {
         const row = cols.map((k) => escapeCell((o as any)[k]));
         row.push(escapeCell(mapBackendStatusToDisplay(o.status)));
-        return row.join(',');
+        return row.join(",");
       });
 
-      const csvContent = [headers.join(','), ...rows].join('\r\n');
+      const csvContent = [headers.join(","), ...rows].join("\r\n");
 
       const now = new Date();
-      const dd = String(now.getDate()).padStart(2, '0');
-      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, "0");
+      const mm = String(now.getMonth() + 1).padStart(2, "0");
       const yyyy = now.getFullYear();
       const filename = `PO_(${dd}-${mm}-${yyyy}).csv`;
 
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
+      const a = document.createElement("a");
 
       a.href = url;
-      a.setAttribute('download', filename);
+      a.setAttribute("download", filename);
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      toast.success('Export complete');
+      toast.success("Export complete");
     } catch (err) {
-      console.error('[PO] export failed', err);
-      toast.error('Failed to export PO data');
+      console.error("[PO] export failed", err);
+      toast.error("Failed to export PO data");
     }
   }, [filteredOrders, visibleColumns, user.role]);
 
   const columns = useMemo(() => {
-    const mk = (key: ColumnKey, render?: (o: PurchaseOrderItem) => React.ReactNode) => ({
+    const mk = (
+      key: ColumnKey,
+      render?: (o: PurchaseOrderItem) => React.ReactNode,
+    ) => ({
       key,
       label: columnLabel(key, user.role),
       visible: visibleColumns[key],
-      render: render ?? ((o: PurchaseOrderItem) => (o as any)[key] ?? '-'),
+      render: render ?? ((o: PurchaseOrderItem) => (o as any)[key] ?? "-"),
     });
 
     return [
-      mk('purchaseRequisition', (o) => <span className="font-medium">{o.purchaseRequisition}</span>),
-      mk('itemOfRequisition', (o) => o.itemOfRequisition),
-      mk('purchasingDocument', (o) => <span className="font-medium">{o.purchasingDocument}</span>),
-      mk('item', (o) => o.item),
-      mk('documentDate', (o) => <span className="text-sm text-gray-600">{o.documentDate}</span>),
-      mk('deliveryDate', (o) => <span className="text-sm text-gray-600">{o.deliveryDate || '-'}</span>),
-      mk('etaDate', (o) => <span className="text-sm text-gray-600">{o.etaDate || '-'}</span>),
-      mk('purchasingDocType', (o) => o.purchasingDocType),
-      mk('purchasingGroup', (o) => o.purchasingGroup),
-      mk('shortText', (o) => <span className="max-w-xs truncate block">{o.shortText}</span>),
-      mk('material', (o) => <span className="text-sm text-gray-600">{o.material}</span>),
-      mk('qtyOrder', (o) => <span className="text-right block">{o.qtyOrder || '-'}</span>),
-      mk('nameOfSupplier', (o) => o.nameOfSupplier),
-      mk('quantityReceived', (o) => <span className="text-right block">{o.quantityReceived}</span>),
-      mk('stillToBeDelivered', (o) => (
+      mk("purchaseRequisition", (o) => (
+        <span className="font-medium">{o.purchaseRequisition}</span>
+      )),
+      mk("itemOfRequisition", (o) => o.itemOfRequisition),
+      mk("purchasingDocument", (o) => (
+        <span className="font-medium">{o.purchasingDocument}</span>
+      )),
+      mk("item", (o) => o.item),
+      mk("documentDate", (o) => (
+        <span className="text-sm text-gray-600">{o.documentDate}</span>
+      )),
+      mk("deliveryDate", (o) => (
+        <span className="text-sm text-gray-600">{o.deliveryDate || "-"}</span>
+      )),
+      mk("etaDate", (o) => (
+        <span className="text-sm text-gray-600">{o.etaDate || "-"}</span>
+      )),
+      mk("purchasingDocType", (o) => o.purchasingDocType),
+      mk("purchasingGroup", (o) => o.purchasingGroup),
+      mk("shortText", (o) => (
+        <span className="max-w-xs truncate block">{o.shortText}</span>
+      )),
+      mk("material", (o) => (
+        <span className="text-sm text-gray-600">{o.material}</span>
+      )),
+      mk("qtyOrder", (o) => (
+        <span className="text-right block">{o.qtyOrder || "-"}</span>
+      )),
+      mk("nameOfSupplier", (o) => o.nameOfSupplier),
+      mk("quantityReceived", (o) => (
+        <span className="text-right block">{o.quantityReceived}</span>
+      )),
+      mk("stillToBeDelivered", (o) => (
         <span className="text-right block">{o.stillToBeDelivered}</span>
       )),
-      mk('plant', (o) => o.plant),
-      mk('storageLocation', (o) => o.storageLocation),
-      mk('order', (o) => <span className="text-sm text-gray-600">{o.order || '-'}</span>),
-      mk('changedOn', (o) => <span className="text-sm text-gray-600">{o.changedOn || '-'}</span>),
-      mk('grCreatedDate', (o) => (
-        <span className="text-sm text-gray-600">{o.grCreatedDate || '-'}</span>
+      mk("plant", (o) => o.plant),
+      mk("storageLocation", (o) => o.storageLocation),
+      mk("order", (o) => (
+        <span className="text-sm text-gray-600">{o.order || "-"}</span>
       )),
-      mk('remarks', (o) => <span className="max-w-xs truncate block">{o.remarks || '-'}</span>),
-      mk('reEtaDate', (o) => <span className="text-sm text-gray-600">{o.reEtaDate || '-'}</span>),
-      mk('attention', (o) => attentionBadge(o.attention)),
+      mk("changedOn", (o) => (
+        <span className="text-sm text-gray-600">{o.changedOn || "-"}</span>
+      )),
+      mk("grCreatedDate", (o) => (
+        <span className="text-sm text-gray-600">{o.grCreatedDate || "-"}</span>
+      )),
+      mk("remarks", (o) => (
+        <span className="max-w-xs truncate block">{o.remarks || "-"}</span>
+      )),
+      mk("reEtaDate", (o) => (
+        <span className="text-sm text-gray-600">{o.reEtaDate || "-"}</span>
+      )),
+      mk("attention", (o) => attentionBadge(o.attention)),
     ];
   }, [user.role, visibleColumns]);
 
@@ -1995,7 +2296,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                     <TableCell className="sticky right-[100px] bg-white shadow-[-2px_0_4px_rgba(0,0,0,0.05)] z-10">
                       <Badge
                         className="min-w-[120px] justify-center"
-                        style={{ backgroundColor: statusColor(display), color: 'white' }}
+                        style={{
+                          backgroundColor: statusColor(display),
+                          color: "white",
+                        }}
                       >
                         {display}
                       </Badge>
@@ -2008,7 +2312,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         onClick={() => {
                           setSelectedOrderId(key);
                         }}
-                        style={{ borderColor: '#014357', color: '#014357' }}
+                        style={{ borderColor: "#014357", color: "#014357" }}
                         className="hover:bg-gray-50 min-w-[80px]"
                       >
                         <Eye className="h-4 w-4 mr-2" />
@@ -2025,8 +2329,13 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         {totalOrders > 0 && (
           <div className="flex items-center justify-between px-4 py-4 border-t gap-4">
             <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-600 whitespace-nowrap">Rows per page:</span>
-              <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
+              <span className="text-sm text-gray-600 whitespace-nowrap">
+                Rows per page:
+              </span>
+              <Select
+                value={itemsPerPage.toString()}
+                onValueChange={handleItemsPerPageChange}
+              >
                 <SelectTrigger className="w-[70px]">
                   <SelectValue />
                 </SelectTrigger>
@@ -2044,7 +2353,11 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                 <PaginationItem>
                   <PaginationPrevious
                     onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                    className={
+                      currentPage === 1
+                        ? "pointer-events-none opacity-50"
+                        : "cursor-pointer"
+                    }
                   />
                 </PaginationItem>
 
@@ -2078,9 +2391,13 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
                 <PaginationItem>
                   <PaginationNext
-                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    onClick={() =>
+                      setCurrentPage((p) => Math.min(totalPages, p + 1))
+                    }
                     className={
-                      currentPage === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'
+                      currentPage === totalPages
+                        ? "pointer-events-none opacity-50"
+                        : "cursor-pointer"
                     }
                   />
                 </PaginationItem>
@@ -2088,8 +2405,8 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             </Pagination>
 
             <div className="text-sm text-gray-600 whitespace-nowrap">
-              Showing {totalOrders === 0 ? 0 : startIndex + 1} to {Math.min(endIndex, totalOrders)} of{' '}
-              {totalOrders} results
+              Showing {totalOrders === 0 ? 0 : startIndex + 1} to{" "}
+              {Math.min(endIndex, totalOrders)} of {totalOrders} results
             </div>
           </div>
         )}
@@ -2105,7 +2422,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       endIndex,
       itemsPerPage,
       handleItemsPerPageChange,
-    ]
+    ],
   );
 
   return (
@@ -2119,14 +2436,22 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       ) : (
         <>
           <div className="mb-6 sm:mb-8">
-            <h1 className="mb-2" style={{ color: '#014357' }}>
+            <h1 className="mb-2" style={{ color: "#014357" }}>
               Purchase Orders
             </h1>
-            <p className="text-gray-600">Track and manage all purchase orders</p>
+            <p className="text-gray-600">
+              Track and manage all purchase orders
+            </p>
           </div>
 
-          {loading && <div className="mb-4 text-sm text-gray-500">Loading purchase orders...</div>}
-          {loadError && <div className="mb-4 text-sm text-red-600">{loadError}</div>}
+          {loading && (
+            <div className="mb-4 text-sm text-gray-500">
+              Loading purchase orders...
+            </div>
+          )}
+          {loadError && (
+            <div className="mb-4 text-sm text-red-600">{loadError}</div>
+          )}
 
           <div className="flex flex-col sm:flex-row gap-3 mb-4 items-start sm:items-center justify-between">
             <div className="relative flex-1 w-full sm:max-w-md">
@@ -2139,20 +2464,30 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
               />
             </div>
 
-            {user.role === 'admin' && (
+            {user.role === "admin" && (
               <div className="flex gap-2 w-full sm:w-auto">
-                <Button variant="outline" className="flex-1 sm:flex-none" size="sm" onClick={handleDownloadTemplate}>
+                <Button
+                  variant="outline"
+                  className="flex-1 sm:flex-none"
+                  size="sm"
+                  onClick={handleDownloadTemplate}
+                >
                   <FileSpreadsheet className="h-4 w-4 sm:mr-2" />
                   <span className="hidden sm:inline">Template</span>
                 </Button>
 
-                <Button variant="outline" className="flex-1 sm:flex-none" size="sm" onClick={handleDownloadPOData}>
+                <Button
+                  variant="outline"
+                  className="flex-1 sm:flex-none"
+                  size="sm"
+                  onClick={handleDownloadPOData}
+                >
                   <Download className="h-4 w-4 sm:mr-2" />
                   <span className="hidden sm:inline">Export</span>
                 </Button>
 
                 <Button
-                  style={{ backgroundColor: '#014357' }}
+                  style={{ backgroundColor: "#014357" }}
                   className="text-white hover:opacity-90 flex-1 sm:flex-none"
                   size="sm"
                   onClick={() => setIsUploadDialogOpen(true)}
@@ -2167,22 +2502,31 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
           <div className="grid grid-cols-1 gap-4 mb-4">
             <Card
               className={[
-                'p-4 shadow-[0_2px_4px_rgba(220,38,38,0.25)] border-0 cursor-pointer transition-all w-full',
-                specialFilter === 'delay' ? 'overdue-active' : '',
-              ].join(' ')}
-              style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)' }}
-              onClick={() => handleToggleAttentionCard('delay')}
+                "p-4 shadow-[0_2px_4px_rgba(220,38,38,0.25)] border-0 cursor-pointer transition-all w-full",
+                specialFilter === "delay" ? "overdue-active" : "",
+              ].join(" ")}
+              style={{ backgroundColor: "rgba(220, 38, 38, 0.1)" }}
+              onClick={() => handleToggleAttentionCard("delay")}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="p-2 rounded-lg bg-white shadow-sm">
-                    <AlertTriangle className="h-4 w-4" style={{ color: '#DC2626' }} />
+                    <AlertTriangle
+                      className="h-4 w-4"
+                      style={{ color: "#DC2626" }}
+                    />
                   </div>
-                  <div className="text-gray-900 text-sm" style={{ fontWeight: 600 }}>
+                  <div
+                    className="text-gray-900 text-sm"
+                    style={{ fontWeight: 600 }}
+                  >
                     Delay
                   </div>
                 </div>
-                <div className="text-2xl font-bold" style={{ color: '#DC2626', fontWeight: 800 }}>
+                <div
+                  className="text-2xl font-bold"
+                  style={{ color: "#DC2626", fontWeight: 800 }}
+                >
                   {delayCount}
                 </div>
               </div>
@@ -2192,12 +2536,15 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
           <div className="flex gap-3 mb-6 flex-wrap">
             <Card className="flex-1 min-w-[180px] p-4">
               <div className="flex items-center gap-2 mb-2">
-                <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(1, 67, 87, 0.1)' }}>
-                  <Package className="h-4 w-4" style={{ color: '#014357' }} />
+                <div
+                  className="p-2 rounded-lg"
+                  style={{ backgroundColor: "rgba(1, 67, 87, 0.1)" }}
+                >
+                  <Package className="h-4 w-4" style={{ color: "#014357" }} />
                 </div>
                 <div className="text-gray-600 text-sm">Total PO Items</div>
               </div>
-              <div className="text-3xl" style={{ color: '#014357' }}>
+              <div className="text-3xl" style={{ color: "#014357" }}>
                 {summary?.TotalPO ?? 0}
               </div>
             </Card>
@@ -2206,76 +2553,94 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
               <div className="flex items-center gap-2 mb-2">
                 <div
                   className="p-2 rounded-lg"
-                  style={{ backgroundColor: 'rgba(237, 131, 45, 0.1)' }}
+                  style={{ backgroundColor: "rgba(237, 131, 45, 0.1)" }}
                 >
-                  <FilePlus className="h-4 w-4" style={{ color: '#ED832D' }} />
+                  <FilePlus className="h-4 w-4" style={{ color: "#ED832D" }} />
                 </div>
                 <div className="text-gray-600 text-sm">PO Submitted</div>
               </div>
-              <div className="text-3xl" style={{ color: '#ED832D' }}>
+              <div className="text-3xl" style={{ color: "#ED832D" }}>
                 {summary?.POSubmitted ?? 0}
               </div>
             </Card>
 
             <Card className="flex-1 min-w-[180px] p-4">
               <div className="flex items-center gap-2 mb-2">
-                <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(92, 140, 182, 0.1)' }}>
-                  <Loader className="h-4 w-4" style={{ color: '#5C8CB6' }} />
+                <div
+                  className="p-2 rounded-lg"
+                  style={{ backgroundColor: "rgba(92, 140, 182, 0.1)" }}
+                >
+                  <Loader className="h-4 w-4" style={{ color: "#5C8CB6" }} />
                 </div>
                 <div className="text-gray-600 text-sm">Work in Progress</div>
               </div>
-              <div className="text-3xl" style={{ color: '#5C8CB6' }}>
+              <div className="text-3xl" style={{ color: "#5C8CB6" }}>
                 {summary?.POWorkInProgress ?? 0}
               </div>
             </Card>
 
             <Card className="flex-1 min-w-[180px] p-4">
               <div className="flex items-center gap-2 mb-2">
-                <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(0, 131, 131, 0.1)' }}>
-                  <Truck className="h-4 w-4" style={{ color: '#008383' }} />
+                <div
+                  className="p-2 rounded-lg"
+                  style={{ backgroundColor: "rgba(0, 131, 131, 0.1)" }}
+                >
+                  <Truck className="h-4 w-4" style={{ color: "#008383" }} />
                 </div>
                 <div className="text-gray-600 text-sm">On Delivery</div>
               </div>
-              <div className="text-3xl" style={{ color: '#008383' }}>
+              <div className="text-3xl" style={{ color: "#008383" }}>
                 {summary?.POOnDelivery ?? 0}
               </div>
             </Card>
 
             <Card className="flex-1 min-w-[180px] p-4">
               <div className="flex items-center gap-2 mb-2">
-                <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)' }}>
-                  <Ban className="h-4 w-4" style={{ color: '#DC2626' }} />
+                <div
+                  className="p-2 rounded-lg"
+                  style={{ backgroundColor: "rgba(220, 38, 38, 0.1)" }}
+                >
+                  <Ban className="h-4 w-4" style={{ color: "#DC2626" }} />
                 </div>
                 <div className="text-gray-600 text-sm">Cancel</div>
               </div>
-              <div className="text-3xl" style={{ color: '#DC2626' }}>
+              <div className="text-3xl" style={{ color: "#DC2626" }}>
                 {cancelCount}
               </div>
             </Card>
 
             <Card className="flex-1 min-w-[180px] p-4">
               <div className="flex items-center gap-2 mb-2">
-                <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(106, 167, 93, 0.1)' }}>
-                  <CheckCircle2 className="h-4 w-4" style={{ color: '#6AA75D' }} />
+                <div
+                  className="p-2 rounded-lg"
+                  style={{ backgroundColor: "rgba(106, 167, 93, 0.1)" }}
+                >
+                  <CheckCircle2
+                    className="h-4 w-4"
+                    style={{ color: "#6AA75D" }}
+                  />
                 </div>
                 <div className="text-gray-600 text-sm">Received</div>
               </div>
-              <div className="text-3xl" style={{ color: '#6AA75D' }}>
+              <div className="text-3xl" style={{ color: "#6AA75D" }}>
                 {receivedCount}
               </div>
             </Card>
           </div>
 
-          {user.role === 'vendor' && ordersNeedingUpdate.length > 0 && (
-            <Card className="mb-6 p-6" style={{ borderColor: '#ED832D', borderWidth: '2px' }}>
+          {user.role === "vendor" && ordersNeedingUpdate.length > 0 && (
+            <Card
+              className="mb-6 p-6"
+              style={{ borderColor: "#ED832D", borderWidth: "2px" }}
+            >
               <div className="flex items-center gap-2 mb-4">
-                <AlertCircle className="h-5 w-5" style={{ color: '#ED832D' }} />
-                <h2 style={{ color: '#014357' }}>Orders Needing Update</h2>
+                <AlertCircle className="h-5 w-5" style={{ color: "#ED832D" }} />
+                <h2 style={{ color: "#014357" }}>Orders Needing Update</h2>
               </div>
 
               <p className="text-sm text-gray-600 mb-4">
-                These orders have a ETA Date within 2 days and require vendor confirmation whether
-                they are still on track or need re-ETA.
+                These are your active orders requiring confirmation. Please
+                confirm whether they are still on track or need re-ETA.
               </p>
 
               <div className="overflow-x-auto">
@@ -2285,8 +2650,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       <TableHead>Purchasing Document</TableHead>
                       <TableHead>Short Text</TableHead>
                       <TableHead>ETA Date</TableHead>
-                      <TableHead>Re-ETA Date</TableHead>
-                      <TableHead>Days Until Re-ETA</TableHead>
+                      <TableHead>Days Until ETA</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Action</TableHead>
                     </TableRow>
@@ -2294,39 +2658,54 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
                   <TableBody>
                     {ordersNeedingUpdate.map((o, idx) => {
-                      const d = parseDdMmmYyyy(o.reEtaDate);
-                      const diffDays = d ? diffDaysFromToday(d) : null;
                       const display = mapBackendStatusToDisplay(o.status);
+                      const etaDateValue =
+                        display === "PO Submitted" ? o.deliveryDate : o.etaDate;
+                      const d = parseDdMmmYyyy(etaDateValue);
+                      const diffDays = d ? diffDaysFromToday(d) : null;
 
                       return (
                         <TableRow key={`${getOrderKey(o)}-${idx}`}>
-                          <TableCell className="font-medium">{o.purchasingDocument}</TableCell>
+                          <TableCell className="font-medium">
+                            {o.purchasingDocument}
+                          </TableCell>
                           <TableCell>{o.shortText}</TableCell>
-                          <TableCell>{o.etaDate || '-'}</TableCell>
-                          <TableCell>{o.reEtaDate || '-'}</TableCell>
+                          <TableCell>{etaDateValue || "-"}</TableCell>
                           <TableCell>
                             {diffDays === null ? (
                               <span className="text-gray-400">-</span>
                             ) : (
                               <Badge
                                 style={{
-                                  backgroundColor: diffDays === 0 ? '#d4183d' : '#ED832D',
-                                  color: 'white',
+                                  backgroundColor:
+                                    diffDays === 0 ? "#d4183d" : "#ED832D",
+                                  color: "white",
                                 }}
                               >
-                                {diffDays === 0 ? 'Today' : `${diffDays} day${diffDays > 1 ? 's' : ''}`}
+                                {diffDays === 0
+                                  ? "Today"
+                                  : `${diffDays} day${diffDays > 1 ? "s" : ""}`}
                               </Badge>
                             )}
                           </TableCell>
 
                           <TableCell>
-                            <Badge style={{ backgroundColor: statusColor(display), color: 'white' }}>
+                            <Badge
+                              style={{
+                                backgroundColor: statusColor(display),
+                                color: "white",
+                              }}
+                            >
                               {display}
                             </Badge>
                           </TableCell>
 
                           <TableCell>
-                            <Button variant="outline" size="sm" onClick={() => handleOpenUpdateDialog(o)}>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleOpenUpdateDialog(o)}
+                            >
                               <Pencil className="h-4 w-4 mr-2" />
                               Update
                             </Button>
@@ -2340,7 +2719,11 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             </Card>
           )}
 
-          <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
+          <Tabs
+            value={activeTab}
+            onValueChange={handleTabChange}
+            className="w-full"
+          >
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
               <TabsList>
                 <TabsTrigger value="all">All Orders</TabsTrigger>
@@ -2359,17 +2742,28 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       Columns
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-[280px] max-h-[500px]" align="end">
+                  <PopoverContent
+                    className="w-[280px] max-h-[500px]"
+                    align="end"
+                  >
                     <div className="space-y-3">
                       <div className="space-y-2">
-                        <h4 className="font-medium text-sm">Customize Table View</h4>
-                        <p className="text-xs text-gray-500">Show or hide columns. Some cannot be hidden.</p>
+                        <h4 className="font-medium text-sm">
+                          Customize Table View
+                        </h4>
+                        <p className="text-xs text-gray-500">
+                          Show or hide columns. Some cannot be hidden.
+                        </p>
                       </div>
 
                       <ScrollArea className="h-[320px]">
                         <div className="space-y-2 pr-4">
                           <div className="flex items-center space-x-2">
-                            <Checkbox id="col-purchasingDocument" checked={visibleColumns.purchasingDocument} disabled />
+                            <Checkbox
+                              id="col-purchasingDocument"
+                              checked={visibleColumns.purchasingDocument}
+                              disabled
+                            />
                             <label
                               htmlFor="col-purchasingDocument"
                               className="text-sm cursor-not-allowed text-gray-700"
@@ -2378,10 +2772,17 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                             </label>
                           </div>
 
-                          {user.role !== 'vendor' && (
+                          {user.role !== "vendor" && (
                             <div className="flex items-center space-x-2">
-                              <Checkbox id="col-item" checked={visibleColumns.item} disabled />
-                              <label htmlFor="col-item" className="text-sm cursor-not-allowed text-gray-700">
+                              <Checkbox
+                                id="col-item"
+                                checked={visibleColumns.item}
+                                disabled
+                              />
+                              <label
+                                htmlFor="col-item"
+                                className="text-sm cursor-not-allowed text-gray-700"
+                              >
                                 Item
                               </label>
                             </div>
@@ -2390,15 +2791,24 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           <Separator className="my-3" />
 
                           {(Object.keys(visibleColumns) as ColumnKey[])
-                            .filter((k) => !['purchasingDocument', 'item'].includes(k))
+                            .filter(
+                              (k) =>
+                                !["purchasingDocument", "item"].includes(k),
+                            )
                             .map((k) => (
-                              <div key={k} className="flex items-center space-x-2">
+                              <div
+                                key={k}
+                                className="flex items-center space-x-2"
+                              >
                                 <Checkbox
                                   id={`col-${k}`}
                                   checked={visibleColumns[k]}
                                   onCheckedChange={() => toggleColumn(k)}
                                 />
-                                <label htmlFor={`col-${k}`} className="text-sm cursor-pointer">
+                                <label
+                                  htmlFor={`col-${k}`}
+                                  className="text-sm cursor-pointer"
+                                >
                                   {columnLabel(k, user.role)}
                                 </label>
                               </div>
@@ -2418,7 +2828,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         <Badge
                           variant="secondary"
                           className="ml-2 h-5 w-5 flex items-center justify-center p-0 text-xs rounded-full"
-                          style={{ backgroundColor: '#ED832D', color: 'white' }}
+                          style={{ backgroundColor: "#ED832D", color: "white" }}
                         >
                           {activeFilterCount}
                         </Badge>
@@ -2429,11 +2839,15 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle>Advanced Filters</DialogTitle>
-                      <DialogDescription>Filter purchase orders by multiple criteria</DialogDescription>
+                      <DialogDescription>
+                        Filter purchase orders by multiple criteria
+                      </DialogDescription>
                     </DialogHeader>
 
                     {loadingMasterFilters && (
-                      <div className="py-2 text-sm text-gray-500">Loading filter options...</div>
+                      <div className="py-2 text-sm text-gray-500">
+                        Loading filter options...
+                      </div>
                     )}
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-4">
@@ -2441,7 +2855,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         <Label>Status</Label>
                         <Select
                           value={draftFilters.status}
-                          onValueChange={(v) => setDraftFilters((prev) => ({ ...prev, status: v }))}
+                          onValueChange={(v) =>
+                            setDraftFilters((prev) => ({ ...prev, status: v }))
+                          }
                         >
                           <SelectTrigger>
                             <SelectValue placeholder="All statuses" />
@@ -2449,7 +2865,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           <SelectContent>
                             {filterOptions.status.map((opt) => (
                               <SelectItem key={opt} value={opt}>
-                                {opt === 'all' ? 'All' : opt}
+                                {opt === "all" ? "All" : opt}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -2461,7 +2877,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         <Select
                           value={draftFilters.storageLocation}
                           onValueChange={(v) =>
-                            setDraftFilters((prev) => ({ ...prev, storageLocation: v }))
+                            setDraftFilters((prev) => ({
+                              ...prev,
+                              storageLocation: v,
+                            }))
                           }
                         >
                           <SelectTrigger>
@@ -2470,7 +2889,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           <SelectContent>
                             {filterOptions.storage.map((opt) => (
                               <SelectItem key={opt} value={opt}>
-                                {opt === 'all' ? 'All' : opt}
+                                {opt === "all" ? "All" : opt}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -2481,7 +2900,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         <Label>Plant</Label>
                         <Select
                           value={draftFilters.plant}
-                          onValueChange={(v) => setDraftFilters((prev) => ({ ...prev, plant: v }))}
+                          onValueChange={(v) =>
+                            setDraftFilters((prev) => ({ ...prev, plant: v }))
+                          }
                         >
                           <SelectTrigger>
                             <SelectValue placeholder="All plants" />
@@ -2489,7 +2910,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           <SelectContent>
                             {filterOptions.plant.map((opt) => (
                               <SelectItem key={opt} value={opt}>
-                                {opt === 'all' ? 'All' : opt}
+                                {opt === "all" ? "All" : opt}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -2501,7 +2922,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         <Select
                           value={draftFilters.purchasingGroup}
                           onValueChange={(v) =>
-                            setDraftFilters((prev) => ({ ...prev, purchasingGroup: v }))
+                            setDraftFilters((prev) => ({
+                              ...prev,
+                              purchasingGroup: v,
+                            }))
                           }
                         >
                           <SelectTrigger>
@@ -2510,19 +2934,24 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           <SelectContent>
                             {filterOptions.group.map((opt) => (
                               <SelectItem key={opt} value={opt}>
-                                {opt === 'all' ? 'All' : opt}
+                                {opt === "all" ? "All" : opt}
                               </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
                       </div>
 
-                      {user.role !== 'vendor' && (
+                      {user.role !== "vendor" && (
                         <div className="grid gap-2">
                           <Label>Supplier</Label>
                           <Select
                             value={draftFilters.supplier}
-                            onValueChange={(v) => setDraftFilters((prev) => ({ ...prev, supplier: v }))}
+                            onValueChange={(v) =>
+                              setDraftFilters((prev) => ({
+                                ...prev,
+                                supplier: v,
+                              }))
+                            }
                           >
                             <SelectTrigger>
                               <SelectValue placeholder="All suppliers" />
@@ -2530,7 +2959,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                             <SelectContent>
                               {filterOptions.supplier.map((opt) => (
                                 <SelectItem key={opt} value={opt}>
-                                  {opt === 'all' ? 'All' : opt}
+                                  {opt === "all" ? "All" : opt}
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -2543,7 +2972,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         <Select
                           value={draftFilters.purchasingDocType}
                           onValueChange={(v) =>
-                            setDraftFilters((prev) => ({ ...prev, purchasingDocType: v }))
+                            setDraftFilters((prev) => ({
+                              ...prev,
+                              purchasingDocType: v,
+                            }))
                           }
                         >
                           <SelectTrigger>
@@ -2552,7 +2984,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           <SelectContent>
                             {filterOptions.docType.map((opt) => (
                               <SelectItem key={opt} value={opt}>
-                                {opt === 'all' ? 'All' : opt}
+                                {opt === "all" ? "All" : opt}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -2561,12 +2993,16 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                     </div>
 
                     <div className="flex gap-3">
-                      <Button variant="outline" onClick={clearFilters} className="flex-1">
+                      <Button
+                        variant="outline"
+                        onClick={clearFilters}
+                        className="flex-1"
+                      >
                         <X className="h-4 w-4 mr-2" />
                         Clear Filters
                       </Button>
                       <Button
-                        style={{ backgroundColor: '#014357' }}
+                        style={{ backgroundColor: "#014357" }}
                         className="text-white hover:opacity-90 flex-1"
                         onClick={handleApplyFilters}
                       >
@@ -2592,22 +3028,27 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
               setIsUpdateDialogOpen(open);
               if (!open) {
                 setOrderToUpdate(null);
-                setUpdateScheduleStatus('');
+                setUpdateScheduleStatus("");
               }
             }}
           >
             <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden">
               <DialogHeader>
-                <DialogTitle style={{ color: '#014357' }}>Update Purchase Order</DialogTitle>
+                <DialogTitle style={{ color: "#014357" }}>
+                  Update Purchase Order
+                </DialogTitle>
                 <DialogDescription>
-                  Confirm whether this PO item is still on track with the current ETA or needs re-ETA.
+                  Confirm whether this PO item is still on track with the
+                  current ETA or needs re-ETA.
                 </DialogDescription>
                 {orderToUpdate && (
                   <div className="flex items-center gap-2 pt-2">
                     <Badge
                       style={{
-                        backgroundColor: statusColor(mapBackendStatusToDisplay(orderToUpdate.status)),
-                        color: 'white',
+                        backgroundColor: statusColor(
+                          mapBackendStatusToDisplay(orderToUpdate.status),
+                        ),
+                        color: "white",
                       }}
                       className="px-4 py-1.5"
                     >
@@ -2624,10 +3065,16 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       <div>
                         <div
                           className="flex items-center gap-3 mb-4 pb-3 border-b-2"
-                          style={{ borderColor: '#014357' }}
+                          style={{ borderColor: "#014357" }}
                         >
-                          <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#014357' }} />
-                          <h3 className="text-lg tracking-wide" style={{ color: '#014357' }}>
+                          <div
+                            className="h-1.5 w-1.5 rounded-full"
+                            style={{ backgroundColor: "#014357" }}
+                          />
+                          <h3
+                            className="text-lg tracking-wide"
+                            style={{ color: "#014357" }}
+                          >
                             Order Information
                           </h3>
                         </div>
@@ -2637,14 +3084,18 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                             <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">
                               Purchasing Document
                             </p>
-                            <p className="text-sm">{orderToUpdate.purchasingDocument}</p>
+                            <p className="text-sm">
+                              {orderToUpdate.purchasingDocument}
+                            </p>
                           </div>
 
                           <div>
                             <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">
                               Item of Requisition
                             </p>
-                            <p className="text-sm">{orderToUpdate.itemOfRequisition}</p>
+                            <p className="text-sm">
+                              {orderToUpdate.itemOfRequisition}
+                            </p>
                           </div>
 
                           <div className="col-span-2">
@@ -2655,25 +3106,39 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           </div>
 
                           <div>
-                            <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">ETA Date</p>
-                            <p className="text-sm">{orderToUpdate.etaDate || 'N/A'}</p>
+                            <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">
+                              ETA Date
+                            </p>
+                            <p className="text-sm">
+                              {orderToUpdate.etaDate || "N/A"}
+                            </p>
                           </div>
 
                           <div>
                             <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">
                               Re-ETA Date
                             </p>
-                            <p className="text-sm">{orderToUpdate.reEtaDate || 'N/A'}</p>
+                            <p className="text-sm">
+                              {orderToUpdate.reEtaDate || "N/A"}
+                            </p>
                           </div>
 
                           <div>
-                            <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Qty Order</p>
-                            <p className="text-sm">{orderToUpdate.qtyOrder || 'N/A'}</p>
+                            <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">
+                              Qty Order
+                            </p>
+                            <p className="text-sm">
+                              {orderToUpdate.qtyOrder || "N/A"}
+                            </p>
                           </div>
 
                           <div>
-                            <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Attention</p>
-                            <div className="pt-0.5">{attentionBadge(orderToUpdate.attention)}</div>
+                            <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">
+                              Attention
+                            </p>
+                            <div className="pt-0.5">
+                              {attentionBadge(orderToUpdate.attention)}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -2681,10 +3146,16 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       <div>
                         <div
                           className="flex items-center gap-3 mb-4 pb-3 border-b-2"
-                          style={{ borderColor: '#014357' }}
+                          style={{ borderColor: "#014357" }}
                         >
-                          <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#014357' }} />
-                          <h3 className="text-lg tracking-wide" style={{ color: '#014357' }}>
+                          <div
+                            className="h-1.5 w-1.5 rounded-full"
+                            style={{ backgroundColor: "#014357" }}
+                          />
+                          <h3
+                            className="text-lg tracking-wide"
+                            style={{ color: "#014357" }}
+                          >
                             Update Confirmation
                           </h3>
                         </div>
@@ -2695,22 +3166,25 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           <div className="space-y-3">
                             <label
                               className={[
-                                'flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition',
-                                updateScheduleStatus === 'yes'
-                                  ? 'border-[#014357] bg-slate-50'
-                                  : 'border-gray-200 hover:border-[#014357]/50',
-                              ].join(' ')}
+                                "flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition",
+                                updateScheduleStatus === "yes"
+                                  ? "border-[#014357] bg-slate-50"
+                                  : "border-gray-200 hover:border-[#014357]/50",
+                              ].join(" ")}
                             >
                               <input
                                 type="radio"
                                 name="scheduleStatus"
                                 value="yes"
-                                checked={updateScheduleStatus === 'yes'}
-                                onChange={() => setUpdateScheduleStatus('yes')}
+                                checked={updateScheduleStatus === "yes"}
+                                onChange={() => setUpdateScheduleStatus("yes")}
                                 className="mt-1"
                               />
                               <div>
-                                <div className="font-medium text-sm" style={{ color: '#014357' }}>
+                                <div
+                                  className="font-medium text-sm"
+                                  style={{ color: "#014357" }}
+                                >
                                   Ya, masih sesuai ETA
                                 </div>
                               </div>
@@ -2718,46 +3192,54 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
                             <label
                               className={[
-                                'flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition',
-                                updateScheduleStatus === 'no'
-                                  ? 'border-[#014357] bg-slate-50'
-                                  : 'border-gray-200 hover:border-[#014357]/50',
-                              ].join(' ')}
+                                "flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition",
+                                updateScheduleStatus === "no"
+                                  ? "border-[#014357] bg-slate-50"
+                                  : "border-gray-200 hover:border-[#014357]/50",
+                              ].join(" ")}
                             >
                               <input
                                 type="radio"
                                 name="scheduleStatus"
                                 value="no"
-                                checked={updateScheduleStatus === 'no'}
-                                onChange={() => setUpdateScheduleStatus('no')}
+                                checked={updateScheduleStatus === "no"}
+                                onChange={() => setUpdateScheduleStatus("no")}
                                 className="mt-1"
                               />
                               <div>
-                                <div className="font-medium text-sm" style={{ color: '#014357' }}>
+                                <div
+                                  className="font-medium text-sm"
+                                  style={{ color: "#014357" }}
+                                >
                                   Tidak, lakukan Re-ETA
                                 </div>
                               </div>
                             </label>
                           </div>
 
-                          {updateScheduleStatus === 'no' && (
+                          {updateScheduleStatus === "no" && (
                             <Alert
                               style={{
-                                borderColor: '#DC2626',
-                                backgroundColor: 'rgba(220, 38, 38, 0.06)',
+                                borderColor: "#DC2626",
+                                backgroundColor: "rgba(220, 38, 38, 0.06)",
                               }}
                             >
-                              <AlertCircle className="h-4 w-4" style={{ color: '#DC2626' }} />
+                              <AlertCircle
+                                className="h-4 w-4"
+                                style={{ color: "#DC2626" }}
+                              />
                               <AlertDescription className="text-sm text-gray-700">
-                                ETA exceeds the delivery date. Please{' '}
+                                ETA exceeds the delivery date. Please{" "}
                                 <button
                                   type="button"
                                   className="btn-underlined-text inline border-none bg-transparent p-0 underline cursor-pointer"
-                                  style={{ color: '#014357' }}
-                                  onClick={() => handleOpenRescheduleDialog(orderToUpdate)}
+                                  style={{ color: "#014357" }}
+                                  onClick={() =>
+                                    handleOpenRescheduleDialog(orderToUpdate)
+                                  }
                                 >
                                   submit a Reschedule ETA Request again
-                                </button>{' '}
+                                </button>{" "}
                                 before proceeding.
                               </AlertDescription>
                             </Alert>
@@ -2766,13 +3248,17 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           {orderToUpdate.isApproveReETA === false && (
                             <Alert
                               style={{
-                                borderColor: '#DC2626',
-                                backgroundColor: 'rgba(220, 38, 38, 0.06)',
+                                borderColor: "#DC2626",
+                                backgroundColor: "rgba(220, 38, 38, 0.06)",
                               }}
                             >
-                              <AlertCircle className="h-4 w-4" style={{ color: '#DC2626' }} />
+                              <AlertCircle
+                                className="h-4 w-4"
+                                style={{ color: "#DC2626" }}
+                              />
                               <AlertDescription className="text-sm text-gray-700">
-                                Waiting for Re-ETA approval. Please wait until the request is reviewed before proceeding.
+                                Waiting for Re-ETA approval. Please wait until
+                                the request is reviewed before proceeding.
                               </AlertDescription>
                             </Alert>
                           )}
@@ -2782,21 +3268,24 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   </ScrollArea>
 
                   <DialogFooter className="mt-4">
-                    <Button variant="outline" onClick={() => setIsUpdateDialogOpen(false)}>
+                    <Button
+                      variant="outline"
+                      onClick={() => setIsUpdateDialogOpen(false)}
+                    >
                       Cancel
                     </Button>
                     <Button
-                      style={{ backgroundColor: '#014357' }}
+                      style={{ backgroundColor: "#014357" }}
                       className="text-white hover:opacity-90"
                       onClick={handleSubmitUpdate}
                       disabled={
                         submittingUpdate ||
                         !updateScheduleStatus ||
-                        updateScheduleStatus === 'no' ||
+                        updateScheduleStatus === "no" ||
                         orderToUpdate.isApproveReETA === false
                       }
                     >
-                      {submittingUpdate ? 'Submitting...' : 'Submit Update'}
+                      {submittingUpdate ? "Submitting..." : "Submit Update"}
                     </Button>
                   </DialogFooter>
                 </>
@@ -2804,18 +3293,26 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             </DialogContent>
           </Dialog>
 
-          <Dialog open={rescheduleDialogOpen} onOpenChange={setRescheduleDialogOpen}>
+          <Dialog
+            open={rescheduleDialogOpen}
+            onOpenChange={setRescheduleDialogOpen}
+          >
             <DialogContent className="sm:max-w-lg">
               <DialogHeader>
-                <DialogTitle style={{ color: '#014357' }}>Create Reschedule ETA Request</DialogTitle>
+                <DialogTitle style={{ color: "#014357" }}>
+                  Create Reschedule ETA Request
+                </DialogTitle>
                 <DialogDescription>
-                  Review the current schedule and submit a request with New ETD and New Lead Time.
+                  Review the current schedule and submit a request with New ETD
+                  and New Lead Time.
                 </DialogDescription>
               </DialogHeader>
 
               <div className="space-y-4 py-4">
                 <RequiredDeliveryDateCard
-                  deliveryDateValue={getOrderRequiredDeliveryDate(rescheduleTargetOrder)}
+                  deliveryDateValue={getOrderRequiredDeliveryDate(
+                    rescheduleTargetOrder,
+                  )}
                 />
 
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -2825,13 +3322,26 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                     </Label>
                     <Popover>
                       <PopoverTrigger asChild>
-                        <Button variant="outline" className="mt-1 w-full justify-start text-left" type="button">
+                        <Button
+                          variant="outline"
+                          className="mt-1 w-full justify-start text-left"
+                          type="button"
+                        >
                           <Calendar className="mr-2 h-4 w-4" />
-                          {newEtd ? format(newEtd, 'PPP') : <span>Select new ETD</span>}
+                          {newEtd ? (
+                            format(newEtd, "PPP")
+                          ) : (
+                            <span>Select new ETD</span>
+                          )}
                         </Button>
                       </PopoverTrigger>
                       <PopoverContent className="w-auto p-0">
-                        <CalendarComponent mode="single" selected={newEtd} onSelect={setNewEtd} initialFocus />
+                        <CalendarComponent
+                          mode="single"
+                          selected={newEtd}
+                          onSelect={setNewEtd}
+                          initialFocus
+                        />
                       </PopoverContent>
                     </Popover>
                   </div>
@@ -2853,15 +3363,20 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                 </div>
 
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                  <Label className="mb-2 block text-sm text-gray-600">New ETA (New ETD + New Lead Time)</Label>
-                  <p className="text-lg" style={{ color: '#014357' }}>
-                    {newEtaDateForReschedule ? format(newEtaDateForReschedule, 'MMM dd, yyyy') : 'Not set'}
+                  <Label className="mb-2 block text-sm text-gray-600">
+                    New ETA (New ETD + New Lead Time)
+                  </Label>
+                  <p className="text-lg" style={{ color: "#014357" }}>
+                    {newEtaDateForReschedule
+                      ? format(newEtaDateForReschedule, "MMM dd, yyyy")
+                      : "Not set"}
                   </p>
                 </div>
 
                 <div>
                   <Label htmlFor="rescheduleReason">
-                    Reason for Rescheduling <span className="text-red-500">*</span>
+                    Reason for Rescheduling{" "}
+                    <span className="text-red-500">*</span>
                   </Label>
                   <Textarea
                     id="rescheduleReason"
@@ -2875,16 +3390,20 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
               </div>
 
               <DialogFooter>
-                <Button variant="outline" onClick={handleCloseRescheduleDialog} disabled={submittingReschedule}>
+                <Button
+                  variant="outline"
+                  onClick={handleCloseRescheduleDialog}
+                  disabled={submittingReschedule}
+                >
                   Cancel
                 </Button>
                 <Button
                   onClick={handleSubmitReschedule}
-                  style={{ backgroundColor: '#014357' }}
+                  style={{ backgroundColor: "#014357" }}
                   className="text-white hover:opacity-90"
                   disabled={submittingReschedule}
                 >
-                  {submittingReschedule ? 'Submitting...' : 'Submit Request'}
+                  {submittingReschedule ? "Submitting..." : "Submit Request"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -2901,9 +3420,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
           >
             <DialogContent className="max-w-xl">
               <DialogHeader>
-                <DialogTitle style={{ color: '#014357' }}>Upload Purchase Order</DialogTitle>
+                <DialogTitle style={{ color: "#014357" }}>
+                  Upload Purchase Order
+                </DialogTitle>
                 <DialogDescription>
-                  Upload 3 file Excel terpisah untuk <b>ME2N</b>, <b>ME5A</b>, dan <b>ZMM013R</b>.
+                  Upload 3 file Excel terpisah untuk <b>ME2N</b>, <b>ME5A</b>,
+                  dan <b>ZMM013R</b>.
                 </DialogDescription>
               </DialogHeader>
 
@@ -2914,7 +3436,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   inputRef={fileInputME2NRef}
                   disabled={uploading}
                   onChange={handleFileChangeME2N}
-                  onClear={() => clearUploadFile('ME2N')}
+                  onClear={() => clearUploadFile("ME2N")}
                 />
 
                 <UploadFileField
@@ -2923,7 +3445,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   inputRef={fileInputME5ARef}
                   disabled={uploading}
                   onChange={handleFileChangeME5A}
-                  onClear={() => clearUploadFile('ME5A')}
+                  onClear={() => clearUploadFile("ME5A")}
                 />
 
                 <UploadFileField
@@ -2932,14 +3454,19 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   inputRef={fileInputZMM013RRef}
                   disabled={uploading}
                   onChange={handleFileChangeZMM013R}
-                  onClear={() => clearUploadFile('ZMM013R')}
+                  onClear={() => clearUploadFile("ZMM013R")}
                 />
 
                 {uploading && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-gray-600">{uploadStatusText || 'Uploading...'}</span>
-                      <span className="font-medium" style={{ color: '#014357' }}>
+                      <span className="text-gray-600">
+                        {uploadStatusText || "Uploading..."}
+                      </span>
+                      <span
+                        className="font-medium"
+                        style={{ color: "#014357" }}
+                      >
                         {uploadProgress}%
                       </span>
                     </div>
@@ -2949,30 +3476,35 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         className="h-full rounded-full transition-all duration-300"
                         style={{
                           width: `${uploadProgress}%`,
-                          backgroundColor: '#014357',
+                          backgroundColor: "#014357",
                         }}
                       />
                     </div>
                   </div>
                 )}
-
-                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                  Pastikan setiap file sesuai jenisnya: <b>ME2N</b>, <b>ME5A</b>, dan <b>ZMM013R</b>.
-                </div>
               </div>
 
               <DialogFooter>
-                <Button variant="outline" onClick={() => setIsUploadDialogOpen(false)} disabled={uploading}>
+                <Button
+                  variant="outline"
+                  onClick={() => setIsUploadDialogOpen(false)}
+                  disabled={uploading}
+                >
                   Cancel
                 </Button>
 
                 <Button
-                  style={{ backgroundColor: '#014357' }}
+                  style={{ backgroundColor: "#014357" }}
                   className="text-white hover:opacity-90"
                   onClick={handleSubmitUploadPO}
-                  disabled={uploading || !uploadFileME2N || !uploadFileME5A || !uploadFileZMM013R}
+                  disabled={
+                    uploading ||
+                    !uploadFileME2N ||
+                    !uploadFileME5A ||
+                    !uploadFileZMM013R
+                  }
                 >
-                  {uploading ? 'Uploading...' : 'Upload'}
+                  {uploading ? "Uploading..." : "Upload"}
                 </Button>
               </DialogFooter>
             </DialogContent>

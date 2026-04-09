@@ -88,7 +88,6 @@ namespace EXPOAPI.Services
                 ["Role"] = Get(payload, "Role"),
                 ["Department"] = Get(payload, "Department"),
                 ["Jobsite"] = Get(payload, "Jobsite"),
-                ["IsActive"] = NormalizeBool(Get(payload, "IsActive")),
                 ["UpdatedBy"] = actor
             };
 
