@@ -1,9 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Card } from '../ui/card';
-import { Button } from '../ui/button';
-import { Input } from '../ui/input';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
-import { Badge } from '../ui/badge';
+import { useEffect, useMemo, useState } from "react";
+import { Card } from "../ui/card";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../ui/table";
+import { Badge } from "../ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -11,7 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from '../ui/dialog';
+} from "../ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,9 +29,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from '../ui/alert-dialog';
-import { Label } from '../ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+} from "../ui/alert-dialog";
+import { Label } from "../ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 import {
   Pagination,
   PaginationContent,
@@ -33,7 +46,7 @@ import {
   PaginationLink,
   PaginationNext,
   PaginationPrevious,
-} from '../ui/pagination';
+} from "../ui/pagination";
 import {
   Search,
   Plus,
@@ -44,13 +57,16 @@ import {
   Users,
   ShieldCheck,
   User as UserIcon,
-} from 'lucide-react';
-import { Switch } from '../ui/switch';
-import { toast } from 'sonner';
-import { API } from '../../config';
-import { getAccessToken, redirectToLoginExpired } from '../../utils/authSession';
+} from "lucide-react";
+import { Switch } from "../ui/switch";
+import { toast } from "sonner";
+import { API } from "../../config";
+import {
+  getAccessToken,
+  redirectToLoginExpired,
+} from "../../utils/authSession";
 
-type RoleType = 'Admin' | 'Purchaser' | 'User' | string;
+type RoleType = "Admin" | "Purchaser" | "User" | string;
 
 interface InternalUser {
   id: number | string;
@@ -83,12 +99,12 @@ interface VerifiedUser {
 
 // ================= Shared helpers =================
 const buildAuthHeaders = (): HeadersInit => {
-  const local = localStorage.getItem('accessToken');
+  const local = localStorage.getItem("accessToken");
   const sessionToken = getAccessToken();
   const token = local || sessionToken;
 
   return {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 };
@@ -98,7 +114,7 @@ const fetchWithAuth = async (input: RequestInfo | URL, init?: RequestInit) => {
 
   if (res.status === 401) {
     redirectToLoginExpired();
-    throw new Error('Session expired');
+    throw new Error("Session expired");
   }
 
   return res;
@@ -115,12 +131,27 @@ const parseErrorResponse = async (res: Response): Promise<string> => {
   }
 };
 
-const DEPARTMENTS = ['Procurement', 'Finance', 'Operations', 'Logistics', 'HR', 'IT', 'Legal'];
-const JOBSITES = ['ADMO Mining', 'ADMO Hauling', 'SERA', 'MACO Mining', 'MACO Hauling', 'JAHO'];
+const DEPARTMENTS = [
+  "Procurement",
+  "Finance",
+  "Operations",
+  "Logistics",
+  "HR",
+  "IT",
+  "Legal",
+];
+const JOBSITES = [
+  "ADMO Mining",
+  "ADMO Hauling",
+  "SERA",
+  "MACO Mining",
+  "MACO Hauling",
+  "JAHO",
+];
 
 export function InternalUserManagement() {
   // ====== list & filter state ======
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [users, setUsers] = useState<InternalUser[]>([]);
@@ -132,26 +163,25 @@ export function InternalUserManagement() {
   // ====== edit user state ======
   const [editingUser, setEditingUser] = useState<InternalUser | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [editNRP, setEditNRP] = useState('');
-  const [editName, setEditName] = useState('');
-  const [editEmail, setEditEmail] = useState('');
-  const [editRole, setEditRole] = useState<RoleType>('');
-  const [editDepartment, setEditDepartment] = useState('');
-  const [editJobsite, setEditJobsite] = useState('');
-  const [editIsActive, setEditIsActive] = useState(true);
+  const [editNRP, setEditNRP] = useState("");
+  const [editName, setEditName] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editRole, setEditRole] = useState<RoleType>("");
+  const [editDepartment, setEditDepartment] = useState("");
+  const [editJobsite, setEditJobsite] = useState("");
 
   // ====== add user state ======
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [newUserNRP, setNewUserNRP] = useState('');
+  const [newUserNRP, setNewUserNRP] = useState("");
   const [verifiedUser, setVerifiedUser] = useState<VerifiedUser | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
 
-  const [newUserRole, setNewUserRole] = useState<RoleType>('');
-  const [newUserDepartment, setNewUserDepartment] = useState('');
-  const [newUserJobsite, setNewUserJobsite] = useState('');
-  const [newUserName, setNewUserName] = useState('');
-  const [newUserEmail, setNewUserEmail] = useState('');
-  const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserRole, setNewUserRole] = useState<RoleType>("");
+  const [newUserDepartment, setNewUserDepartment] = useState("");
+  const [newUserJobsite, setNewUserJobsite] = useState("");
+  const [newUserName, setNewUserName] = useState("");
+  const [newUserEmail, setNewUserEmail] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
 
   const isVerified = Boolean(verifiedUser);
 
@@ -186,22 +216,27 @@ export function InternalUserManagement() {
 
       const normalized: InternalUser[] = list.map((u: any) => ({
         id: u.ID_User ?? u.id,
-        nrp: u.NRP ?? u.nrp ?? '',
-        name: u.Name ?? u.Nama ?? u.name ?? '',
-        email: u.Email ?? u.email ?? '',
-        role: u.Role ?? u.role ?? 'User',
-        department: u.Department ?? u.department ?? '',
-        jobsite: u.Jobsite ?? u.jobsite ?? '',
+        nrp: u.NRP ?? u.nrp ?? "",
+        name: u.Name ?? u.Nama ?? u.name ?? "",
+        email: u.Email ?? u.email ?? "",
+        role: u.Role ?? u.role ?? "User",
+        department: u.Department ?? u.department ?? "",
+        jobsite: u.Jobsite ?? u.jobsite ?? "",
         isActive: u.IsActive ?? u.isActive ?? true,
       }));
 
       setUsers(normalized);
 
-      const rowsHeader = json.data?.summary ?? json.Data?.summary ?? json.summary ?? null;
-      setSummary(rowsHeader && typeof rowsHeader === 'object' ? (rowsHeader as UserSummary) : null);
+      const rowsHeader =
+        json.data?.summary ?? json.Data?.summary ?? json.summary ?? null;
+      setSummary(
+        rowsHeader && typeof rowsHeader === "object"
+          ? (rowsHeader as UserSummary)
+          : null,
+      );
     } catch (err: any) {
       console.error(err);
-      if (err?.message !== 'Session expired') {
+      if (err?.message !== "Session expired") {
         toast.error(`Failed to load users: ${err.message || err}`);
       }
     } finally {
@@ -216,30 +251,36 @@ export function InternalUserManagement() {
   // =============== helpers ===============
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
-      case 'Admin':
-        return '#014357';
-      case 'Purchaser':
-        return '#ED832D';
-      case 'User':
-        return '#008383';
+      case "Admin":
+        return "#014357";
+      case "Purchaser":
+        return "#ED832D";
+      case "User":
+        return "#008383";
       default:
-        return '#008383';
+        return "#008383";
     }
   };
 
-  const getRoleCount = (role: string) => users.filter((u) => u.role === role).length;
+  const getRoleCount = (role: string) =>
+    users.filter((u) => u.role === role).length;
 
-  const totalUsersValue = summary?.TotalUsers ?? summary?.totalUsers ?? users.length;
-  const totalAdminValue = summary?.TotalAdmin ?? summary?.totalAdmin ?? getRoleCount('Admin');
+  const totalUsersValue =
+    summary?.TotalUsers ?? summary?.totalUsers ?? users.length;
+  const totalAdminValue =
+    summary?.TotalAdmin ?? summary?.totalAdmin ?? getRoleCount("Admin");
   const totalPurchaserValue =
-    summary?.TotalPurchaser ?? summary?.totalPurchaser ?? getRoleCount('Purchaser');
-  const totalUserRoleValue = summary?.TotalUser ?? summary?.totalUser ?? getRoleCount('User');
+    summary?.TotalPurchaser ??
+    summary?.totalPurchaser ??
+    getRoleCount("Purchaser");
+  const totalUserRoleValue =
+    summary?.TotalUser ?? summary?.totalUser ?? getRoleCount("User");
 
   // =============== delete user ===============
   const deleteUser = async (userId: number | string) => {
     try {
       const res = await fetchWithAuth(API.DELETEUSER(userId), {
-        method: 'DELETE',
+        method: "DELETE",
         headers: buildAuthHeaders(),
         body: JSON.stringify({}),
       });
@@ -249,10 +290,10 @@ export function InternalUserManagement() {
       }
 
       setUsers((prev) => prev.filter((u) => u.id !== userId));
-      toast.success('User deleted successfully');
+      toast.success("User deleted successfully");
     } catch (err: any) {
       console.error(err);
-      if (err?.message !== 'Session expired') {
+      if (err?.message !== "Session expired") {
         toast.error(`Failed to delete user: ${err.message || err}`);
       }
     }
@@ -267,19 +308,18 @@ export function InternalUserManagement() {
     setEditRole(user.role);
     setEditDepartment(user.department);
     setEditJobsite(user.jobsite);
-    setEditIsActive(user.isActive);
+
     setIsEditDialogOpen(true);
   };
 
   const resetEditForm = () => {
     setEditingUser(null);
-    setEditNRP('');
-    setEditName('');
-    setEditEmail('');
-    setEditRole('');
-    setEditDepartment('');
-    setEditJobsite('');
-    setEditIsActive(true);
+    setEditNRP("");
+    setEditName("");
+    setEditEmail("");
+    setEditRole("");
+    setEditDepartment("");
+    setEditJobsite("");
   };
 
   const handleEditDialogChange = (open: boolean) => {
@@ -291,7 +331,7 @@ export function InternalUserManagement() {
     if (!editingUser) return;
 
     if (!editNRP || !editName || !editEmail) {
-      toast.error('NRP, Full Name, and Email are required.');
+      toast.error("NRP, Full Name, and Email are required.");
       return;
     }
 
@@ -304,11 +344,10 @@ export function InternalUserManagement() {
         Role: editRole,
         Department: editDepartment,
         Jobsite: editJobsite,
-        IsActive: editIsActive,
       };
 
       const res = await fetchWithAuth(API.UPDATEUSER(editingUser.id), {
-        method: 'PUT',
+        method: "PUT",
         headers: buildAuthHeaders(),
         body: JSON.stringify(payload),
       });
@@ -320,12 +359,12 @@ export function InternalUserManagement() {
       await res.json();
       await fetchUsers();
 
-      toast.success('User updated successfully');
+      toast.success("User updated successfully");
       setIsEditDialogOpen(false);
       resetEditForm();
     } catch (err: any) {
       console.error(err);
-      if (err?.message !== 'Session expired') {
+      if (err?.message !== "Session expired") {
         toast.error(`Failed to update user: ${err.message || err}`);
       }
     }
@@ -336,7 +375,7 @@ export function InternalUserManagement() {
     const nrp = newUserNRP.trim();
 
     if (!nrp) {
-      toast.error('Please enter NRP first');
+      toast.error("Please enter NRP first");
       return;
     }
 
@@ -344,26 +383,28 @@ export function InternalUserManagement() {
       setIsVerifying(true);
 
       const res = await fetchWithAuth(API.SSO_GETUSER(nrp), {
-        method: 'GET',
+        method: "GET",
         headers: buildAuthHeaders(),
       });
 
       if (!res.ok) {
         const msg = await parseErrorResponse(res);
         setVerifiedUser(null);
-        toast.error(msg || 'SSO lookup failed');
+        toast.error(msg || "SSO lookup failed");
         return;
       }
 
       const json = await res.json();
       const payload = json.Data ?? json.data ?? json;
 
-      const fullName = payload?.Name ?? payload?.FullName ?? payload?.name ?? '';
-      const email = payload?.Email ?? payload?.UserEmail ?? payload?.email ?? '';
+      const fullName =
+        payload?.Name ?? payload?.FullName ?? payload?.name ?? "";
+      const email =
+        payload?.Email ?? payload?.UserEmail ?? payload?.email ?? "";
 
       if (!fullName && !email) {
         setVerifiedUser(null);
-        toast.error('User not found in SSO');
+        toast.error("User not found in SSO");
         return;
       }
 
@@ -373,10 +414,10 @@ export function InternalUserManagement() {
 
       toast.success(`NRP verified: ${fullName}`);
     } catch (err: any) {
-      console.error('[verifyNRP] error:', err);
+      console.error("[verifyNRP] error:", err);
       setVerifiedUser(null);
-      if (err?.message !== 'Session expired') {
-        toast.error('Failed to verify NRP');
+      if (err?.message !== "Session expired") {
+        toast.error("Failed to verify NRP");
       }
     } finally {
       setIsVerifying(false);
@@ -390,17 +431,17 @@ export function InternalUserManagement() {
     const email = (verifiedUser?.email || newUserEmail).trim();
 
     if (!nrp || !name || !email) {
-      toast.error('NRP, Full Name, and Email are required.');
+      toast.error("NRP, Full Name, and Email are required.");
       return;
     }
 
     if (!newUserRole || !newUserDepartment || !newUserJobsite) {
-      toast.error('Role, Department, and Jobsite are required.');
+      toast.error("Role, Department, and Jobsite are required.");
       return;
     }
 
     if (!newUserPassword) {
-      toast.error('Password is required for all roles.');
+      toast.error("Password is required for all roles.");
       return;
     }
 
@@ -418,7 +459,7 @@ export function InternalUserManagement() {
       };
 
       const res = await fetchWithAuth(API.CREATEUSER(), {
-        method: 'POST',
+        method: "POST",
         headers: buildAuthHeaders(),
         body: JSON.stringify(payload),
       });
@@ -435,21 +476,21 @@ export function InternalUserManagement() {
       setIsAddDialogOpen(false);
     } catch (err: any) {
       console.error(err);
-      if (err?.message !== 'Session expired') {
+      if (err?.message !== "Session expired") {
         toast.error(`Failed to add user: ${err.message || err}`);
       }
     }
   };
 
   const resetAddUserForm = () => {
-    setNewUserNRP('');
+    setNewUserNRP("");
     setVerifiedUser(null);
-    setNewUserRole('');
-    setNewUserDepartment('');
-    setNewUserJobsite('');
-    setNewUserName('');
-    setNewUserEmail('');
-    setNewUserPassword('');
+    setNewUserRole("");
+    setNewUserDepartment("");
+    setNewUserJobsite("");
+    setNewUserName("");
+    setNewUserEmail("");
+    setNewUserPassword("");
   };
 
   const handleAddDialogChange = (open: boolean) => {
@@ -497,10 +538,15 @@ export function InternalUserManagement() {
   return (
     <div className="p-8">
       <div className="mb-8">
-        <h1 className="mb-2 text-2xl font-semibold" style={{ color: '#014357' }}>
+        <h1
+          className="mb-2 text-2xl font-semibold"
+          style={{ color: "#014357" }}
+        >
           Internal User Management
         </h1>
-        <p className="text-gray-600">Manage internal users, roles, and permissions</p>
+        <p className="text-gray-600">
+          Manage internal users, roles, and permissions
+        </p>
       </div>
 
       <div className="flex justify-between items-center mb-6 gap-4">
@@ -516,7 +562,10 @@ export function InternalUserManagement() {
 
         <Dialog open={isAddDialogOpen} onOpenChange={handleAddDialogChange}>
           <DialogTrigger asChild>
-            <Button style={{ backgroundColor: '#014357' }} className="text-white hover:opacity-90">
+            <Button
+              style={{ backgroundColor: "#014357" }}
+              className="text-white hover:opacity-90"
+            >
               <Plus className="h-4 w-4 mr-2" /> Add New User
             </Button>
           </DialogTrigger>
@@ -525,8 +574,9 @@ export function InternalUserManagement() {
             <DialogHeader>
               <DialogTitle>Add New User</DialogTitle>
               <DialogDescription>
-                Masukkan NRP lalu klik Verify. Nama &amp; Email akan terisi otomatis dan terkunci.
-                Setelah verifikasi, pilih Role, Department, Jobsite, lalu isi Password.
+                Masukkan NRP lalu klik Verify. Nama &amp; Email akan terisi
+                otomatis dan terkunci. Setelah verifikasi, pilih Role,
+                Department, Jobsite, lalu isi Password.
               </DialogDescription>
             </DialogHeader>
 
@@ -543,14 +593,18 @@ export function InternalUserManagement() {
                   {!isVerified ? (
                     <Button
                       onClick={verifyNRP}
-                      style={{ backgroundColor: '#014357' }}
+                      style={{ backgroundColor: "#014357" }}
                       className="text-white whitespace-nowrap"
                       disabled={!newUserNRP || isVerifying}
                     >
-                      {isVerifying ? 'Verifying…' : 'Verify'}
+                      {isVerifying ? "Verifying…" : "Verify"}
                     </Button>
                   ) : (
-                    <Button onClick={resetAddUserForm} variant="outline" className="whitespace-nowrap">
+                    <Button
+                      onClick={resetAddUserForm}
+                      variant="outline"
+                      className="whitespace-nowrap"
+                    >
                       Reset
                     </Button>
                   )}
@@ -561,7 +615,9 @@ export function InternalUserManagement() {
                 <div className="p-3 rounded-lg bg-green-50 border border-green-200 -mt-2 mb-2">
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="h-5 w-5 text-green-600" />
-                    <span className="text-green-700">NRP verified successfully</span>
+                    <span className="text-green-700">
+                      NRP verified successfully
+                    </span>
                   </div>
                 </div>
               )}
@@ -597,7 +653,7 @@ export function InternalUserManagement() {
                   value={newUserRole}
                   onValueChange={(val) => {
                     setNewUserRole(val);
-                    setNewUserPassword('');
+                    setNewUserPassword("");
                   }}
                   disabled={!isVerified}
                 >
@@ -621,7 +677,9 @@ export function InternalUserManagement() {
                     onChange={(e) => setNewUserPassword(e.target.value)}
                     placeholder="Type password"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Password is required for all roles.</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Password is required for all roles.
+                  </p>
                 </div>
               )}
 
@@ -666,10 +724,15 @@ export function InternalUserManagement() {
               </div>
 
               <Button
-                style={{ backgroundColor: '#014357' }}
+                style={{ backgroundColor: "#014357" }}
                 className="w-full text-white"
                 onClick={addNewUser}
-                disabled={!isVerified || !newUserRole || !newUserDepartment || !newUserJobsite}
+                disabled={
+                  !isVerified ||
+                  !newUserRole ||
+                  !newUserDepartment ||
+                  !newUserJobsite
+                }
               >
                 Add User
               </Button>
@@ -681,48 +744,60 @@ export function InternalUserManagement() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <Card className="p-4">
           <div className="flex items-center gap-2 mb-2">
-            <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(1, 67, 87, 0.1)' }}>
-              <Users className="h-4 w-4" style={{ color: '#014357' }} />
+            <div
+              className="p-2 rounded-lg"
+              style={{ backgroundColor: "rgba(1, 67, 87, 0.1)" }}
+            >
+              <Users className="h-4 w-4" style={{ color: "#014357" }} />
             </div>
             <div className="text-gray-600 text-sm">Total Users</div>
           </div>
-          <div className="text-3xl" style={{ color: '#014357' }}>
-            {isLoading ? '...' : totalUsersValue}
+          <div className="text-3xl" style={{ color: "#014357" }}>
+            {isLoading ? "..." : totalUsersValue}
           </div>
         </Card>
 
         <Card className="p-4">
           <div className="flex items-center gap-2 mb-2">
-            <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(0, 131, 131, 0.1)' }}>
-              <ShieldCheck className="h-4 w-4" style={{ color: '#008383' }} />
+            <div
+              className="p-2 rounded-lg"
+              style={{ backgroundColor: "rgba(0, 131, 131, 0.1)" }}
+            >
+              <ShieldCheck className="h-4 w-4" style={{ color: "#008383" }} />
             </div>
             <div className="text-gray-600 text-sm">Admins</div>
           </div>
-          <div className="text-3xl" style={{ color: '#008383' }}>
+          <div className="text-3xl" style={{ color: "#008383" }}>
             {totalAdminValue}
           </div>
         </Card>
 
         <Card className="p-4">
           <div className="flex items-center gap-2 mb-2">
-            <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(237, 131, 45, 0.1)' }}>
-              <UserCheck className="h-4 w-4" style={{ color: '#ED832D' }} />
+            <div
+              className="p-2 rounded-lg"
+              style={{ backgroundColor: "rgba(237, 131, 45, 0.1)" }}
+            >
+              <UserCheck className="h-4 w-4" style={{ color: "#ED832D" }} />
             </div>
             <div className="text-gray-600 text-sm">Purchasers</div>
           </div>
-          <div className="text-3xl" style={{ color: '#ED832D' }}>
+          <div className="text-3xl" style={{ color: "#ED832D" }}>
             {totalPurchaserValue}
           </div>
         </Card>
 
         <Card className="p-4">
           <div className="flex items-center gap-2 mb-2">
-            <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(106, 167, 93, 0.1)' }}>
-              <UserIcon className="h-4 w-4" style={{ color: '#6AA75D' }} />
+            <div
+              className="p-2 rounded-lg"
+              style={{ backgroundColor: "rgba(106, 167, 93, 0.1)" }}
+            >
+              <UserIcon className="h-4 w-4" style={{ color: "#6AA75D" }} />
             </div>
             <div className="text-gray-600 text-sm">Users</div>
           </div>
-          <div className="text-3xl" style={{ color: '#6AA75D' }}>
+          <div className="text-3xl" style={{ color: "#6AA75D" }}>
             {totalUserRoleValue}
           </div>
         </Card>
@@ -733,37 +808,21 @@ export function InternalUserManagement() {
           <DialogHeader>
             <DialogTitle>Edit User</DialogTitle>
             <DialogDescription>
-              Update internal user information and activation status.
+              Update internal user information.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 mt-4">
-            <div className="flex items-start gap-4">
-              <div className="flex-1">
-                <Label className="mb-2">Full Name</Label>
-                <Input
-                  value={editName}
-                  onChange={() => {}}
-                  placeholder="Full name"
-                  className="bg-gray-50 opacity-80 cursor-not-allowed"
-                  readOnly
-                  disabled
-                />
-              </div>
-
-              <div className="flex flex-col items-end gap-2 pt-1">
-                <span className="text-xs text-gray-600">Status</span>
-                <div
-                  className={`flex items-center gap-2 px-3 py-1 rounded-full border text-xs ${
-                    editIsActive
-                      ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                      : 'bg-red-50 border-red-200 text-red-700'
-                  }`}
-                >
-                  <span className="font-medium">{editIsActive ? 'Active' : 'Inactive'}</span>
-                  <Switch checked={editIsActive} onCheckedChange={setEditIsActive} />
-                </div>
-              </div>
+            <div>
+              <Label className="mb-2">Full Name</Label>
+              <Input
+                value={editName}
+                onChange={() => {}}
+                placeholder="Full name"
+                className="bg-gray-50 opacity-80 cursor-not-allowed"
+                readOnly
+                disabled
+              />
             </div>
 
             <div>
@@ -793,7 +852,10 @@ export function InternalUserManagement() {
 
             <div>
               <Label className="mb-2">Role</Label>
-              <Select value={editRole} onValueChange={(val) => setEditRole(val)}>
+              <Select
+                value={editRole}
+                onValueChange={(val) => setEditRole(val)}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select role" />
                 </SelectTrigger>
@@ -838,7 +900,7 @@ export function InternalUserManagement() {
             </div>
 
             <Button
-              style={{ backgroundColor: '#014357' }}
+              style={{ backgroundColor: "#014357" }}
               className="w-full text-white"
               onClick={updateUser}
             >
@@ -866,7 +928,9 @@ export function InternalUserManagement() {
             <TableBody>
               {paginatedUsers.map((user) => (
                 <TableRow key={user.id} className="h-12">
-                  <TableCell className="px-4 py-2 align-middle">{user.nrp}</TableCell>
+                  <TableCell className="px-4 py-2 align-middle">
+                    {user.nrp}
+                  </TableCell>
 
                   <TableCell className="px-4 py-2 align-middle">
                     <div className="flex items-center gap-2">
@@ -893,8 +957,12 @@ export function InternalUserManagement() {
                     </Badge>
                   </TableCell>
 
-                  <TableCell className="px-4 py-2 align-middle">{user.department}</TableCell>
-                  <TableCell className="px-4 py-2 align-middle">{user.jobsite}</TableCell>
+                  <TableCell className="px-4 py-2 align-middle">
+                    {user.department}
+                  </TableCell>
+                  <TableCell className="px-4 py-2 align-middle">
+                    {user.jobsite}
+                  </TableCell>
 
                   <TableCell className="px-4 py-2 align-middle text-right">
                     <div className="flex items-center justify-end gap-2">
@@ -902,7 +970,7 @@ export function InternalUserManagement() {
                         variant="outline"
                         size="icon"
                         className="h-8 w-8 p-0 border-[1px]"
-                        style={{ borderColor: '#014357', color: '#014357' }}
+                        style={{ borderColor: "#014357", color: "#014357" }}
                         onClick={() => openEditDialog(user)}
                       >
                         <Pencil className="h-4 w-4" />
@@ -914,7 +982,7 @@ export function InternalUserManagement() {
                             variant="outline"
                             size="icon"
                             className="h-8 w-8 p-0 border-[1px]"
-                            style={{ borderColor: '#dc2626', color: '#dc2626' }}
+                            style={{ borderColor: "#dc2626", color: "#dc2626" }}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -933,7 +1001,7 @@ export function InternalUserManagement() {
                             <AlertDialogCancel>Cancel</AlertDialogCancel>
                             <AlertDialogAction
                               onClick={() => deleteUser(user.id)}
-                              style={{ backgroundColor: '#dc2626' }}
+                              style={{ backgroundColor: "#dc2626" }}
                             >
                               Delete User
                             </AlertDialogAction>
@@ -947,7 +1015,10 @@ export function InternalUserManagement() {
 
               {!isLoading && paginatedUsers.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="px-4 py-6 text-center text-sm text-gray-500">
+                  <TableCell
+                    colSpan={7}
+                    className="px-4 py-6 text-center text-sm text-gray-500"
+                  >
                     No users found.
                   </TableCell>
                 </TableRow>
@@ -959,8 +1030,13 @@ export function InternalUserManagement() {
         {filteredUsers.length > 0 && (
           <div className="flex items-center justify-between px-4 py-4 border-t gap-4">
             <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-600 whitespace-nowrap">Rows per page:</span>
-              <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
+              <span className="text-sm text-gray-600 whitespace-nowrap">
+                Rows per page:
+              </span>
+              <Select
+                value={itemsPerPage.toString()}
+                onValueChange={handleItemsPerPageChange}
+              >
                 <SelectTrigger className="w-[70px]">
                   <SelectValue />
                 </SelectTrigger>
@@ -977,8 +1053,14 @@ export function InternalUserManagement() {
               <PaginationContent>
                 <PaginationItem>
                   <PaginationPrevious
-                    onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-                    className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                    onClick={() =>
+                      setCurrentPage((prev) => Math.max(1, prev - 1))
+                    }
+                    className={
+                      currentPage === 1
+                        ? "pointer-events-none opacity-50"
+                        : "cursor-pointer"
+                    }
                   />
                 </PaginationItem>
 
@@ -988,7 +1070,8 @@ export function InternalUserManagement() {
                   if (
                     pageNumber === 1 ||
                     pageNumber === totalPages ||
-                    (pageNumber >= currentPage - 1 && pageNumber <= currentPage + 1)
+                    (pageNumber >= currentPage - 1 &&
+                      pageNumber <= currentPage + 1)
                   ) {
                     return (
                       <PaginationItem key={pageNumber}>
@@ -1003,7 +1086,10 @@ export function InternalUserManagement() {
                     );
                   }
 
-                  if (pageNumber === currentPage - 2 || pageNumber === currentPage + 2) {
+                  if (
+                    pageNumber === currentPage - 2 ||
+                    pageNumber === currentPage + 2
+                  ) {
                     return <PaginationEllipsis key={pageNumber} />;
                   }
 
@@ -1012,9 +1098,13 @@ export function InternalUserManagement() {
 
                 <PaginationItem>
                   <PaginationNext
-                    onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                    onClick={() =>
+                      setCurrentPage((prev) => Math.min(totalPages, prev + 1))
+                    }
                     className={
-                      currentPage === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'
+                      currentPage === totalPages
+                        ? "pointer-events-none opacity-50"
+                        : "cursor-pointer"
                     }
                   />
                 </PaginationItem>
@@ -1022,7 +1112,8 @@ export function InternalUserManagement() {
             </Pagination>
 
             <div className="text-sm text-gray-600 whitespace-nowrap">
-              Showing {startIndex + 1} to {Math.min(endIndex, filteredUsers.length)} of{' '}
+              Showing {startIndex + 1} to{" "}
+              {Math.min(endIndex, filteredUsers.length)} of{" "}
               {filteredUsers.length} results
             </div>
           </div>

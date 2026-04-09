@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { format } from 'date-fns';
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { format } from "date-fns";
 import {
   AlertCircle,
   ArrowLeft,
@@ -13,16 +13,19 @@ import {
   Package,
   PackageCheck,
   Truck,
-} from 'lucide-react';
-import { toast } from 'sonner';
+} from "lucide-react";
+import { toast } from "sonner";
 
-import { API } from '../../config';
-import { getAccessToken, redirectToLoginExpired } from '../../utils/authSession';
-import { Alert, AlertDescription } from '../ui/alert';
-import { Badge } from '../ui/badge';
-import { Button } from '../ui/button';
-import { Calendar as CalendarComponent } from '../ui/calendar';
-import { Card } from '../ui/card';
+import { API } from "../../config";
+import {
+  getAccessToken,
+  redirectToLoginExpired,
+} from "../../utils/authSession";
+import { Alert, AlertDescription } from "../ui/alert";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Calendar as CalendarComponent } from "../ui/calendar";
+import { Card } from "../ui/card";
 import {
   Dialog,
   DialogContent,
@@ -30,13 +33,13 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '../ui/dialog';
-import { Input } from '../ui/input';
-import { Label } from '../ui/label';
-import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
-import { Textarea } from '../ui/textarea';
-import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
-import type { User } from './Login';
+} from "../ui/dialog";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { Textarea } from "../ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
+import type { User } from "./Login";
 
 // ===================== Types =====================
 interface PurchaseOrderDetailProps {
@@ -47,17 +50,17 @@ interface PurchaseOrderDetailProps {
 }
 
 type FlowStatus =
-  | 'PO Submitted'
-  | 'Work in Progress'
-  | 'On Delivery'
-  | 'Received';
+  | "PO Submitted"
+  | "Work in Progress"
+  | "On Delivery"
+  | "Received";
 
 type ApiStatusFlowRow = {
   Status?: string | null;
   StatusAt?: string | null;
-  ['Purchasing Document']?: string | null;
+  ["Purchasing Document"]?: string | null;
   Item?: string | null;
-  ['ID PO Item']?: string | null;
+  ["ID PO Item"]?: string | null;
   IDPOItem?: string | null;
   IdPoItem?: string | null;
 };
@@ -80,7 +83,7 @@ type NormalizedReEta = {
   newETA: string | null;
   proposedETADays: string;
   reason: string;
-  status: 'Pending' | 'Approved' | 'Rejected' | string;
+  status: "Pending" | "Approved" | "Rejected" | string;
   responseDate: string | null;
   evidenceFile?: ReEtaFile | null;
   approvalFile?: ReEtaFile | null;
@@ -91,33 +94,33 @@ type NormalizedReEta = {
 
 type PoDetail = {
   POID?: string | null;
-  ['ID PO Item']?: string | null;
+  ["ID PO Item"]?: string | null;
   IDPOItem?: string | null;
   IdPoItem?: string | null;
   idPoItem?: string | null;
   POIDItem?: string | null;
   POItemID?: string | null;
 
-  ['Purchasing Document']?: string | null;
-  ['Purchase Requisition']?: string | null;
+  ["Purchasing Document"]?: string | null;
+  ["Purchase Requisition"]?: string | null;
   Item?: string | null;
   Material?: string | null;
-  ['Document Date']?: string | null;
-  ['Delivery date']?: string | null;
+  ["Document Date"]?: string | null;
+  ["Delivery date"]?: string | null;
   DeliveryDate?: string | null;
-  ['Purchasing Doc. Type']?: string | null;
-  ['Purchasing Group']?: string | null;
+  ["Purchasing Doc. Type"]?: string | null;
+  ["Purchasing Group"]?: string | null;
   MaterialDescription?: string | null;
   VendorName?: string | null;
-  ['Quantity Received']?: string | number | null;
+  ["Quantity Received"]?: string | number | null;
   StillToBeDeliveredQty?: string | number | null;
-  ['Qty Order']?: string | number | null;
+  ["Qty Order"]?: string | number | null;
   QtyOrder?: string | number | null;
   Plant?: string | null;
-  ['Storage location']?: string | null;
-  ['Changed On']?: string | null;
-  ['Created By']?: string | null;
-  ['GR Created Date']?: string | null;
+  ["Storage location"]?: string | null;
+  ["Changed On"]?: string | null;
+  ["Created By"]?: string | null;
+  ["GR Created Date"]?: string | null;
 
   CurrentETD?: string | null;
   CurrentETADays?: string | number | null;
@@ -125,10 +128,10 @@ type PoDetail = {
 
   ETD?: string | null;
   ETA?: string | null;
-  ['WIP Remark']?: string | null;
+  ["WIP Remark"]?: string | null;
   WIPRemark?: string | null;
   AWB?: string | null;
-  ['Delivery Update']?: string | null;
+  ["Delivery Update"]?: string | null;
   LeadtimeDelivery?: string | number | null;
 
   AWBFileName?: string | null;
@@ -184,34 +187,34 @@ type RequiredDeliveryDateCardProps = {
 
 // ===================== Constants =====================
 const FLOW_ORDER: FlowStatus[] = [
-  'PO Submitted',
-  'Work in Progress',
-  'On Delivery',
-  'Received',
+  "PO Submitted",
+  "Work in Progress",
+  "On Delivery",
+  "Received",
 ];
 
 const STATUS_LINE_TOP = 24;
 
 const ETA_DELIVERY_DATE_ERROR =
-  'ETA exceeds the delivery date. Please submit a Reschedule ETA Request again before proceeding.';
+  "ETA exceeds the delivery date. Please submit a Reschedule ETA Request again before proceeding.";
 
 const WIP_REETA_REQUIRED_ERROR =
-  'New ETA exceeds the required delivery date. Please submit a Re-ETA request again before proceeding.';
+  "New ETA exceeds the required delivery date. Please submit a Re-ETA request again before proceeding.";
 
 const WAITING_REETA_APPROVAL_MESSAGE =
-  'Waiting for Re-ETA approval. Please wait until the request is reviewed before proceeding.';
+  "Waiting for Re-ETA approval. Please wait until the request is reviewed before proceeding.";
 
 // ===================== Auth =====================
 const getAuthToken = (): string => {
-  const local = localStorage.getItem('accessToken');
+  const local = localStorage.getItem("accessToken");
   const sessionToken = getAccessToken();
-  return local || sessionToken || '';
+  return local || sessionToken || "";
 };
 
 const buildAuthHeaders = (): HeadersInit => {
   const token = getAuthToken();
   return {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 };
@@ -226,14 +229,15 @@ const fetchWithAuth = async (input: RequestInfo | URL, init?: RequestInit) => {
 
   if (res.status === 401) {
     redirectToLoginExpired();
-    throw new Error('Session expired');
+    throw new Error("Session expired");
   }
 
   return res;
 };
 
 // ===================== Helpers =====================
-const trim = (v: unknown): string => (v === null || v === undefined ? '' : String(v).trim());
+const trim = (v: unknown): string =>
+  v === null || v === undefined ? "" : String(v).trim();
 
 const parseServerDate = (value?: string | number | null): Date | undefined => {
   const s = trim(value);
@@ -242,7 +246,8 @@ const parseServerDate = (value?: string | number | null): Date | undefined => {
   return Number.isNaN(d.getTime()) ? undefined : d;
 };
 
-const startOfDay = (date: Date): Date => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+const startOfDay = (date: Date): Date =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
 const todayStart = (): Date => startOfDay(new Date());
 
@@ -256,12 +261,14 @@ const addDaysDateOnly = (date: Date, days: number): Date => {
 const diffDaysDateOnly = (later: Date, earlier: Date): number => {
   const laterOnly = startOfDay(later);
   const earlierOnly = startOfDay(earlier);
-  return Math.ceil((laterOnly.getTime() - earlierOnly.getTime()) / (1000 * 60 * 60 * 24));
+  return Math.ceil(
+    (laterOnly.getTime() - earlierOnly.getTime()) / (1000 * 60 * 60 * 24),
+  );
 };
 
 const safeDateOnly = (v: unknown): string | null => {
   const d = parseServerDate(v as string | number | null | undefined);
-  return d ? format(d, 'yyyy-MM-dd') : null;
+  return d ? format(d, "yyyy-MM-dd") : null;
 };
 
 const toIsoString = (v?: string | null): string | null => {
@@ -275,30 +282,30 @@ const toIsoDateTime = (v?: Date | null): string | null => {
 };
 
 const toNumberOrZero = (value: unknown): number => {
-  if (value === null || value === undefined || value === '') return 0;
+  if (value === null || value === undefined || value === "") return 0;
   const n = Number(value);
   return Number.isNaN(n) ? 0 : n;
 };
 
 const formatDate = (dateString: string): string => {
   const d = new Date(dateString);
-  if (Number.isNaN(d.getTime())) return '-';
-  return d.toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
   });
 };
 
 const formatDateTime = (dateTimeString: string): string => {
   const d = new Date(dateTimeString);
-  if (Number.isNaN(d.getTime())) return '-';
-  return d.toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
   });
 };
 
@@ -314,70 +321,73 @@ const mapFlowStatus = (backendStatus?: string | null): FlowStatus | null => {
 
   const u = s.toUpperCase();
 
-  if (u === 'SUBMITTED' || u === 'PO SUBMITTED') return 'PO Submitted';
-  if (u === 'WORK IN PROGRESS') return 'Work in Progress';
-  if (u === 'ON DELIVERY') return 'On Delivery';
-  if (u === 'FULLY RECEIVED' || u === 'RECEIVED') return 'Received';
+  if (u === "SUBMITTED" || u === "PO SUBMITTED") return "PO Submitted";
+  if (u === "WORK IN PROGRESS") return "Work in Progress";
+  if (u === "ON DELIVERY") return "On Delivery";
+  if (u === "FULLY RECEIVED" || u === "RECEIVED") return "Received";
 
-  if (s === 'Submitted') return 'PO Submitted';
-  if (s === 'Work In Progress' || s === 'Work in Progress') return 'Work in Progress';
-  if (s === 'On Delivery') return 'On Delivery';
-  if (s === 'Fully Received' || s === 'Received') return 'Received';
+  if (s === "Submitted") return "PO Submitted";
+  if (s === "Work In Progress" || s === "Work in Progress")
+    return "Work in Progress";
+  if (s === "On Delivery") return "On Delivery";
+  if (s === "Fully Received" || s === "Received") return "Received";
 
   return null;
 };
 
 const getStatusColor = (status: string) => {
   switch (status) {
-    case 'PO Submitted':
-      return '#ED832D';
-    case 'Work in Progress':
-      return '#5C8CB6';
-    case 'On Delivery':
-      return '#008383';
-    case 'Received':
-      return '#6AA75D';
+    case "PO Submitted":
+      return "#ED832D";
+    case "Work in Progress":
+      return "#5C8CB6";
+    case "On Delivery":
+      return "#008383";
+    case "Received":
+      return "#6AA75D";
     default:
-      return '#014357';
+      return "#014357";
   }
 };
 
 const getRescheduleStatusColor = (status: string) => {
   switch (status) {
-    case 'Pending':
-      return '#ED832D';
-    case 'Approved':
-      return '#6AA75D';
-    case 'Rejected':
-      return '#DC2626';
+    case "Pending":
+      return "#ED832D";
+    case "Approved":
+      return "#6AA75D";
+    case "Rejected":
+      return "#DC2626";
     default:
-      return '#014357';
+      return "#014357";
   }
 };
 
 const getStatusIcon = (statusName: string) => {
   switch (statusName) {
-    case 'PO Submitted':
+    case "PO Submitted":
       return FileText;
-    case 'Work in Progress':
+    case "Work in Progress":
       return Package;
-    case 'On Delivery':
+    case "On Delivery":
       return Truck;
-    case 'Received':
+    case "Received":
       return PackageCheck;
     default:
       return FileText;
   }
 };
 
-const normalizeRescheduleStatus = (raw: unknown): 'Pending' | 'Approved' | 'Rejected' | string => {
+const normalizeRescheduleStatus = (
+  raw: unknown,
+): "Pending" | "Approved" | "Rejected" | string => {
   const s = trim(raw);
-  if (!s) return 'Pending';
+  if (!s) return "Pending";
 
   const u = s.toUpperCase();
-  if (u === 'PENDING') return 'Pending';
-  if (u === 'APPROVED') return 'Approved';
-  if (u === 'REJECTED') return 'Rejected';
+  if (u === "PENDING") return "Pending";
+  if (u === "APPROVED") return "Approved";
+  if (u === "REJECTED") return "Rejected";
 
   return s;
 };
@@ -400,9 +410,12 @@ const getReEtaRequestedAt = (row: any): Date | null => {
 const getLatestApprovedReEta = (rows: any[]): any | null => {
   const approvedRows = rows.filter((row) => {
     const status = normalizeRescheduleStatus(
-      row?.['Reschedule Status'] ?? row?.RescheduleStatus ?? row?.status ?? row?.Status
+      row?.["Reschedule Status"] ??
+        row?.RescheduleStatus ??
+        row?.status ??
+        row?.Status,
     );
-    return status === 'Approved';
+    return status === "Approved";
   });
 
   if (!approvedRows.length) return null;
@@ -424,7 +437,7 @@ const pickBase64File = (
   base64Data: unknown,
   contentType?: unknown,
   size?: unknown,
-  fallbackName = 'File'
+  fallbackName = "File",
 ): ReEtaFile | null => {
   const base64 = trim(base64Data);
   if (!base64) return null;
@@ -432,7 +445,8 @@ const pickBase64File = (
   const name = trim(fileName) || fallbackName;
   const mime = trim(contentType) || null;
 
-  const numericSize = size === null || size === undefined || size === '' ? null : Number(size);
+  const numericSize =
+    size === null || size === undefined || size === "" ? null : Number(size);
 
   return {
     name,
@@ -448,47 +462,62 @@ const pickBase64File = (
 const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
   const id = safeId(
     r?.POREETANUMBER ??
-      r?.['POREETANUMBER'] ??
+      r?.["POREETANUMBER"] ??
       r?.ReETARequestID ??
-      r?.['ReETARequestID'] ??
+      r?.["ReETARequestID"] ??
       r?.id ??
       r?.ID ??
       r?.RequestID ??
       r?.RequestNo,
-    `RSR-${String(idx + 1).padStart(3, '0')}`
+    `RSR-${String(idx + 1).padStart(3, "0")}`,
   );
 
   const status = normalizeRescheduleStatus(
-    r?.['Reschedule Status'] ?? r?.RescheduleStatus ?? r?.status ?? r?.Status
+    r?.["Reschedule Status"] ?? r?.RescheduleStatus ?? r?.status ?? r?.Status,
   );
 
   const oldETA = safeDateOnly(r?.OldETA ?? r?.oldETA);
   const newETA = safeDateOnly(r?.NewETA ?? r?.newETA);
 
   const requestDate = safeDateOnly(
-    r?.RequestedAt ?? r?.requestDate ?? r?.RequestDate ?? r?.CreatedAt ?? r?.CREATED_AT
+    r?.RequestedAt ??
+      r?.requestDate ??
+      r?.RequestDate ??
+      r?.CreatedAt ??
+      r?.CREATED_AT,
   );
 
   const responseDate = safeDateOnly(
-    r?.UpdatedAt ?? r?.UPDATED_AT ?? r?.ResponseAt ?? r?.responseDate ?? r?.ResponseDate
+    r?.UpdatedAt ??
+      r?.UPDATED_AT ??
+      r?.ResponseAt ??
+      r?.responseDate ??
+      r?.ResponseDate,
   );
 
   const requestedBy =
-    trim(r?.RequestedBy ?? r?.requestedBy ?? r?.CREATED_BY ?? r?.VendorName ?? r?.SupplierName) || '-';
+    trim(
+      r?.RequestedBy ??
+        r?.requestedBy ??
+        r?.CREATED_BY ??
+        r?.VendorName ??
+        r?.SupplierName,
+    ) || "-";
 
   const reason =
     trim(
-      r?.['Reschedule Reason'] ??
+      r?.["Reschedule Reason"] ??
         r?.RescheduleReason ??
         r?.reason ??
         r?.Reason ??
         r?.remarks ??
         r?.Remarks ??
         r?.Note ??
-        r?.note
-    ) || '-';
+        r?.note,
+    ) || "-";
 
-  const proposedETADays = trim(r?.ProposedETADays ?? r?.['Proposed ETA']) || '-';
+  const proposedETADays =
+    trim(r?.ProposedETADays ?? r?.["Proposed ETA"]) || "-";
 
   const evidenceFile =
     pickBase64File(
@@ -496,7 +525,7 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
       r?.EvidenceBase64Data,
       r?.EvidenceContentType,
       r?.EvidenceSize,
-      'Evidence File'
+      "Evidence File",
     ) || null;
 
   const feedbackFile =
@@ -505,7 +534,7 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
       r?.FeedbackBase64Data,
       r?.FeedbackContentType,
       r?.FeedbackSize,
-      'Feedback File'
+      "Feedback File",
     ) || null;
 
   const vendorRespFile =
@@ -514,7 +543,7 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
       r?.VendorRespBase64Data,
       r?.VendorRespContentType,
       r?.VendorRespSize,
-      'Vendor Response File'
+      "Vendor Response File",
     ) || null;
 
   const approvalFile =
@@ -523,8 +552,8 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
       r?.ApprovalFile,
       r?.FeedbackContentType,
       r?.FeedbackSize,
-      'Approval File'
-    ) || (status === 'Approved' ? feedbackFile : null);
+      "Approval File",
+    ) || (status === "Approved" ? feedbackFile : null);
 
   const rejectionFile =
     pickBase64File(
@@ -532,8 +561,8 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
       r?.RejectionFile,
       r?.FeedbackContentType,
       r?.FeedbackSize,
-      'Rejection File'
-    ) || (status === 'Rejected' ? feedbackFile : null);
+      "Rejection File",
+    ) || (status === "Rejected" ? feedbackFile : null);
 
   const confirmationFile =
     pickBase64File(
@@ -541,8 +570,8 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
       r?.ConfirmationFile,
       r?.VendorRespContentType,
       r?.VendorRespSize,
-      'Confirmation File'
-    ) || (status === 'Rejected' ? vendorRespFile : null);
+      "Confirmation File",
+    ) || (status === "Rejected" ? vendorRespFile : null);
 
   const waitingFile =
     pickBase64File(
@@ -550,8 +579,8 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
       r?.WaitingFile,
       r?.FeedbackContentType,
       r?.FeedbackSize,
-      'Waiting File'
-    ) || (status !== 'Approved' && status !== 'Rejected' ? feedbackFile : null);
+      "Waiting File",
+    ) || (status !== "Approved" && status !== "Rejected" ? feedbackFile : null);
 
   return {
     id,
@@ -571,44 +600,52 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
   };
 };
 
-const canCreateReschedule = (role: User['role'], status: string) =>
-  role === 'vendor' && (status === 'Work in Progress' || status === 'On Delivery');
+const canCreateReschedule = (role: User["role"], status: string) =>
+  role === "vendor" &&
+  (status === "Work in Progress" || status === "On Delivery");
 
-const extractIdPoItem = (detail: PoDetail | null, flowRows: ApiStatusFlowRow[]): string => {
+const extractIdPoItem = (
+  detail: PoDetail | null,
+  flowRows: ApiStatusFlowRow[],
+): string => {
   const fromDetail = trim(
-    detail?.['ID PO Item'] ??
+    detail?.["ID PO Item"] ??
       detail?.IDPOItem ??
       detail?.IdPoItem ??
       detail?.idPoItem ??
       detail?.POIDItem ??
       detail?.POItemID ??
-      detail?.POID
+      detail?.POID,
   );
 
   if (fromDetail) return fromDetail;
 
   const fromFlow = flowRows.find(
     (r) =>
-      trim(r?.['ID PO Item']) ||
+      trim(r?.["ID PO Item"]) ||
       trim(r?.IDPOItem) ||
       trim(r?.IdPoItem) ||
-      (trim(r?.['Purchasing Document']) && trim(r?.Item))
+      (trim(r?.["Purchasing Document"]) && trim(r?.Item)),
   );
 
-  const direct = trim(fromFlow?.['ID PO Item'] ?? fromFlow?.IDPOItem ?? fromFlow?.IdPoItem);
+  const direct = trim(
+    fromFlow?.["ID PO Item"] ?? fromFlow?.IDPOItem ?? fromFlow?.IdPoItem,
+  );
   if (direct) return direct;
 
-  const purchasingDocument = trim(fromFlow?.['Purchasing Document']);
+  const purchasingDocument = trim(fromFlow?.["Purchasing Document"]);
   const item = trim(fromFlow?.Item);
 
   if (purchasingDocument && item) return `${purchasingDocument}-${item}`;
-  return '';
+  return "";
 };
 
 const diffDaysFromNow = (date: Date): number => {
   const startToday = todayStart();
   const target = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  return Math.ceil((target.getTime() - startToday.getTime()) / (1000 * 60 * 60 * 24));
+  return Math.ceil(
+    (target.getTime() - startToday.getTime()) / (1000 * 60 * 60 * 24),
+  );
 };
 
 const getDaysUntilDelivery = (value?: string | null): number | null => {
@@ -616,13 +653,19 @@ const getDaysUntilDelivery = (value?: string | null): number | null => {
   if (!target) return null;
 
   const startToday = todayStart();
-  const startTarget = new Date(target.getFullYear(), target.getMonth(), target.getDate());
+  const startTarget = new Date(
+    target.getFullYear(),
+    target.getMonth(),
+    target.getDate(),
+  );
 
   const diffMs = startTarget.getTime() - startToday.getTime();
   return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 };
 
-const buildStatusHistory = (rows: ApiStatusFlowRow[]): Record<string, string> => {
+const buildStatusHistory = (
+  rows: ApiStatusFlowRow[],
+): Record<string, string> => {
   const map: Record<string, string> = {};
   for (const row of rows) {
     const st = mapFlowStatus(row.Status);
@@ -639,17 +682,26 @@ const getLastValidStatus = (rows: ApiStatusFlowRow[]): FlowStatus => {
     return !!mappedStatus && !!validStatusAt;
   });
 
-  return mapFlowStatus(lastValidStatusRow?.Status) || 'PO Submitted';
+  return mapFlowStatus(lastValidStatusRow?.Status) || "PO Submitted";
 };
 
-const getInitialServerEtd = (detail: PoDetail | null, rows: ApiStatusFlowRow[]): Date | undefined => {
+const getInitialServerEtd = (
+  detail: PoDetail | null,
+  rows: ApiStatusFlowRow[],
+): Date | undefined => {
   return (
     parseServerDate(detail?.CurrentETD ?? detail?.ETD) ??
-    parseServerDate(rows.find((r) => mapFlowStatus(r.Status) === 'PO Submitted')?.StatusAt ?? undefined)
+    parseServerDate(
+      rows.find((r) => mapFlowStatus(r.Status) === "PO Submitted")?.StatusAt ??
+        undefined,
+    )
   );
 };
 
-const getInitialServerEtaDays = (detail: PoDetail | null, serverEtd?: Date): string => {
+const getInitialServerEtaDays = (
+  detail: PoDetail | null,
+  serverEtd?: Date,
+): string => {
   const currentEtaDays = trim(detail?.CurrentETADays);
   if (currentEtaDays) return currentEtaDays;
 
@@ -659,17 +711,17 @@ const getInitialServerEtaDays = (detail: PoDetail | null, serverEtd?: Date): str
     if (diff > 0) return String(diff);
   }
 
-  return '';
+  return "";
 };
 
 const resolveStatusCardData = (
   poDetail: PoDetail | null,
-  latestApprovedReEtaDate?: string | null
+  latestApprovedReEtaDate?: string | null,
 ): StatusCardData => {
   const etd = parseServerDate(poDetail?.CurrentETD) ?? null;
   const etaDate = parseServerDate(poDetail?.CurrentEta) ?? null;
   const etaDays = trim(poDetail?.CurrentETADays);
-  const remarks = trim(poDetail?.['WIP Remark'] ?? poDetail?.WIPRemark) || '-';
+  const remarks = trim(poDetail?.["WIP Remark"] ?? poDetail?.WIPRemark) || "-";
   const reEtaDate = parseServerDate(latestApprovedReEtaDate) ?? null;
 
   return {
@@ -683,32 +735,36 @@ const resolveStatusCardData = (
 
 const getBase64MimeType = (base64?: string | null): string => {
   const raw = trim(base64);
-  if (!raw) return 'application/octet-stream';
+  if (!raw) return "application/octet-stream";
 
   const match = raw.match(/^data:(.*?);base64,/i);
   if (match?.[1]) return match[1];
 
-  if (raw.startsWith('JVBER')) return 'application/pdf';
-  if (raw.startsWith('/9j/')) return 'image/jpeg';
-  if (raw.startsWith('iVBOR')) return 'image/png';
-  if (raw.startsWith('UklGR')) return 'image/webp';
+  if (raw.startsWith("JVBER")) return "application/pdf";
+  if (raw.startsWith("/9j/")) return "image/jpeg";
+  if (raw.startsWith("iVBOR")) return "image/png";
+  if (raw.startsWith("UklGR")) return "image/webp";
 
-  return 'application/octet-stream';
+  return "application/octet-stream";
 };
 
-const base64ToBlob = (base64: string, contentType?: string | null): Blob | null => {
+const base64ToBlob = (
+  base64: string,
+  contentType?: string | null,
+): Blob | null => {
   const raw = trim(base64);
   if (!raw) return null;
 
-  const normalized = raw.startsWith('data:')
+  const normalized = raw.startsWith("data:")
     ? raw
     : `data:${trim(contentType) || getBase64MimeType(raw)};base64,${raw}`;
 
-  const parts = normalized.split(',');
+  const parts = normalized.split(",");
   if (parts.length < 2) return null;
 
   const mimeMatch = parts[0].match(/data:(.*?);base64/i);
-  const mime = mimeMatch?.[1] || trim(contentType) || 'application/octet-stream';
+  const mime =
+    mimeMatch?.[1] || trim(contentType) || "application/octet-stream";
 
   try {
     const byteString = atob(parts[1]);
@@ -724,12 +780,16 @@ const base64ToBlob = (base64: string, contentType?: string | null): Blob | null 
   }
 };
 
-const downloadBase64File = (base64: string, fileName: string, contentType?: string | null) => {
+const downloadBase64File = (
+  base64: string,
+  fileName: string,
+  contentType?: string | null,
+) => {
   const blob = base64ToBlob(base64, contentType);
   if (!blob) return;
 
   const blobUrl = URL.createObjectURL(blob);
-  const a = document.createElement('a');
+  const a = document.createElement("a");
   a.href = blobUrl;
   a.download = fileName;
   document.body.appendChild(a);
@@ -750,20 +810,20 @@ function ValidationNotice({
     <div
       className="mb-4 m-[0px] flex items-start gap-3 rounded-lg p-4"
       style={{
-        backgroundColor: 'rgba(1, 67, 87, 0.05)',
-        border: '1px solid rgba(1, 67, 87, 0.12)',
+        backgroundColor: "rgba(1, 67, 87, 0.05)",
+        border: "1px solid rgba(1, 67, 87, 0.12)",
       }}
     >
       <div
         className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
-        style={{ backgroundColor: '#014357' }}
+        style={{ backgroundColor: "#014357" }}
       >
         <CalendarDays className="h-5 w-5 text-white" />
       </div>
 
       <div className="min-w-0 flex-1">
         <div className="mb-1 flex items-center gap-2">
-          <Label className="text-sm" style={{ color: '#014357' }}>
+          <Label className="text-sm" style={{ color: "#014357" }}>
             Required Delivery Date
           </Label>
 
@@ -775,34 +835,35 @@ function ValidationNotice({
             </TooltipTrigger>
             <TooltipContent>
               <p className="max-w-[220px] text-xs">
-                This is the buyer&apos;s requested delivery date. Please plan your ETD and ETA accordingly.
+                This is the buyer&apos;s requested delivery date. Please plan
+                your ETD and ETA accordingly.
               </p>
             </TooltipContent>
           </Tooltip>
         </div>
 
-        <p className="text-lg font-medium" style={{ color: '#014357' }}>
-          {deliveryDate ? format(deliveryDate, 'EEEE, MMMM dd, yyyy') : '-'}
+        <p className="text-lg font-medium" style={{ color: "#014357" }}>
+          {deliveryDate ? format(deliveryDate, "EEEE, MMMM dd, yyyy") : "-"}
         </p>
 
-        {typeof daysLeft === 'number' && (
+        {typeof daysLeft === "number" && (
           <div className="mt-1 flex items-center gap-1.5">
             <Clock
               className="h-3.5 w-3.5"
               style={{
-                color: isOverdue ? '#DC2626' : isUrgent ? '#ED832D' : '#6AA75D',
+                color: isOverdue ? "#DC2626" : isUrgent ? "#ED832D" : "#6AA75D",
               }}
             />
             <span
               className="text-sm"
               style={{
-                color: isOverdue ? '#DC2626' : isUrgent ? '#ED832D' : '#6AA75D',
+                color: isOverdue ? "#DC2626" : isUrgent ? "#ED832D" : "#6AA75D",
               }}
             >
               {isOverdue
                 ? `${Math.abs(daysLeft)} days overdue`
                 : daysLeft === 0
-                  ? 'Delivery due today'
+                  ? "Delivery due today"
                   : `${daysLeft} days remaining`}
             </span>
           </div>
@@ -812,31 +873,34 @@ function ValidationNotice({
   );
 }
 
-function RequiredDeliveryDateCard({ deliveryDateValue }: RequiredDeliveryDateCardProps) {
+function RequiredDeliveryDateCard({
+  deliveryDateValue,
+}: RequiredDeliveryDateCardProps) {
   const deliveryDate = parseServerDate(deliveryDateValue);
   const daysLeft = getDaysUntilDelivery(deliveryDateValue);
 
-  const isOverdue = typeof daysLeft === 'number' && daysLeft < 0;
-  const isUrgent = typeof daysLeft === 'number' && daysLeft >= 0 && daysLeft <= 7;
+  const isOverdue = typeof daysLeft === "number" && daysLeft < 0;
+  const isUrgent =
+    typeof daysLeft === "number" && daysLeft >= 0 && daysLeft <= 7;
 
   return (
     <div
       className="mb-4 m-[0px] flex items-start gap-3 rounded-lg p-4"
       style={{
-        backgroundColor: 'rgba(1, 67, 87, 0.05)',
-        border: '1px solid rgba(1, 67, 87, 0.12)',
+        backgroundColor: "rgba(1, 67, 87, 0.05)",
+        border: "1px solid rgba(1, 67, 87, 0.12)",
       }}
     >
       <div
         className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
-        style={{ backgroundColor: '#014357' }}
+        style={{ backgroundColor: "#014357" }}
       >
         <CalendarDays className="h-5 w-5 text-white" />
       </div>
 
       <div className="min-w-0 flex-1">
         <div className="mb-1 flex items-center gap-2">
-          <Label className="text-sm" style={{ color: '#014357' }}>
+          <Label className="text-sm" style={{ color: "#014357" }}>
             Required Delivery Date
           </Label>
 
@@ -848,34 +912,35 @@ function RequiredDeliveryDateCard({ deliveryDateValue }: RequiredDeliveryDateCar
             </TooltipTrigger>
             <TooltipContent>
               <p className="max-w-[220px] text-xs">
-                This is the buyer&apos;s requested delivery date. Please plan your ETD and ETA accordingly.
+                This is the buyer&apos;s requested delivery date. Please plan
+                your ETD and ETA accordingly.
               </p>
             </TooltipContent>
           </Tooltip>
         </div>
 
-        <p className="text-lg font-medium" style={{ color: '#014357' }}>
-          {deliveryDate ? format(deliveryDate, 'EEEE, MMMM dd, yyyy') : '-'}
+        <p className="text-lg font-medium" style={{ color: "#014357" }}>
+          {deliveryDate ? format(deliveryDate, "EEEE, MMMM dd, yyyy") : "-"}
         </p>
 
-        {typeof daysLeft === 'number' && (
+        {typeof daysLeft === "number" && (
           <div className="mt-1 flex items-center gap-1.5">
             <Clock
               className="h-3.5 w-3.5"
               style={{
-                color: isOverdue ? '#DC2626' : isUrgent ? '#ED832D' : '#6AA75D',
+                color: isOverdue ? "#DC2626" : isUrgent ? "#ED832D" : "#6AA75D",
               }}
             />
             <span
               className="text-sm"
               style={{
-                color: isOverdue ? '#DC2626' : isUrgent ? '#ED832D' : '#6AA75D',
+                color: isOverdue ? "#DC2626" : isUrgent ? "#ED832D" : "#6AA75D",
               }}
             >
               {isOverdue
                 ? `${Math.abs(daysLeft)} days overdue`
                 : daysLeft === 0
-                  ? 'Delivery due today'
+                  ? "Delivery due today"
                   : `${daysLeft} days remaining`}
             </span>
           </div>
@@ -901,17 +966,18 @@ function StatusFlowHistory({ status, statusHistory }: StatusFlowHistoryProps) {
     return last;
   }, [statusHistory]);
 
-  const progressWidth = lastDoneIndex <= 0 ? '0%' : `calc(${lastDoneIndex * stepPct}% )`;
-  const progressColor = lastDoneIndex <= 0 ? '#f3f3f4' : '#014357';
+  const progressWidth =
+    lastDoneIndex <= 0 ? "0%" : `calc(${lastDoneIndex * stepPct}% )`;
+  const progressColor = lastDoneIndex <= 0 ? "#f3f3f4" : "#014357";
 
   const isActiveByTimestamp = useCallback(
     (statusName: FlowStatus) => !!statusHistory[statusName],
-    [statusHistory]
+    [statusHistory],
   );
 
   return (
     <Card className="p-6">
-      <h2 className="mb-6" style={{ color: '#014357' }}>
+      <h2 className="mb-6" style={{ color: "#014357" }}>
         Status Flow History
       </h2>
 
@@ -923,10 +989,10 @@ function StatusFlowHistory({ status, statusHistory }: StatusFlowHistoryProps) {
             right: baseRight,
             top: STATUS_LINE_TOP + 2,
             height: 6,
-            backgroundColor: '#E5E7EB',
+            backgroundColor: "#E5E7EB",
             borderRadius: 999,
             zIndex: 0,
-            pointerEvents: 'none',
+            pointerEvents: "none",
           }}
         />
 
@@ -940,12 +1006,15 @@ function StatusFlowHistory({ status, statusHistory }: StatusFlowHistoryProps) {
             backgroundColor: progressColor,
             borderRadius: 999,
             zIndex: 1,
-            transition: 'width 0.3s ease',
-            pointerEvents: 'none',
+            transition: "width 0.3s ease",
+            pointerEvents: "none",
           }}
         />
 
-        <div className="relative flex items-start justify-between gap-2" style={{ zIndex: 2 }}>
+        <div
+          className="relative flex items-start justify-between gap-2"
+          style={{ zIndex: 2 }}
+        >
           {FLOW_ORDER.map((statusName) => {
             const Icon = getStatusIcon(statusName);
             const active = isActiveByTimestamp(statusName);
@@ -958,18 +1027,25 @@ function StatusFlowHistory({ status, statusHistory }: StatusFlowHistoryProps) {
                   <div
                     className="mb-2 flex h-12 w-12 items-center justify-center rounded-full"
                     style={{
-                      backgroundColor: active ? color : '#E5E7EB',
-                      transition: 'all 0.3s ease',
+                      backgroundColor: active ? color : "#E5E7EB",
+                      transition: "all 0.3s ease",
                     }}
                   >
                     <Icon className="h-6 w-6 text-white" />
                   </div>
 
-                  <p className="mb-1 px-1 text-center text-xs" style={{ color: '#014357' }}>
+                  <p
+                    className="mb-1 px-1 text-center text-xs"
+                    style={{ color: "#014357" }}
+                  >
                     {statusName}
                   </p>
 
-                  {active && ts && <p className="text-center text-xs text-gray-500">{formatDateTime(ts)}</p>}
+                  {active && ts && (
+                    <p className="text-center text-xs text-gray-500">
+                      {formatDateTime(ts)}
+                    </p>
+                  )}
                 </div>
               </div>
             );
@@ -990,27 +1066,31 @@ function StatusRelatedInformation({
 }: StatusRelatedInformationProps) {
   const { etd, etaDate, etaDays, remarks, reEtaDate } = useMemo(
     () => resolveStatusCardData(poDetail, latestApprovedReEtaDate),
-    [poDetail, latestApprovedReEtaDate]
+    [poDetail, latestApprovedReEtaDate],
   );
 
-  const workInProgressColor = getStatusColor('Work in Progress');
-  const onDeliveryColor = getStatusColor('On Delivery');
-  const receivedColor = getStatusColor('Received');
+  const workInProgressColor = getStatusColor("Work in Progress");
+  const onDeliveryColor = getStatusColor("On Delivery");
+  const receivedColor = getStatusColor("Received");
 
-  const WorkInProgressIcon = getStatusIcon('Work in Progress');
-  const OnDeliveryIcon = getStatusIcon('On Delivery');
-  const ReceivedIcon = getStatusIcon('Received');
+  const WorkInProgressIcon = getStatusIcon("Work in Progress");
+  const OnDeliveryIcon = getStatusIcon("On Delivery");
+  const ReceivedIcon = getStatusIcon("Received");
 
-  const awb = trim(poDetail?.AWB) || '-';
-  const actualDeliveryDate = parseServerDate(poDetail?.FinalActualDeliveryDate) ?? null;
-  const receivedAt = parseServerDate(poDetail?.['GR Created Date']) ?? null;
+  const awb = trim(poDetail?.AWB) || "-";
+  const actualDeliveryDate =
+    parseServerDate(poDetail?.FinalActualDeliveryDate) ?? null;
+  const receivedAt = parseServerDate(poDetail?.["GR Created Date"]) ?? null;
 
-  const awbFileName = trim(poDetail?.AWBFileName) || 'AWB Document';
+  const awbFileName = trim(poDetail?.AWBFileName) || "AWB Document";
   const hasAwbFile = !!trim(poDetail?.AWBBase64Data);
 
-  const onDeliveryQuantity = toNumberOrZero(poDetail?.['Qty Order'] ?? poDetail?.QtyOrder);
+  const onDeliveryQuantity = toNumberOrZero(
+    poDetail?.["Qty Order"] ?? poDetail?.QtyOrder,
+  );
   const onDeliveryLeadtimeNumber = toNumberOrZero(poDetail?.LeadtimeDelivery);
-  const onDeliveryLeadtimeText = onDeliveryLeadtimeNumber > 0 ? `${onDeliveryLeadtimeNumber} days` : '-';
+  const onDeliveryLeadtimeText =
+    onDeliveryLeadtimeNumber > 0 ? `${onDeliveryLeadtimeNumber} days` : "-";
 
   const onDeliveryNewEta = useMemo(() => {
     if (!actualDeliveryDate || onDeliveryLeadtimeNumber <= 0) return null;
@@ -1018,45 +1098,51 @@ function StatusRelatedInformation({
   }, [actualDeliveryDate, onDeliveryLeadtimeNumber]);
 
   const showWorkInProgressSection =
-    status === 'Work in Progress' || status === 'On Delivery' || status === 'Received';
+    status === "Work in Progress" ||
+    status === "On Delivery" ||
+    status === "Received";
 
-  const showOnDeliverySection = status === 'On Delivery' || status === 'Received';
-  const showReceivedSection = status === 'Received';
+  const showOnDeliverySection =
+    status === "On Delivery" || status === "Received";
+  const showReceivedSection = status === "Received";
 
   const handleViewAwbFile = useCallback(() => {
     const base64 = trim(poDetail?.AWBBase64Data);
     if (!base64) {
-      toast.error('AWB file not found.');
+      toast.error("AWB file not found.");
       return;
     }
 
     const blob = base64ToBlob(base64, poDetail?.AWBContentType);
     if (!blob) {
-      toast.error('Failed to open AWB file.');
+      toast.error("Failed to open AWB file.");
       return;
     }
 
     const blobUrl = URL.createObjectURL(blob);
 
     try {
-      window.open(blobUrl, '_blank');
+      window.open(blobUrl, "_blank");
       setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
     } catch {
       URL.revokeObjectURL(blobUrl);
-      toast.error('Failed to open file in a new tab.');
+      toast.error("Failed to open file in a new tab.");
     }
   }, [poDetail]);
 
   return (
     <Card className="rounded-xl border border-gray-200 p-6 shadow-sm">
-      <h2 className="mb-5 text-lg font-semibold" style={{ color: '#014357' }}>
+      <h2 className="mb-5 text-lg font-semibold" style={{ color: "#014357" }}>
         Status-Related Information
       </h2>
 
       {showWorkInProgressSection && (
         <>
           <div className="flex items-center gap-3">
-            <WorkInProgressIcon className="h-5 w-5" style={{ color: workInProgressColor }} />
+            <WorkInProgressIcon
+              className="h-5 w-5"
+              style={{ color: workInProgressColor }}
+            />
             <h3 className="text-[20px]" style={{ color: workInProgressColor }}>
               Work in Progress
             </h3>
@@ -1064,14 +1150,20 @@ function StatusRelatedInformation({
 
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             <div>
-              <Label className="block text-sm text-gray-500">ETD (Estimated Date of Delivery)</Label>
-              <p className="text-[18px] text-black">{etd ? format(etd, 'MMM dd, yyyy') : '-'}</p>
+              <Label className="block text-sm text-gray-500">
+                ETD (Estimated Date of Delivery)
+              </Label>
+              <p className="text-[18px] text-black">
+                {etd ? format(etd, "MMM dd, yyyy") : "-"}
+              </p>
             </div>
 
             <div>
               <Label className="block text-sm text-gray-500">ETA</Label>
               <p className="text-[18px] text-black">
-                {etaDate ? `${format(etaDate, 'MMM dd, yyyy')}${etaDays ? ` (${etaDays} days)` : ''}` : '-'}
+                {etaDate
+                  ? `${format(etaDate, "MMM dd, yyyy")}${etaDays ? ` (${etaDays} days)` : ""}`
+                  : "-"}
               </p>
             </div>
 
@@ -1081,8 +1173,12 @@ function StatusRelatedInformation({
             </div>
 
             <div>
-              <Label className="block text-sm text-gray-500">Delivery Date</Label>
-              <p className="text-[18px] text-black">{reEtaDate ? format(reEtaDate, 'MMM dd, yyyy') : '-'}</p>
+              <Label className="block text-sm text-gray-500">
+                Delivery Date
+              </Label>
+              <p className="text-[18px] text-black">
+                {reEtaDate ? format(reEtaDate, "MMM dd, yyyy") : "-"}
+              </p>
             </div>
           </div>
         </>
@@ -1093,7 +1189,10 @@ function StatusRelatedInformation({
           <hr className="my-6 border-gray-200" />
 
           <div className="flex items-center gap-2">
-            <OnDeliveryIcon className="h-5 w-5" style={{ color: onDeliveryColor }} />
+            <OnDeliveryIcon
+              className="h-5 w-5"
+              style={{ color: onDeliveryColor }}
+            />
             <h3 className="text-[20px]" style={{ color: onDeliveryColor }}>
               On Delivery
             </h3>
@@ -1101,31 +1200,43 @@ function StatusRelatedInformation({
 
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             <div>
-              <Label className="block text-sm text-gray-500">Air way bill</Label>
+              <Label className="block text-sm text-gray-500">
+                Air way bill
+              </Label>
               <p className="text-[18px] text-black">{awb}</p>
             </div>
 
             <div>
-              <Label className="block text-sm text-gray-500">Actual Delivery Date</Label>
+              <Label className="block text-sm text-gray-500">
+                Actual Delivery Date
+              </Label>
               <p className="text-[18px] text-black">
-                {actualDeliveryDate ? format(actualDeliveryDate, 'MMM dd, yyyy') : '-'}
+                {actualDeliveryDate
+                  ? format(actualDeliveryDate, "MMM dd, yyyy")
+                  : "-"}
               </p>
             </div>
 
             <div>
               <Label className="block text-sm text-gray-500">Quantity</Label>
-              <p className="text-[18px] text-black">{onDeliveryQuantity || '-'}</p>
+              <p className="text-[18px] text-black">
+                {onDeliveryQuantity || "-"}
+              </p>
             </div>
 
             <div>
-              <Label className="block text-sm text-gray-500">Lead Time Delivery</Label>
+              <Label className="block text-sm text-gray-500">
+                Lead Time Delivery
+              </Label>
               <p className="text-[18px] text-black">{onDeliveryLeadtimeText}</p>
             </div>
 
             <div>
               <Label className="block text-sm text-gray-500">New ETA</Label>
               <p className="text-[18px] text-black">
-                {onDeliveryNewEta ? format(onDeliveryNewEta, 'MMM dd, yyyy') : '-'}
+                {onDeliveryNewEta
+                  ? format(onDeliveryNewEta, "MMM dd, yyyy")
+                  : "-"}
               </p>
             </div>
           </div>
@@ -1134,7 +1245,7 @@ function StatusRelatedInformation({
             <Card className="mt-6 rounded-xl border border-gray-200 p-4 shadow-sm">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-2">
-                  <FileText className="h-5 w-5" style={{ color: '#014357' }} />
+                  <FileText className="h-5 w-5" style={{ color: "#014357" }} />
                   <div>
                     <p className="text-sm text-gray-500">AWB Document</p>
                     <p className="text-base text-black">{awbFileName}</p>
@@ -1142,12 +1253,20 @@ function StatusRelatedInformation({
                 </div>
 
                 <div className="flex flex-col gap-2 sm:flex-row">
-                  <Button type="button" variant="outline" onClick={handleViewAwbFile}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleViewAwbFile}
+                  >
                     <FileText className="mr-2 h-4 w-4" />
                     View File
                   </Button>
 
-                  <Button type="button" variant="outline" onClick={onDownloadAwbFile}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={onDownloadAwbFile}
+                  >
                     <Download className="mr-2 h-4 w-4" />
                     Download
                   </Button>
@@ -1163,7 +1282,10 @@ function StatusRelatedInformation({
           <hr className="my-6 border-gray-200" />
 
           <div className="flex items-center gap-2">
-            <ReceivedIcon className="h-5 w-5" style={{ color: receivedColor }} />
+            <ReceivedIcon
+              className="h-5 w-5"
+              style={{ color: receivedColor }}
+            />
             <h3 className="text-[20px]" style={{ color: receivedColor }}>
               Received
             </h3>
@@ -1171,9 +1293,11 @@ function StatusRelatedInformation({
 
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             <div>
-              <Label className="block text-sm text-gray-500">GR Created AT</Label>
+              <Label className="block text-sm text-gray-500">
+                GR Created AT
+              </Label>
               <p className="text-[18px] text-black">
-                {receivedAt ? format(receivedAt, 'MMM dd, yyyy') : '-'}
+                {receivedAt ? format(receivedAt, "MMM dd, yyyy") : "-"}
               </p>
             </div>
           </div>
@@ -1183,7 +1307,12 @@ function StatusRelatedInformation({
   );
 }
 
-function FileActionCard({ file, label, iconColor = '#014357', onDownload }: FileActionCardProps) {
+function FileActionCard({
+  file,
+  label,
+  iconColor = "#014357",
+  onDownload,
+}: FileActionCardProps) {
   return (
     <Button
       variant="outline"
@@ -1192,16 +1321,22 @@ function FileActionCard({ file, label, iconColor = '#014357', onDownload }: File
       type="button"
     >
       <div className="flex w-full items-center gap-3">
-        <FileText className="h-4 w-4 flex-shrink-0" style={{ color: iconColor }} />
+        <FileText
+          className="h-4 w-4 flex-shrink-0"
+          style={{ color: iconColor }}
+        />
         <div className="flex-1 text-left">
           <p className="text-xs text-gray-500">{label}</p>
           <p className="mb-1 text-sm">{file.name}</p>
           <p className="text-xs text-gray-500">
-            Uploaded by {file.uploadedBy || '-'}
-            {file.uploadedDate ? ` on ${formatDate(file.uploadedDate)}` : ''}
+            Uploaded by {file.uploadedBy || "-"}
+            {file.uploadedDate ? ` on ${formatDate(file.uploadedDate)}` : ""}
           </p>
         </div>
-        <Download className="h-4 w-4 flex-shrink-0" style={{ color: '#014357' }} />
+        <Download
+          className="h-4 w-4 flex-shrink-0"
+          style={{ color: "#014357" }}
+        />
       </div>
     </Button>
   );
@@ -1223,23 +1358,25 @@ export function PurchaseOrderDetail({
   const [submittingPoStatus, setSubmittingPoStatus] = useState(false);
   const [submittingReschedule, setSubmittingReschedule] = useState(false);
 
-  const [status, setStatus] = useState<FlowStatus>('PO Submitted');
-  const [remarks, setRemarks] = useState('');
+  const [status, setStatus] = useState<FlowStatus>("PO Submitted");
+  const [remarks, setRemarks] = useState("");
   const [etd, setEtd] = useState<Date | undefined>(todayStart());
-  const [etaDays, setEtaDays] = useState('');
-  const [awb, setAwb] = useState('');
+  const [etaDays, setEtaDays] = useState("");
+  const [awb, setAwb] = useState("");
   const [hasFilledUpdate, setHasFilledUpdate] = useState(false);
 
-  const [actualDeliveryDate, setActualDeliveryDate] = useState<Date | undefined>(todayStart());
-  const [leadtimeDelivery, setLeadtimeDelivery] = useState('');
-  const [quantity, setQuantity] = useState('');
+  const [actualDeliveryDate, setActualDeliveryDate] = useState<
+    Date | undefined
+  >(todayStart());
+  const [leadtimeDelivery, setLeadtimeDelivery] = useState("");
+  const [quantity, setQuantity] = useState("");
   const [awbFile, setAwbFile] = useState<File | null>(null);
   const [awbFileInputKey, setAwbFileInputKey] = useState(0);
 
   const [rescheduleDialogOpen, setRescheduleDialogOpen] = useState(false);
   const [newEtd, setNewEtd] = useState<Date | undefined>(undefined);
-  const [newLeadtimeDays, setNewLeadtimeDays] = useState('');
-  const [rescheduleReason, setRescheduleReason] = useState('');
+  const [newLeadtimeDays, setNewLeadtimeDays] = useState("");
+  const [rescheduleReason, setRescheduleReason] = useState("");
 
   const fetchDetail = useCallback(
     async (signal?: AbortSignal) => {
@@ -1248,7 +1385,7 @@ export function PurchaseOrderDetail({
 
       try {
         const res = await fetchWithAuth(API.DETAILPO(orderId), {
-          method: 'GET',
+          method: "GET",
           headers: buildAuthHeaders(),
           signal,
         });
@@ -1269,23 +1406,30 @@ export function PurchaseOrderDetail({
             body = undefined;
           }
 
-          throw new Error(body?.message || body?.Message || `HTTP ${res.status}`);
+          throw new Error(
+            body?.message || body?.Message || `HTTP ${res.status}`,
+          );
         }
 
         const json = (await res.json()) as DetailApiResponse;
         const data = (json?.Data ?? json?.data) as DetailData | undefined;
         const flow = Array.isArray(data?.StatusFlow) ? data.StatusFlow : [];
-        const reqs = Array.isArray(data?.ReEtaRequests) ? data.ReEtaRequests : [];
-        const detail = (data?.PoDetail ?? data?.Order ?? null) as PoDetail | null;
-
+        const reqs = Array.isArray(data?.ReEtaRequests)
+          ? data.ReEtaRequests
+          : [];
+        const detail = (data?.PoDetail ??
+          data?.Order ??
+          null) as PoDetail | null;
+        console.log(data);
         setStatusFlowRows(flow);
         setReEtaRequestsRaw(reqs);
         setPoDetail(detail);
         setStatus(getLastValidStatus(flow));
 
         const serverEtd = getInitialServerEtd(detail, flow) ?? todayStart();
-        const serverActualDeliveryDate = parseServerDate(detail?.FinalActualDeliveryDate) ?? todayStart();
-        const serverRemarks = trim(detail?.['WIP Remark'] ?? detail?.WIPRemark);
+        const serverActualDeliveryDate =
+          parseServerDate(detail?.FinalActualDeliveryDate) ?? todayStart();
+        const serverRemarks = trim(detail?.["WIP Remark"] ?? detail?.WIPRemark);
         const serverAwb = trim(detail?.AWB);
         const serverEtaDays = getInitialServerEtaDays(detail, serverEtd);
 
@@ -1295,23 +1439,31 @@ export function PurchaseOrderDetail({
         setAwb((prev) => prev || serverAwb);
         setEtaDays((prev) => prev || serverEtaDays);
       } catch (e: any) {
-        if (e?.message === 'Session expired') {
+        if (e?.message === "Session expired") {
           return;
         }
 
-        const isAbort = e?.name === 'AbortError';
+        const isAbort = e?.name === "AbortError";
 
         setStatusFlowRows([]);
         setReEtaRequestsRaw([]);
         setPoDetail(null);
 
-        setLoadError(isAbort ? 'Request timeout. Please try again.' : e?.message || 'Failed to load PO detail');
-        toast.error(isAbort ? 'Request timeout' : e?.message || 'Failed to load PO detail');
+        setLoadError(
+          isAbort
+            ? "Request timeout. Please try again."
+            : e?.message || "Failed to load PO detail",
+        );
+        toast.error(
+          isAbort
+            ? "Request timeout"
+            : e?.message || "Failed to load PO detail",
+        );
       } finally {
         setLoading(false);
       }
     },
-    [orderId]
+    [orderId],
   );
 
   useEffect(() => {
@@ -1323,37 +1475,61 @@ export function PurchaseOrderDetail({
     return () => controller.abort();
   }, [fetchDetail]);
 
-  const statusHistory = useMemo(() => buildStatusHistory(statusFlowRows), [statusFlowRows]);
+  const statusHistory = useMemo(
+    () => buildStatusHistory(statusFlowRows),
+    [statusFlowRows],
+  );
 
-  const idPoItem = useMemo(() => extractIdPoItem(poDetail, statusFlowRows), [poDetail, statusFlowRows]);
+  const idPoItem = useMemo(
+    () => extractIdPoItem(poDetail, statusFlowRows),
+    [poDetail, statusFlowRows],
+  );
 
   const latestApprovedReEta = useMemo(() => {
     return getLatestApprovedReEta(reEtaRequestsRaw);
   }, [reEtaRequestsRaw]);
 
   const latestApprovedReEtaDate = useMemo(() => {
-    const fallbackDeliveryDate = poDetail?.DeliveryDate ?? poDetail?.['Delivery date'] ?? null;
+    const fallbackDeliveryDate =
+      poDetail?.DeliveryDate ?? poDetail?.["Delivery date"] ?? null;
 
     if (reEtaRequestsRaw.length === 0) return fallbackDeliveryDate;
 
-    return latestApprovedReEta?.NewETA ?? latestApprovedReEta?.newETA ?? fallbackDeliveryDate;
+    return (
+      latestApprovedReEta?.NewETA ??
+      latestApprovedReEta?.newETA ??
+      fallbackDeliveryDate
+    );
   }, [latestApprovedReEta, poDetail, reEtaRequestsRaw]);
 
   const poDeliveryDateValue = useMemo(() => {
     const approvedNewEta = latestApprovedReEtaDate;
-    return approvedNewEta ?? poDetail?.DeliveryDate ?? poDetail?.['Delivery date'] ?? null;
+    return (
+      approvedNewEta ??
+      poDetail?.DeliveryDate ??
+      poDetail?.["Delivery date"] ??
+      null
+    );
   }, [latestApprovedReEtaDate, poDetail]);
 
-  const deliveryDate = useMemo(() => parseServerDate(poDeliveryDateValue), [poDeliveryDateValue]);
+  const deliveryDate = useMemo(
+    () => parseServerDate(poDeliveryDateValue),
+    [poDeliveryDateValue],
+  );
 
   const isRequiredDeliveryDatePassed = useMemo(() => {
     return isDateBeforeToday(poDeliveryDateValue);
   }, [poDeliveryDateValue]);
 
-  const currentEtaForReschedule = useMemo(() => safeDateOnly(poDeliveryDateValue), [poDeliveryDateValue]);
+  const currentEtaForReschedule = useMemo(() => {
+    if (status === "PO Submitted") {
+      return safeDateOnly(poDeliveryDateValue);
+    }
+    return safeDateOnly(poDetail?.CurrentEta ?? poDetail?.ETA);
+  }, [status, poDeliveryDateValue, poDetail]);
 
   const currentEtdForReschedule = useMemo(() => {
-    return etd ? format(etd, 'yyyy-MM-dd') : null;
+    return etd ? format(etd, "yyyy-MM-dd") : null;
   }, [etd]);
 
   const currentLeadtimeForReschedule = useMemo(() => {
@@ -1381,14 +1557,17 @@ export function PurchaseOrderDetail({
   }, [etd, etaDays]);
 
   const isEtaBeyondDeliveryDate = useMemo(() => {
-    if (status !== 'PO Submitted') return false;
+    if (status !== "PO Submitted") return false;
     if (!calculatedEtaDate || !deliveryDate) return false;
-    return startOfDay(calculatedEtaDate).getTime() > startOfDay(deliveryDate).getTime();
+    return (
+      startOfDay(calculatedEtaDate).getTime() >
+      startOfDay(deliveryDate).getTime()
+    );
   }, [status, calculatedEtaDate, deliveryDate]);
 
   const needsVendorUpdate = useMemo(() => {
     const currentEta = parseServerDate(currentEtaForReschedule);
-    if (status !== 'On Delivery') return false;
+    if (status !== "On Delivery") return false;
     if (!currentEta) return false;
     return diffDaysFromNow(currentEta) <= 2;
   }, [status, currentEtaForReschedule]);
@@ -1396,12 +1575,12 @@ export function PurchaseOrderDetail({
   const rescheduleRequests = useMemo(() => {
     return reEtaRequestsRaw
       .map((r, i) => normalizeReEtaRequest(r, i))
-      .sort((a, b) => (b.requestDate || '').localeCompare(a.requestDate || ''));
+      .sort((a, b) => (b.requestDate || "").localeCompare(a.requestDate || ""));
   }, [reEtaRequestsRaw]);
 
   const hasPendingReEtaApproval = useMemo(
-    () => rescheduleRequests.some((request) => request.status === 'Pending'),
-    [rescheduleRequests]
+    () => rescheduleRequests.some((request) => request.status === "Pending"),
+    [rescheduleRequests],
   );
 
   const shouldShowExpiredDeliveryAlert = useMemo(() => {
@@ -1409,47 +1588,79 @@ export function PurchaseOrderDetail({
   }, [isRequiredDeliveryDatePassed, hasPendingReEtaApproval]);
 
   const shouldShowEtaExceededAlertInline = useMemo(() => {
-    return isEtaBeyondDeliveryDate && !isRequiredDeliveryDatePassed && !hasPendingReEtaApproval;
-  }, [isEtaBeyondDeliveryDate, isRequiredDeliveryDatePassed, hasPendingReEtaApproval]);
+    return (
+      isEtaBeyondDeliveryDate &&
+      !isRequiredDeliveryDatePassed &&
+      !hasPendingReEtaApproval
+    );
+  }, [
+    isEtaBeyondDeliveryDate,
+    isRequiredDeliveryDatePassed,
+    hasPendingReEtaApproval,
+  ]);
 
   const shouldShowEtaExceededAlert = useMemo(() => {
     if (hasPendingReEtaApproval) return false;
     return isRequiredDeliveryDatePassed || isEtaBeyondDeliveryDate;
-  }, [hasPendingReEtaApproval, isRequiredDeliveryDatePassed, isEtaBeyondDeliveryDate]);
+  }, [
+    hasPendingReEtaApproval,
+    isRequiredDeliveryDatePassed,
+    isEtaBeyondDeliveryDate,
+  ]);
 
   const isPoSubmittedBlockedByEta = useMemo(() => {
     if (hasPendingReEtaApproval) return false;
     return isRequiredDeliveryDatePassed || isEtaBeyondDeliveryDate;
-  }, [hasPendingReEtaApproval, isRequiredDeliveryDatePassed, isEtaBeyondDeliveryDate]);
+  }, [
+    hasPendingReEtaApproval,
+    isRequiredDeliveryDatePassed,
+    isEtaBeyondDeliveryDate,
+  ]);
 
   const isPoSubmittedSubmitDisabled = useMemo(
-    () => isRequiredDeliveryDatePassed || isPoSubmittedBlockedByEta || hasPendingReEtaApproval,
-    [isRequiredDeliveryDatePassed, isPoSubmittedBlockedByEta, hasPendingReEtaApproval]
+    () =>
+      isRequiredDeliveryDatePassed ||
+      isPoSubmittedBlockedByEta ||
+      hasPendingReEtaApproval,
+    [
+      isRequiredDeliveryDatePassed,
+      isPoSubmittedBlockedByEta,
+      hasPendingReEtaApproval,
+    ],
   );
 
   const orderQuantity = useMemo(() => {
-    return toNumberOrZero(poDetail?.['Qty Order'] ?? poDetail?.QtyOrder);
+    return toNumberOrZero(poDetail?.["Qty Order"] ?? poDetail?.QtyOrder);
   }, [poDetail]);
 
   const calculatedLeadtimeDeliveryDate = useMemo(() => {
     const days = parseInt(leadtimeDelivery, 10);
-    if (!actualDeliveryDate || !leadtimeDelivery || Number.isNaN(days) || days <= 0) return null;
+    if (
+      !actualDeliveryDate ||
+      !leadtimeDelivery ||
+      Number.isNaN(days) ||
+      days <= 0
+    )
+      return null;
     return addDaysDateOnly(actualDeliveryDate, days);
   }, [actualDeliveryDate, leadtimeDelivery]);
 
   const enteredQuantity = useMemo(() => {
-    return quantity === '' ? null : Number(quantity);
+    return quantity === "" ? null : Number(quantity);
   }, [quantity]);
 
   const isQuantityMismatch = useMemo(() => {
-    if (quantity === '') return false;
+    if (quantity === "") return false;
     if (enteredQuantity === null || Number.isNaN(enteredQuantity)) return false;
     return enteredQuantity !== orderQuantity;
   }, [quantity, enteredQuantity, orderQuantity]);
 
   const isCalculatedDeliveryDateBeyondPoDeliveryDate = useMemo(() => {
     if (!calculatedLeadtimeDeliveryDate || !deliveryDate) return false;
-    return startOfDay(calculatedLeadtimeDeliveryDate).getTime() > startOfDay(deliveryDate).getTime();
+    return (
+      startOfDay(calculatedLeadtimeDeliveryDate).getTime() >
+      startOfDay(deliveryDate).getTime()
+    );
   }, [calculatedLeadtimeDeliveryDate, deliveryDate]);
 
   const isWipSubmitDisabled = useMemo(() => {
@@ -1471,15 +1682,15 @@ export function PurchaseOrderDetail({
   const handleOpenRescheduleDialog = useCallback(() => {
     setRescheduleDialogOpen(true);
     setNewEtd(etd ?? todayStart());
-    setNewLeadtimeDays(etaDays || '');
-    setRescheduleReason('');
+    setNewLeadtimeDays(etaDays || "");
+    setRescheduleReason("");
   }, [etd, etaDays]);
 
   const handleCloseRescheduleDialog = useCallback(() => {
     setRescheduleDialogOpen(false);
     setNewEtd(undefined);
-    setNewLeadtimeDays('');
-    setRescheduleReason('');
+    setNewLeadtimeDays("");
+    setRescheduleReason("");
   }, []);
 
   const handleBack = useCallback(async () => {
@@ -1490,50 +1701,68 @@ export function PurchaseOrderDetail({
     }
   }, [onBack, onRefreshPurchaseOrders]);
 
-  const handleAwbFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] ?? null;
+  const handleAwbFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0] ?? null;
 
-    if (!file) {
-      setAwbFile(null);
-      return;
-    }
+      if (!file) {
+        setAwbFile(null);
+        return;
+      }
 
-    const allowedTypes = ['application/pdf', 'image/png', 'image/jpg', 'image/jpeg'];
+      const allowedTypes = [
+        "application/pdf",
+        "image/png",
+        "image/jpg",
+        "image/jpeg",
+      ];
 
-    if (!allowedTypes.includes(file.type)) {
-      toast.error('Only PDF, PNG, JPG, and JPEG files are allowed for the AWB document.');
-      e.target.value = '';
-      setAwbFile(null);
-      return;
-    }
+      if (!allowedTypes.includes(file.type)) {
+        toast.error(
+          "Only PDF, PNG, JPG, and JPEG files are allowed for the AWB document.",
+        );
+        e.target.value = "";
+        setAwbFile(null);
+        return;
+      }
 
-    setAwbFile(file);
-  }, []);
+      setAwbFile(file);
+    },
+    [],
+  );
 
-  const submitPoStatusUpdate = useCallback(async (payload: Record<string, unknown>) => {
-    const res = await fetchWithAuth(API.POSTATUS_UPSERT(), {
-      method: 'POST',
-      headers: buildAuthHeaders(),
-      body: JSON.stringify(payload),
-    });
+  const submitPoStatusUpdate = useCallback(
+    async (payload: Record<string, unknown>) => {
+      const res = await fetchWithAuth(API.POSTATUS_UPSERT(), {
+        method: "POST",
+        headers: buildAuthHeaders(),
+        body: JSON.stringify(payload),
+      });
 
-    let data: any = null;
-    try {
-      data = await res.json();
-    } catch {
-      data = null;
-    }
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
 
-    if (!res.ok) {
-      throw new Error(data?.message || data?.Message || data?.title || 'Failed to update PO status');
-    }
+      if (!res.ok) {
+        throw new Error(
+          data?.message ||
+            data?.Message ||
+            data?.title ||
+            "Failed to update PO status",
+        );
+      }
 
-    return data;
-  }, []);
+      return data;
+    },
+    [],
+  );
 
   const submitOnDeliveryUpdate = useCallback(async (formData: FormData) => {
     const res = await fetchWithAuth(API.POSTATUS_ON_DELIVERY(), {
-      method: 'POST',
+      method: "POST",
       headers: buildMultipartAuthHeaders(),
       body: formData,
     });
@@ -1546,34 +1775,45 @@ export function PurchaseOrderDetail({
     }
 
     if (!res.ok) {
-      throw new Error(data?.message || data?.Message || data?.title || 'Failed to update delivery information');
-    }
-
-    return data;
-  }, []);
-
-  const submitReEtaCreate = useCallback(async (payload: Record<string, unknown>) => {
-    const res = await fetchWithAuth(API.REETA_CREATE(), {
-      method: 'POST',
-      headers: buildAuthHeaders(),
-      body: JSON.stringify(payload),
-    });
-
-    let data: any = null;
-    try {
-      data = await res.json();
-    } catch {
-      data = null;
-    }
-
-    if (!res.ok) {
       throw new Error(
-        data?.message || data?.Message || data?.title || 'Failed to create reschedule ETA request'
+        data?.message ||
+          data?.Message ||
+          data?.title ||
+          "Failed to update delivery information",
       );
     }
 
     return data;
   }, []);
+
+  const submitReEtaCreate = useCallback(
+    async (payload: Record<string, unknown>) => {
+      const res = await fetchWithAuth(API.REETA_CREATE(), {
+        method: "POST",
+        headers: buildAuthHeaders(),
+        body: JSON.stringify(payload),
+      });
+
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
+
+      if (!res.ok) {
+        throw new Error(
+          data?.message ||
+            data?.Message ||
+            data?.title ||
+            "Failed to create reschedule ETA request",
+        );
+      }
+
+      return data;
+    },
+    [],
+  );
 
   const handleSubmitOrderInformation = useCallback(async () => {
     try {
@@ -1588,27 +1828,31 @@ export function PurchaseOrderDetail({
       }
 
       if (!idPoItem) {
-        toast.error('ID PO Item not found.');
+        toast.error("ID PO Item not found.");
         return;
       }
 
       if (!etd) {
-        toast.error('Please select an ETD date.');
+        toast.error("Please select an ETD date.");
         return;
       }
 
       const days = parseInt(etaDays, 10);
       if (!etaDays || Number.isNaN(days) || days <= 0) {
-        toast.error('Please enter a valid leadtime delivery.');
+        toast.error("Please enter a valid leadtime delivery.");
         return;
       }
 
       if (!remarks.trim()) {
-        toast.error('Please enter remarks.');
+        toast.error("Please enter remarks.");
         return;
       }
 
-      if (status === 'PO Submitted' && !hasPendingReEtaApproval && isEtaBeyondDeliveryDate) {
+      if (
+        status === "PO Submitted" &&
+        !hasPendingReEtaApproval &&
+        isEtaBeyondDeliveryDate
+      ) {
         toast.error(ETA_DELIVERY_DATE_ERROR);
         return;
       }
@@ -1622,12 +1866,12 @@ export function PurchaseOrderDetail({
         WIPRemark: remarks.trim(),
       });
 
-      toast.success('Order information updated successfully.');
+      toast.success("Order information updated successfully.");
       setHasFilledUpdate(true);
       await fetchDetail();
     } catch (error: any) {
-      if (error?.message !== 'Session expired') {
-        toast.error(error?.message || 'Failed to update order information.');
+      if (error?.message !== "Session expired") {
+        toast.error(error?.message || "Failed to update order information.");
       }
     } finally {
       setSubmittingPoStatus(false);
@@ -1658,34 +1902,34 @@ export function PurchaseOrderDetail({
       }
 
       if (!idPoItem) {
-        toast.error('ID PO Item not found.');
+        toast.error("ID PO Item not found.");
         return;
       }
 
       if (!awb.trim()) {
-        toast.error('Please enter an AWB number.');
+        toast.error("Please enter an AWB number.");
         return;
       }
 
       if (!actualDeliveryDate) {
-        toast.error('Please select an actual delivery date.');
+        toast.error("Please select an actual delivery date.");
         return;
       }
 
       const leadtime = parseInt(leadtimeDelivery, 10);
       if (!leadtimeDelivery || Number.isNaN(leadtime) || leadtime <= 0) {
-        toast.error('Please enter a valid leadtime delivery.');
+        toast.error("Please enter a valid leadtime delivery.");
         return;
       }
 
       const qty = parseFloat(quantity);
-      if (quantity === '' || Number.isNaN(qty) || qty < 0) {
-        toast.error('Please enter a valid quantity.');
+      if (quantity === "" || Number.isNaN(qty) || qty < 0) {
+        toast.error("Please enter a valid quantity.");
         return;
       }
 
       if (qty !== orderQuantity) {
-        toast.error('The entered quantity must match the ordered quantity.');
+        toast.error("The entered quantity must match the ordered quantity.");
         return;
       }
 
@@ -1695,35 +1939,38 @@ export function PurchaseOrderDetail({
       }
 
       if (!awbFile) {
-        toast.error('Please upload the AWB document.');
+        toast.error("Please upload the AWB document.");
         return;
       }
 
       setSubmittingPoStatus(true);
 
       const formData = new FormData();
-      formData.append('ID_PO_Item', idPoItem);
-      formData.append('AWB', awb.trim());
-      formData.append('ActualDeliveryDate', toIsoDateTime(actualDeliveryDate) || '');
-      formData.append('LeadtimeDelivery', String(leadtime));
-      formData.append('Quantity', String(qty));
-      formData.append('File', awbFile);
+      formData.append("ID_PO_Item", idPoItem);
+      formData.append("AWB", awb.trim());
+      formData.append(
+        "ActualDeliveryDate",
+        toIsoDateTime(actualDeliveryDate) || "",
+      );
+      formData.append("LeadtimeDelivery", String(leadtime));
+      formData.append("Quantity", String(qty));
+      formData.append("File", awbFile);
 
       await submitOnDeliveryUpdate(formData);
 
-      toast.success('Delivery information updated successfully.');
+      toast.success("Delivery information updated successfully.");
       setHasFilledUpdate(true);
 
       setActualDeliveryDate(todayStart());
-      setLeadtimeDelivery('');
-      setQuantity('');
+      setLeadtimeDelivery("");
+      setQuantity("");
       setAwbFile(null);
       setAwbFileInputKey((prev) => prev + 1);
 
       await fetchDetail();
     } catch (error: any) {
-      if (error?.message !== 'Session expired') {
-        toast.error(error?.message || 'Failed to update delivery information.');
+      if (error?.message !== "Session expired") {
+        toast.error(error?.message || "Failed to update delivery information.");
       }
     } finally {
       setSubmittingPoStatus(false);
@@ -1746,53 +1993,56 @@ export function PurchaseOrderDetail({
   const handleSubmitReschedule = useCallback(async () => {
     try {
       if (!idPoItem) {
-        toast.error('ID PO Item not found.');
+        toast.error("ID PO Item not found.");
         return;
       }
 
       if (!currentEtaForReschedule) {
-        toast.error('Required delivery date is not set.');
+        toast.error("Required delivery date is not set.");
         return;
       }
 
       if (!newEtd) {
-        toast.error('Please select a valid new ETD.');
+        toast.error("Please select a valid new ETD.");
         return;
       }
 
       const newLeadtime = parseInt(newLeadtimeDays, 10);
       if (!newLeadtimeDays || Number.isNaN(newLeadtime) || newLeadtime <= 0) {
-        toast.error('Please enter a valid new lead time.');
+        toast.error("Please enter a valid new lead time.");
         return;
       }
 
       if (!newEtaDateForReschedule) {
-        toast.error('New ETA could not be calculated.');
+        toast.error("New ETA could not be calculated.");
         return;
       }
 
       if (!rescheduleReason.trim()) {
-        toast.error('Please provide a reason for rescheduling.');
+        toast.error("Please provide a reason for rescheduling.");
         return;
       }
 
-      const proposedEtaDays = diffDaysDateOnly(newEtaDateForReschedule, startOfDay(newEtd));
+      const proposedEtaDays = diffDaysDateOnly(
+        newEtaDateForReschedule,
+        startOfDay(newEtd),
+      );
 
       setSubmittingReschedule(true);
 
       await submitReEtaCreate({
-        CurrentEta: currentEtaForReschedule,
+        CurrentEta: format(newEtd, "yyyy-MM-dd"),
         IdPoItem: idPoItem,
         ProposedETADays: proposedEtaDays,
         Reason: rescheduleReason.trim(),
       });
 
-      toast.success('Reschedule request submitted successfully.');
+      toast.success("Reschedule request submitted successfully.");
       handleCloseRescheduleDialog();
       await fetchDetail();
     } catch (error: any) {
-      if (error?.message !== 'Session expired') {
-        toast.error(error?.message || 'Failed to submit reschedule request.');
+      if (error?.message !== "Session expired") {
+        toast.error(error?.message || "Failed to submit reschedule request.");
       }
     } finally {
       setSubmittingReschedule(false);
@@ -1811,41 +2061,42 @@ export function PurchaseOrderDetail({
 
   const handleDownloadFile = useCallback((file: ReEtaFile) => {
     if (file.url) {
-      window.open(file.url, '_blank', 'noopener,noreferrer');
+      window.open(file.url, "_blank", "noopener,noreferrer");
       return;
     }
 
     if (file.base64Data) {
       downloadBase64File(
         file.base64Data,
-        file.name || 'document',
-        file.contentType || 'application/octet-stream'
+        file.name || "document",
+        file.contentType || "application/octet-stream",
       );
       return;
     }
 
-    toast.error('File not found.');
+    toast.error("File not found.");
   }, []);
 
   const handleDownloadAwbBase64File = useCallback(() => {
     const base64 = trim(poDetail?.AWBBase64Data);
     if (!base64) {
-      toast.error('AWB file not found.');
+      toast.error("AWB file not found.");
       return;
     }
 
     const mime = trim(poDetail?.AWBContentType) || getBase64MimeType(base64);
     const extension =
-      mime === 'application/pdf'
-        ? 'pdf'
-        : mime === 'image/png'
-          ? 'png'
-          : mime === 'image/jpeg' || mime === 'image/jpg'
-            ? 'jpg'
-            : 'bin';
+      mime === "application/pdf"
+        ? "pdf"
+        : mime === "image/png"
+          ? "png"
+          : mime === "image/jpeg" || mime === "image/jpg"
+            ? "jpg"
+            : "bin";
 
     const fileName =
-      trim(poDetail?.AWBFileName) || `${trim(poDetail?.['Purchasing Document']) || 'AWB'}-AWB.${extension}`;
+      trim(poDetail?.AWBFileName) ||
+      `${trim(poDetail?.["Purchasing Document"]) || "AWB"}-AWB.${extension}`;
 
     downloadBase64File(base64, fileName, poDetail?.AWBContentType);
   }, [poDetail]);
@@ -1887,33 +2138,42 @@ export function PurchaseOrderDetail({
 
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="mb-2" style={{ color: '#014357' }}>
+            <h1 className="mb-2" style={{ color: "#014357" }}>
               Purchase Order Details
             </h1>
             <p className="text-gray-600">
-              PO #{poDetail?.['Purchasing Document'] || orderId} - {poDetail?.Item || ''}
+              PO #{poDetail?.["Purchasing Document"] || orderId} -{" "}
+              {poDetail?.Item || ""}
             </p>
-            {loading && <p className="mt-1 text-xs text-gray-500">Loading detail...</p>}
-            {loadError && <p className="mt-1 text-xs text-red-600">{loadError}</p>}
+            {loading && (
+              <p className="mt-1 text-xs text-gray-500">Loading detail...</p>
+            )}
+            {loadError && (
+              <p className="mt-1 text-xs text-red-600">{loadError}</p>
+            )}
           </div>
 
           <Badge
             className="px-4 py-2 text-base"
-            style={{ backgroundColor: getStatusColor(status), color: 'white' }}
+            style={{ backgroundColor: getStatusColor(status), color: "white" }}
           >
             {status}
           </Badge>
         </div>
       </div>
 
-      {user.role === 'vendor' && needsVendorUpdate && !hasFilledUpdate && (
+      {user.role === "vendor" && needsVendorUpdate && !hasFilledUpdate && (
         <Alert
           className="mb-6"
-          style={{ borderColor: '#ED832D', backgroundColor: 'rgba(237, 131, 45, 0.1)' }}
+          style={{
+            borderColor: "#ED832D",
+            backgroundColor: "rgba(237, 131, 45, 0.1)",
+          }}
         >
-          <AlertCircle className="h-4 w-4" style={{ color: '#ED832D' }} />
+          <AlertCircle className="h-4 w-4" style={{ color: "#ED832D" }} />
           <AlertDescription>
-            This order’s ETA is in 2 days or less. Please provide an update on the delivery status.
+            This order’s ETA is in 2 days or less. Please provide an update on
+            the delivery status.
           </AlertDescription>
         </Alert>
       )}
@@ -1921,7 +2181,7 @@ export function PurchaseOrderDetail({
       {canCreateReschedule(user.role, status) && (
         <Button
           className="mb-6"
-          style={{ backgroundColor: '#014357' }}
+          style={{ backgroundColor: "#014357" }}
           onClick={handleOpenRescheduleDialog}
         >
           <Calendar className="mr-2 h-4 w-4" />
@@ -1932,7 +2192,7 @@ export function PurchaseOrderDetail({
       <div className="space-y-6">
         <StatusFlowHistory status={status} statusHistory={statusHistory} />
 
-        {status !== 'PO Submitted' && (
+        {status !== "PO Submitted" && (
           <StatusRelatedInformation
             status={status}
             poDetail={poDetail}
@@ -1941,9 +2201,9 @@ export function PurchaseOrderDetail({
           />
         )}
 
-        {user.role === 'vendor' && (
+        {user.role === "vendor" && (
           <>
-            {status === 'PO Submitted' &&
+            {status === "PO Submitted" &&
               (() => {
                 const etaExceededDays =
                   calculatedEtaDate && deliveryDate
@@ -1952,33 +2212,50 @@ export function PurchaseOrderDetail({
 
                 return (
                   <Card className="p-6">
-                    <h2 className="mb-4" style={{ color: '#014357' }}>
+                    <h2 className="mb-4" style={{ color: "#014357" }}>
                       Update Order Information
                     </h2>
 
-                    <RequiredDeliveryDateCard deliveryDateValue={poDeliveryDateValue} />
+                    <RequiredDeliveryDateCard
+                      deliveryDateValue={poDeliveryDateValue}
+                    />
 
                     <div className="space-y-4">
                       <div>
                         <Label htmlFor="vendor-etd">
-                          ETD (Estimate Time of Delivery) <span className="text-red-500">*</span>
+                          ETD (Estimate Time of Delivery){" "}
+                          <span className="text-red-500">*</span>
                         </Label>
                         <Popover>
                           <PopoverTrigger asChild>
-                            <Button variant="outline" className="mt-1 w-full justify-start text-left" type="button">
+                            <Button
+                              variant="outline"
+                              className="mt-1 w-full justify-start text-left"
+                              type="button"
+                            >
                               <Calendar className="mr-2 h-4 w-4" />
-                              {etd ? format(etd, 'PPP') : <span>Pick a date</span>}
+                              {etd ? (
+                                format(etd, "PPP")
+                              ) : (
+                                <span>Pick a date</span>
+                              )}
                             </Button>
                           </PopoverTrigger>
                           <PopoverContent className="w-auto p-0">
-                            <CalendarComponent mode="single" selected={etd} onSelect={setEtd} initialFocus />
+                            <CalendarComponent
+                              mode="single"
+                              selected={etd}
+                              onSelect={setEtd}
+                              initialFocus
+                            />
                           </PopoverContent>
                         </Popover>
                       </div>
 
                       <div>
                         <Label htmlFor="vendor-eta-days">
-                          Leadtime Delivery <span className="text-red-500">*</span>
+                          Leadtime Delivery{" "}
+                          <span className="text-red-500">*</span>
                         </Label>
                         <Input
                           id="vendor-eta-days"
@@ -1993,13 +2270,22 @@ export function PurchaseOrderDetail({
                         {calculatedEtaDate && (
                           <div
                             className="mt-3 rounded-lg border border-gray-200 p-3"
-                            style={{ backgroundColor: 'rgba(106, 167, 93, 0.06)' }}
+                            style={{
+                              backgroundColor: "rgba(106, 167, 93, 0.06)",
+                            }}
                           >
                             <div className="flex items-center gap-2">
-                              <CheckCircle2 className="h-4 w-4" style={{ color: '#6AA75D' }} />
+                              <CheckCircle2
+                                className="h-4 w-4"
+                                style={{ color: "#6AA75D" }}
+                              />
                               <div>
-                                <p className="text-xs text-gray-500">Calculated ETA Date</p>
-                                <p style={{ color: '#014357' }}>{format(calculatedEtaDate, 'PPP')}</p>
+                                <p className="text-xs text-gray-500">
+                                  Calculated ETA Date
+                                </p>
+                                <p style={{ color: "#014357" }}>
+                                  {format(calculatedEtaDate, "PPP")}
+                                </p>
                               </div>
                             </div>
 
@@ -2009,9 +2295,16 @@ export function PurchaseOrderDetail({
                               etaExceededDays !== null &&
                               etaExceededDays > 0 && (
                                 <div className="mt-2 flex items-center gap-1.5 border-t border-gray-200 pt-2">
-                                  <AlertCircle className="h-3.5 w-3.5" style={{ color: '#ED832D' }} />
-                                  <p className="text-xs" style={{ color: '#ED832D' }}>
-                                    This exceeds the required delivery date by {etaExceededDays} days
+                                  <AlertCircle
+                                    className="h-3.5 w-3.5"
+                                    style={{ color: "#ED832D" }}
+                                  />
+                                  <p
+                                    className="text-xs"
+                                    style={{ color: "#ED832D" }}
+                                  >
+                                    This exceeds the required delivery date by{" "}
+                                    {etaExceededDays} days
                                   </p>
                                 </div>
                               )}
@@ -2037,22 +2330,25 @@ export function PurchaseOrderDetail({
                         <div
                           className="flex items-start gap-3 rounded-lg p-3"
                           style={{
-                            backgroundColor: 'rgba(220, 38, 38, 0.06)',
-                            border: '1px solid rgba(220, 38, 38, 0.15)',
+                            backgroundColor: "rgba(220, 38, 38, 0.06)",
+                            border: "1px solid rgba(220, 38, 38, 0.15)",
                           }}
                         >
-                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: '#DC2626' }} />
+                          <AlertCircle
+                            className="mt-0.5 h-4 w-4 shrink-0"
+                            style={{ color: "#DC2626" }}
+                          />
                           <div className="min-w-0 flex-1">
                             <p className="text-sm text-gray-700">
-                              ETA exceeds the delivery date. Please{' '}
+                              ETA exceeds the delivery date. Please{" "}
                               <button
                                 type="button"
                                 className="btn-underlined-text inline cursor-pointer border-none bg-transparent p-0"
-                                style={{ color: '#014357' }}
+                                style={{ color: "#014357" }}
                                 onClick={handleOpenRescheduleDialog}
                               >
                                 submit a Reschedule ETA Request again
-                              </button>{' '}
+                              </button>{" "}
                               before proceeding.
                             </p>
                           </div>
@@ -2063,22 +2359,25 @@ export function PurchaseOrderDetail({
                         <div
                           className="flex items-start gap-3 rounded-lg p-3"
                           style={{
-                            backgroundColor: 'rgba(220, 38, 38, 0.06)',
-                            border: '1px solid rgba(220, 38, 38, 0.15)',
+                            backgroundColor: "rgba(220, 38, 38, 0.06)",
+                            border: "1px solid rgba(220, 38, 38, 0.15)",
                           }}
                         >
-                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: '#DC2626' }} />
+                          <AlertCircle
+                            className="mt-0.5 h-4 w-4 shrink-0"
+                            style={{ color: "#DC2626" }}
+                          />
                           <div className="min-w-0 flex-1">
                             <p className="text-sm text-gray-700">
-                              ETA exceeds the delivery date. Please{' '}
+                              ETA exceeds the delivery date. Please{" "}
                               <button
                                 type="button"
                                 className="btn-underlined-text inline cursor-pointer border-none bg-transparent p-0"
-                                style={{ color: '#014357' }}
+                                style={{ color: "#014357" }}
                                 onClick={handleOpenRescheduleDialog}
                               >
                                 submit a Reschedule ETA Request again
-                              </button>{' '}
+                              </button>{" "}
                               before proceeding.
                             </p>
                           </div>
@@ -2089,13 +2388,18 @@ export function PurchaseOrderDetail({
                         <div
                           className="flex items-start gap-3 rounded-lg p-3"
                           style={{
-                            backgroundColor: 'rgba(220, 38, 38, 0.06)',
-                            border: '1px solid rgba(220, 38, 38, 0.15)',
+                            backgroundColor: "rgba(220, 38, 38, 0.06)",
+                            border: "1px solid rgba(220, 38, 38, 0.15)",
                           }}
                         >
-                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: '#DC2626' }} />
+                          <AlertCircle
+                            className="mt-0.5 h-4 w-4 shrink-0"
+                            style={{ color: "#DC2626" }}
+                          />
                           <div className="min-w-0 flex-1">
-                            <p className="text-sm text-gray-700">{WAITING_REETA_APPROVAL_MESSAGE}</p>
+                            <p className="text-sm text-gray-700">
+                              {WAITING_REETA_APPROVAL_MESSAGE}
+                            </p>
                           </div>
                         </div>
                       )}
@@ -2104,31 +2408,50 @@ export function PurchaseOrderDetail({
                         type="button"
                         className="w-full"
                         style={{
-                          backgroundColor: isPoSubmittedSubmitDisabled || submittingPoStatus ? '#94A3B8' : '#014357',
-                          color: 'white',
-                          cursor: isPoSubmittedSubmitDisabled || submittingPoStatus ? 'not-allowed' : 'pointer',
-                          opacity: isPoSubmittedSubmitDisabled || submittingPoStatus ? 0.7 : 1,
+                          backgroundColor:
+                            isPoSubmittedSubmitDisabled || submittingPoStatus
+                              ? "#94A3B8"
+                              : "#014357",
+                          color: "white",
+                          cursor:
+                            isPoSubmittedSubmitDisabled || submittingPoStatus
+                              ? "not-allowed"
+                              : "pointer",
+                          opacity:
+                            isPoSubmittedSubmitDisabled || submittingPoStatus
+                              ? 0.7
+                              : 1,
                         }}
-                        disabled={isPoSubmittedSubmitDisabled || submittingPoStatus}
+                        disabled={
+                          isPoSubmittedSubmitDisabled || submittingPoStatus
+                        }
                         onClick={handleClickSubmitInformation}
                       >
                         <CheckCircle2 className="mr-2 h-4 w-4" />
-                        {submittingPoStatus ? 'Submitting...' : 'Submit & Move to Work in Progress'}
+                        {submittingPoStatus
+                          ? "Submitting..."
+                          : "Submit & Move to Work in Progress"}
                       </Button>
                     </div>
                   </Card>
                 );
               })()}
 
-            {status === 'Work in Progress' &&
+            {status === "Work in Progress" &&
               (() => {
-                const previousEta = parseServerDate(poDetail?.CurrentEta ?? poDetail?.ETA) ?? null;
-                const previousEtaLabel = previousEta ? format(previousEta, 'MMM dd, yyyy') : '-';
+                const previousEta =
+                  parseServerDate(poDetail?.CurrentEta ?? poDetail?.ETA) ??
+                  null;
+                const previousEtaLabel = previousEta
+                  ? format(previousEta, "MMM dd, yyyy")
+                  : "-";
 
                 const newCalculatedEta = calculatedLeadtimeDeliveryDate;
 
                 const etaDifference =
-                  previousEta && newCalculatedEta ? diffDaysDateOnly(newCalculatedEta, previousEta) : null;
+                  previousEta && newCalculatedEta
+                    ? diffDaysDateOnly(newCalculatedEta, previousEta)
+                    : null;
 
                 const etaExceededDays =
                   newCalculatedEta && deliveryDate
@@ -2137,32 +2460,35 @@ export function PurchaseOrderDetail({
 
                 return (
                   <Card className="p-6">
-                    <h2 className="mb-0" style={{ color: '#014357' }}>
+                    <h2 className="mb-0" style={{ color: "#014357" }}>
                       Update Delivery Information
                     </h2>
                     <p className="m-[0px] text-sm text-gray-500">
-                      Provide delivery details to mark this order as On Delivery.
+                      Provide delivery details to mark this order as On
+                      Delivery.
                     </p>
 
                     <div
                       className="m-[0px] mt-2 grid grid-cols-1 gap-4 rounded-lg p-4 sm:grid-cols-2"
                       style={{
-                        backgroundColor: 'rgba(1, 67, 87, 0.04)',
-                        border: '1px solid rgba(1, 67, 87, 0.1)',
+                        backgroundColor: "rgba(1, 67, 87, 0.04)",
+                        border: "1px solid rgba(1, 67, 87, 0.1)",
                       }}
                     >
                       <div>
                         <Label className="mb-1 block text-xs uppercase tracking-wide text-gray-400">
                           Order Quantity
                         </Label>
-                        <p style={{ color: '#014357' }}>{orderQuantity} units</p>
+                        <p style={{ color: "#014357" }}>
+                          {orderQuantity} units
+                        </p>
                       </div>
 
                       <div>
                         <Label className="mb-1 block text-xs uppercase tracking-wide text-gray-400">
                           ETA (from previous step)
                         </Label>
-                        <p style={{ color: '#014357' }}>{previousEtaLabel}</p>
+                        <p style={{ color: "#014357" }}>{previousEtaLabel}</p>
                       </div>
                     </div>
 
@@ -2178,7 +2504,9 @@ export function PurchaseOrderDetail({
                             min={0}
                             value={quantity}
                             onChange={(e) => setQuantity(e.target.value)}
-                            onWheel={(e) => (e.target as HTMLInputElement).blur()}
+                            onWheel={(e) =>
+                              (e.target as HTMLInputElement).blur()
+                            }
                             placeholder={`Must be exactly ${orderQuantity}`}
                             className="mt-1.5"
                           />
@@ -2186,7 +2514,8 @@ export function PurchaseOrderDetail({
 
                         <div className="mt-4">
                           <Label htmlFor="vendor-awb">
-                            AWB (Air Waybill) <span className="text-red-500">*</span>
+                            AWB (Air Waybill){" "}
+                            <span className="text-red-500">*</span>
                           </Label>
                           <Input
                             id="vendor-awb"
@@ -2210,7 +2539,7 @@ export function PurchaseOrderDetail({
                             >
                               <FileText className="h-4 w-4 text-gray-400" />
                               <span className="text-sm text-gray-500">
-                                {awbFile ? awbFile.name : 'Upload file'}
+                                {awbFile ? awbFile.name : "Upload file"}
                               </span>
                             </label>
 
@@ -2224,14 +2553,17 @@ export function PurchaseOrderDetail({
                             />
                           </div>
 
-                          <p className="mt-1 text-xs text-gray-500">Allowed file types: PDF, PNG, JPG, JPEG</p>
+                          <p className="mt-1 text-xs text-gray-500">
+                            Allowed file types: PDF, PNG, JPG, JPEG
+                          </p>
                         </div>
                       </div>
 
                       <div className="space-y-5">
                         <div>
                           <Label htmlFor="actual-delivery-date">
-                            Actual Delivery Date <span className="text-red-500">*</span>
+                            Actual Delivery Date{" "}
+                            <span className="text-red-500">*</span>
                           </Label>
                           <Popover>
                             <PopoverTrigger asChild>
@@ -2242,9 +2574,11 @@ export function PurchaseOrderDetail({
                               >
                                 <Calendar className="mr-2 h-4 w-4 text-gray-400" />
                                 {actualDeliveryDate ? (
-                                  format(actualDeliveryDate, 'PPP')
+                                  format(actualDeliveryDate, "PPP")
                                 ) : (
-                                  <span className="text-gray-400">Select date</span>
+                                  <span className="text-gray-400">
+                                    Select date
+                                  </span>
                                 )}
                               </Button>
                             </PopoverTrigger>
@@ -2261,15 +2595,20 @@ export function PurchaseOrderDetail({
 
                         <div className="mb-6 mt-4">
                           <Label htmlFor="leadtime-delivery">
-                            Leadtime Delivery (days) <span className="text-red-500">*</span>
+                            Leadtime Delivery (days){" "}
+                            <span className="text-red-500">*</span>
                           </Label>
                           <Input
                             id="leadtime-delivery"
                             type="number"
                             min={1}
                             value={leadtimeDelivery}
-                            onChange={(e) => setLeadtimeDelivery(e.target.value)}
-                            onWheel={(e) => (e.target as HTMLInputElement).blur()}
+                            onChange={(e) =>
+                              setLeadtimeDelivery(e.target.value)
+                            }
+                            onWheel={(e) =>
+                              (e.target as HTMLInputElement).blur()
+                            }
                             placeholder="e.g., 5"
                             className="mt-1.5"
                           />
@@ -2281,12 +2620,12 @@ export function PurchaseOrderDetail({
                             style={{
                               backgroundColor:
                                 etaDifference !== null && etaDifference > 0
-                                  ? 'rgba(237, 131, 45, 0.06)'
-                                  : 'rgba(106, 167, 93, 0.06)',
+                                  ? "rgba(237, 131, 45, 0.06)"
+                                  : "rgba(106, 167, 93, 0.06)",
                               border: `1px solid ${
                                 etaDifference !== null && etaDifference > 0
-                                  ? 'rgba(237, 131, 45, 0.15)'
-                                  : 'rgba(106, 167, 93, 0.15)'
+                                  ? "rgba(237, 131, 45, 0.15)"
+                                  : "rgba(106, 167, 93, 0.15)"
                               }`,
                             }}
                           >
@@ -2294,34 +2633,46 @@ export function PurchaseOrderDetail({
                               <CalendarDays
                                 className="h-4 w-4"
                                 style={{
-                                  color: etaDifference !== null && etaDifference > 0 ? '#ED832D' : '#6AA75D',
+                                  color:
+                                    etaDifference !== null && etaDifference > 0
+                                      ? "#ED832D"
+                                      : "#6AA75D",
                                 }}
                               />
-                              <span className="text-sm text-gray-600">New ETA</span>
+                              <span className="text-sm text-gray-600">
+                                New ETA
+                              </span>
                             </div>
 
                             <div className="flex items-center gap-2">
-                              <span className="text-sm" style={{ color: '#014357' }}>
-                                {format(newCalculatedEta, 'MMM dd, yyyy')}
+                              <span
+                                className="text-sm"
+                                style={{ color: "#014357" }}
+                              >
+                                {format(newCalculatedEta, "MMM dd, yyyy")}
                               </span>
 
-                              {etaDifference !== null && etaDifference !== 0 && (
-                                <Badge
-                                  className="px-1.5 py-0.5 text-xs"
-                                  style={{
-                                    backgroundColor:
-                                      etaDifference > 0
-                                        ? 'rgba(237, 131, 45, 0.12)'
-                                        : 'rgba(106, 167, 93, 0.12)',
-                                    color: etaDifference > 0 ? '#ED832D' : '#6AA75D',
-                                    border: 'none',
-                                  }}
-                                >
-                                  {etaDifference > 0
-                                    ? `+${etaDifference}d vs previous`
-                                    : `${Math.abs(etaDifference)}d earlier`}
-                                </Badge>
-                              )}
+                              {etaDifference !== null &&
+                                etaDifference !== 0 && (
+                                  <Badge
+                                    className="px-1.5 py-0.5 text-xs"
+                                    style={{
+                                      backgroundColor:
+                                        etaDifference > 0
+                                          ? "rgba(237, 131, 45, 0.12)"
+                                          : "rgba(106, 167, 93, 0.12)",
+                                      color:
+                                        etaDifference > 0
+                                          ? "#ED832D"
+                                          : "#6AA75D",
+                                      border: "none",
+                                    }}
+                                  >
+                                    {etaDifference > 0
+                                      ? `+${etaDifference}d vs previous`
+                                      : `${Math.abs(etaDifference)}d earlier`}
+                                  </Badge>
+                                )}
                             </div>
                           </div>
                         )}
@@ -2333,66 +2684,82 @@ export function PurchaseOrderDetail({
                         <div
                           className="mb-4 flex items-start gap-3 rounded-lg p-3"
                           style={{
-                            backgroundColor: 'rgba(220, 38, 38, 0.06)',
-                            border: '1px solid rgba(220, 38, 38, 0.15)',
+                            backgroundColor: "rgba(220, 38, 38, 0.06)",
+                            border: "1px solid rgba(220, 38, 38, 0.15)",
                           }}
                         >
-                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: '#DC2626' }} />
+                          <AlertCircle
+                            className="mt-0.5 h-4 w-4 shrink-0"
+                            style={{ color: "#DC2626" }}
+                          />
                           <div className="min-w-0 flex-1">
                             <p className="text-sm text-gray-700">
-                              ETA exceeds the delivery date. Please{' '}
+                              ETA exceeds the delivery date. Please{" "}
                               <button
                                 className="btn-underlined-text inline cursor-pointer border-none bg-transparent p-0 underline"
-                                style={{ color: '#014357' }}
+                                style={{ color: "#014357" }}
                                 onClick={handleOpenRescheduleDialog}
                                 type="button"
                               >
                                 submit a Reschedule ETA Request again
-                              </button>{' '}
+                              </button>{" "}
                               before proceeding.
                             </p>
                           </div>
                         </div>
                       )}
 
-                      {!shouldShowExpiredDeliveryAlert && isCalculatedDeliveryDateBeyondPoDeliveryDate && (
-                        <div
-                          className="mb-4 flex items-start gap-3 rounded-lg p-3"
-                          style={{
-                            backgroundColor: 'rgba(220, 38, 38, 0.06)',
-                            border: '1px solid rgba(220, 38, 38, 0.15)',
-                          }}
-                        >
-                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: '#DC2626' }} />
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm text-gray-700">
-                              New ETA exceeds the required delivery date
-                              {etaExceededDays && etaExceededDays > 0 ? ` by ${etaExceededDays} days` : ''}. Please{' '}
-                              <button
-                                className="btn-underlined-text inline cursor-pointer border-none bg-transparent p-0 underline"
-                                style={{ color: '#014357' }}
-                                onClick={handleOpenRescheduleDialog}
-                                type="button"
-                              >
-                                submit a Re-ETA request again
-                              </button>{' '}
-                              before updating the delivery status.
-                            </p>
+                      {!shouldShowExpiredDeliveryAlert &&
+                        isCalculatedDeliveryDateBeyondPoDeliveryDate && (
+                          <div
+                            className="mb-4 flex items-start gap-3 rounded-lg p-3"
+                            style={{
+                              backgroundColor: "rgba(220, 38, 38, 0.06)",
+                              border: "1px solid rgba(220, 38, 38, 0.15)",
+                            }}
+                          >
+                            <AlertCircle
+                              className="mt-0.5 h-4 w-4 shrink-0"
+                              style={{ color: "#DC2626" }}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm text-gray-700">
+                                New ETA exceeds the required delivery date
+                                {etaExceededDays && etaExceededDays > 0
+                                  ? ` by ${etaExceededDays} days`
+                                  : ""}
+                                . Please{" "}
+                                <button
+                                  className="btn-underlined-text inline cursor-pointer border-none bg-transparent p-0 underline"
+                                  style={{ color: "#014357" }}
+                                  onClick={handleOpenRescheduleDialog}
+                                  type="button"
+                                >
+                                  submit a Re-ETA request again
+                                </button>{" "}
+                                before updating the delivery status.
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )}
 
                       {isQuantityMismatch && (
                         <div
                           className="mb-4 flex items-start gap-3 rounded-lg p-3"
                           style={{
-                            backgroundColor: 'rgba(220, 38, 38, 0.06)',
-                            border: '1px solid rgba(220, 38, 38, 0.15)',
+                            backgroundColor: "rgba(220, 38, 38, 0.06)",
+                            border: "1px solid rgba(220, 38, 38, 0.15)",
                           }}
                         >
-                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: '#DC2626' }} />
+                          <AlertCircle
+                            className="mt-0.5 h-4 w-4 shrink-0"
+                            style={{ color: "#DC2626" }}
+                          />
                           <p className="text-sm text-gray-700">
-                            Quantity must be exactly <span style={{ color: '#014357' }}>{orderQuantity} units</span>{' '}
+                            Quantity must be exactly{" "}
+                            <span style={{ color: "#014357" }}>
+                              {orderQuantity} units
+                            </span>{" "}
                             to match the order quantity.
                           </p>
                         </div>
@@ -2402,23 +2769,34 @@ export function PurchaseOrderDetail({
                         <div
                           className="mb-4 flex items-start gap-3 rounded-lg p-3"
                           style={{
-                            backgroundColor: 'rgba(220, 38, 38, 0.06)',
-                            border: '1px solid rgba(220, 38, 38, 0.15)',
+                            backgroundColor: "rgba(220, 38, 38, 0.06)",
+                            border: "1px solid rgba(220, 38, 38, 0.15)",
                           }}
                         >
-                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: '#DC2626' }} />
-                          <p className="text-sm text-gray-700">{WAITING_REETA_APPROVAL_MESSAGE}</p>
+                          <AlertCircle
+                            className="mt-0.5 h-4 w-4 shrink-0"
+                            style={{ color: "#DC2626" }}
+                          />
+                          <p className="text-sm text-gray-700">
+                            {WAITING_REETA_APPROVAL_MESSAGE}
+                          </p>
                         </div>
                       )}
 
                       <Button
                         className="w-full text-white"
-                        style={{ backgroundColor: isWipSubmitDisabled ? '#9CA3AF' : '#014357' }}
+                        style={{
+                          backgroundColor: isWipSubmitDisabled
+                            ? "#9CA3AF"
+                            : "#014357",
+                        }}
                         disabled={isWipSubmitDisabled}
                         onClick={handleSubmitAwb}
                       >
                         <Truck className="mr-2 h-4 w-4" />
-                        {submittingPoStatus ? 'Submitting...' : 'Submit & Mark On Delivery'}
+                        {submittingPoStatus
+                          ? "Submitting..."
+                          : "Submit & Mark On Delivery"}
                       </Button>
                     </div>
                   </Card>
@@ -2429,50 +2807,73 @@ export function PurchaseOrderDetail({
 
         {rescheduleRequests.length > 0 && (
           <Card className="p-6">
-            <h2 className="mb-5 font-medium" style={{ color: '#014357' }}>
+            <h2 className="mb-5 font-medium" style={{ color: "#014357" }}>
               Re-schedule ETA History
             </h2>
 
             <div className="space-y-4">
               {rescheduleRequests.map((request) => (
-                <div key={request.id} className="rounded-lg border border-gray-200 p-4">
+                <div
+                  key={request.id}
+                  className="rounded-lg border border-gray-200 p-4"
+                >
                   <div className="mb-3 flex items-start justify-between">
                     <div>
                       <div className="mb-1 flex items-center gap-2">
-                        <p style={{ color: '#014357' }}>{request.id}</p>
+                        <p style={{ color: "#014357" }}>{request.id}</p>
                         <Badge
                           style={{
-                            backgroundColor: getRescheduleStatusColor(request.status),
-                            color: 'white',
+                            backgroundColor: getRescheduleStatusColor(
+                              request.status,
+                            ),
+                            color: "white",
                           }}
                         >
                           {request.status}
                         </Badge>
                       </div>
-                      <p className="text-sm text-gray-500">Requested by: {request.requestedBy}</p>
+                      <p className="text-sm text-gray-500">
+                        Requested by: {request.requestedBy}
+                      </p>
                     </div>
                     <p className="text-sm text-gray-500">
-                      {request.requestDate ? formatDate(request.requestDate) : '-'}
+                      {request.requestDate
+                        ? formatDate(request.requestDate)
+                        : "-"}
                     </p>
                   </div>
 
                   <div className="mb-3 grid grid-cols-1 gap-4 border-b border-gray-200 pb-3 md:grid-cols-3">
                     <div>
-                      <Label className="mb-1 block text-xs text-gray-500">Old ETA</Label>
-                      <p className="text-sm text-gray-900">{request.oldETA ? formatDate(request.oldETA) : '-'}</p>
+                      <Label className="mb-1 block text-xs text-gray-500">
+                        Old ETA
+                      </Label>
+                      <p className="text-sm text-gray-900">
+                        {request.oldETA ? formatDate(request.oldETA) : "-"}
+                      </p>
                     </div>
                     <div>
-                      <Label className="mb-1 block text-xs text-gray-500">New ETA</Label>
-                      <p className="text-sm text-gray-900">{request.newETA ? formatDate(request.newETA) : '-'}</p>
+                      <Label className="mb-1 block text-xs text-gray-500">
+                        New ETA
+                      </Label>
+                      <p className="text-sm text-gray-900">
+                        {request.newETA ? formatDate(request.newETA) : "-"}
+                      </p>
                     </div>
                     <div>
-                      <Label className="mb-1 block text-xs text-gray-500">Proposed ETA Days</Label>
-                      <p className="text-sm text-gray-900">{request.proposedETADays}</p>
+                      <Label className="mb-1 block text-xs text-gray-500">
+                        Proposed ETA Days
+                      </Label>
+                      <p className="text-sm text-gray-900">
+                        {request.proposedETADays}
+                      </p>
                     </div>
                   </div>
 
                   <div className="mb-3">
-                    <Label className="mb-1 block text-xs text-gray-500">Reason</Label>
+                    <Label className="mb-1 block text-xs text-gray-500">
+                      Reason
+                    </Label>
                     <p className="text-sm text-gray-700">{request.reason}</p>
                   </div>
 
@@ -2486,7 +2887,7 @@ export function PurchaseOrderDetail({
                     </div>
                   )}
 
-                  {request.status === 'Pending' && request.waitingFile && (
+                  {request.status === "Pending" && request.waitingFile && (
                     <div className="grid grid-cols-1 gap-3 border-t border-gray-200 pt-3">
                       <FileActionCard
                         file={request.waitingFile}
@@ -2496,7 +2897,7 @@ export function PurchaseOrderDetail({
                     </div>
                   )}
 
-                  {request.status === 'Approved' && request.approvalFile && (
+                  {request.status === "Approved" && request.approvalFile && (
                     <div className="grid grid-cols-1 gap-3 border-t border-gray-200 pt-3 md:grid-cols-2">
                       <FileActionCard
                         file={request.approvalFile}
@@ -2507,7 +2908,7 @@ export function PurchaseOrderDetail({
                     </div>
                   )}
 
-                  {request.status === 'Rejected' && request.rejectionFile && (
+                  {request.status === "Rejected" && request.rejectionFile && (
                     <div className="grid grid-cols-1 gap-3 border-t border-gray-200 pt-3 md:grid-cols-2">
                       <FileActionCard
                         file={request.rejectionFile}
@@ -2534,37 +2935,31 @@ export function PurchaseOrderDetail({
         )}
       </div>
 
-      <Dialog open={rescheduleDialogOpen} onOpenChange={setRescheduleDialogOpen}>
+      <Dialog
+        open={rescheduleDialogOpen}
+        onOpenChange={setRescheduleDialogOpen}
+      >
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle style={{ color: '#014357' }}>Create Reschedule ETA Request</DialogTitle>
+            <DialogTitle style={{ color: "#014357" }}>
+              Create Reschedule ETA Request
+            </DialogTitle>
             <DialogDescription>
-              Review the current schedule and submit a request with New ETD and New Lead Time.
+              Review the current schedule and submit a request with New ETD and
+              New Lead Time.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                <Label className="mb-2 block text-sm text-gray-600">Current ETD</Label>
-                <p className="text-lg" style={{ color: '#014357' }}>
-                  {currentEtdForReschedule ? formatDate(currentEtdForReschedule) : 'Not set'}
-                </p>
-              </div>
-
-              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                <Label className="mb-2 block text-sm text-gray-600">Current Lead Time</Label>
-                <p className="text-lg" style={{ color: '#014357' }}>
-                  {currentLeadtimeForReschedule ? `${currentLeadtimeForReschedule} day(s)` : 'Not set'}
-                </p>
-              </div>
-
-              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                <Label className="mb-2 block text-sm text-gray-600">Current ETA</Label>
-                <p className="text-lg" style={{ color: '#014357' }}>
-                  {currentEtaDateForReschedule ? format(currentEtaDateForReschedule, 'MMM dd, yyyy') : 'Not set'}
-                </p>
-              </div>
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+              <Label className="mb-2 block text-sm text-gray-600">
+                Current ETA
+              </Label>
+              <p className="text-lg" style={{ color: "#014357" }}>
+                {currentEtaForReschedule
+                  ? formatDate(currentEtaForReschedule)
+                  : "Not set"}
+              </p>
             </div>
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -2574,13 +2969,26 @@ export function PurchaseOrderDetail({
                 </Label>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" className="mt-1 w-full justify-start text-left" type="button">
+                    <Button
+                      variant="outline"
+                      className="mt-1 w-full justify-start text-left"
+                      type="button"
+                    >
                       <Calendar className="mr-2 h-4 w-4" />
-                      {newEtd ? format(newEtd, 'PPP') : <span>Select new ETD</span>}
+                      {newEtd ? (
+                        format(newEtd, "PPP")
+                      ) : (
+                        <span>Select new ETD</span>
+                      )}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">
-                    <CalendarComponent mode="single" selected={newEtd} onSelect={setNewEtd} initialFocus />
+                    <CalendarComponent
+                      mode="single"
+                      selected={newEtd}
+                      onSelect={setNewEtd}
+                      initialFocus
+                    />
                   </PopoverContent>
                 </Popover>
               </div>
@@ -2602,9 +3010,13 @@ export function PurchaseOrderDetail({
             </div>
 
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-              <Label className="mb-2 block text-sm text-gray-600">New ETA (New ETD + New Lead Time)</Label>
-              <p className="text-lg" style={{ color: '#014357' }}>
-                {newEtaDateForReschedule ? format(newEtaDateForReschedule, 'MMM dd, yyyy') : 'Not set'}
+              <Label className="mb-2 block text-sm text-gray-600">
+                New ETA (New ETD + New Lead Time)
+              </Label>
+              <p className="text-lg" style={{ color: "#014357" }}>
+                {newEtaDateForReschedule
+                  ? format(newEtaDateForReschedule, "MMM dd, yyyy")
+                  : "Not set"}
               </p>
             </div>
 
@@ -2624,16 +3036,20 @@ export function PurchaseOrderDetail({
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={handleCloseRescheduleDialog} disabled={submittingReschedule}>
+            <Button
+              variant="outline"
+              onClick={handleCloseRescheduleDialog}
+              disabled={submittingReschedule}
+            >
               Cancel
             </Button>
             <Button
               onClick={handleSubmitReschedule}
-              style={{ backgroundColor: '#014357' }}
+              style={{ backgroundColor: "#014357" }}
               className="text-white hover:opacity-90"
               disabled={submittingReschedule}
             >
-              {submittingReschedule ? 'Submitting...' : 'Submit Request'}
+              {submittingReschedule ? "Submitting..." : "Submit Request"}
             </Button>
           </DialogFooter>
         </DialogContent>
