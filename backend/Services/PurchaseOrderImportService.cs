@@ -51,19 +51,10 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
         Dictionary<string, string>? SourceAliases = null,
         string[]? OptionalColumns = null);
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // ME2N
-    //   Perbedaan nama kolom CSV vs UDT:
-    //     "Supplier/Supplying Plant"     → UDT: "Name of Supplier"
-    //     "Order Quantity"               → UDT: "Qty Order"
-    //     "Delivery Date"                → UDT: "Delivery date"  (casing)
-    //     "Still to be delivered (value)"→ UDT: "Still to be delivered (qty)"
-    //   Kolom opsional (tidak ada di CSV, diisi NULL):
-    //     "Quantity Received", "Storage location"
-    // ─────────────────────────────────────────────────────────────────────────
+   
     private static readonly SheetSpec ME2N_SPEC = new(
-        Columns: new[]
-        {
+    Columns: new[]
+    {
             "Purchase Requisition",
             "Item of requisition",
             "Purchasing Document",
@@ -80,18 +71,19 @@ public class PurchaseOrderImportService : IPurchaseOrderImportService
             "Still to be delivered (qty)",
             "Plant",
             "Storage location",
-        },
-        DateColumns: new[] { "Document Date", "Delivery date" },
-        NumericColumns: new[] { "Quantity Received", "Still to be delivered (qty)" },
-        SourceAliases: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["Name of Supplier"] = "Supplier/Supplying Plant",
-            ["Qty Order"] = "Order Quantity",
-            ["Delivery date"] = "Delivery Date",
-            ["Still to be delivered (qty)"] = "Still to be delivered (value)",
-        },
-        OptionalColumns: new[] { "Quantity Received", "Storage location" }
-    );
+    },
+    DateColumns: new[] { "Document Date", "Delivery date" },
+    NumericColumns: new[] { "Qty Order", "Quantity Received", "Still to be delivered (qty)" }, // ← tambah "Qty Order"
+    SourceAliases: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Name of Supplier"] = "Supplier/Supplying Plant",
+        ["Qty Order"] = "Order Quantity",
+        ["Delivery date"] = "Delivery Date",
+        ["Still to be delivered (qty)"] = "Still to be delivered (value)",
+    },
+    OptionalColumns: new[] { "Quantity Received", "Storage location" }
+);
+
 
     // ─────────────────────────────────────────────────────────────────────────
     // ME5A — semua nama kolom cocok dengan CSV (case-insensitive match cukup)
