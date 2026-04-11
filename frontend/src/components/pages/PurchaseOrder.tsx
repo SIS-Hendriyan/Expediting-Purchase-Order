@@ -2801,6 +2801,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   <TableBody>
                     {ordersNeedingUpdate.map((o, idx) => {
                       const display = mapBackendStatusToDisplay(o.status);
+                      const etaDateValue =
+                        display === "PO Submitted" ? o.deliveryDate : o.etaDate;
+                      const d = parseDdMmmYyyy(etaDateValue);
+                      const diffDays = d ? diffDaysFromToday(d) : null;
 
                       let effectiveEtaDateStr: string | null = null;
                       if (o.reEtaDate?.trim()) {
