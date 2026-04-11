@@ -13,6 +13,7 @@ namespace EXPOAPI.Models
 
         public int? ProposedEtaDays { get; set; }     // ✅ int days
         public string Reason { get; set; } = "";
+        public int? DelayReasonId { get; set; }
 
         // evidence doc (base64)
         public string? EvidenceFileName { get; set; }

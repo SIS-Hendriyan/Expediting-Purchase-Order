@@ -29,6 +29,7 @@ namespace EXPOAPI.Services
             DateTime? currentEta,
             int? proposedEtaDays,            // ✅ INT days
             string reason,
+            int? delayReasonId,
 
             // evidence doc (base64)
             string? evidenceFileName,

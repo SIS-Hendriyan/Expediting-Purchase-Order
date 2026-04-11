@@ -50,6 +50,7 @@ namespace EXPOAPI.Controllers
             [FromQuery] string? storageLocation,
             [FromQuery] string? purchasingGroup,
             [FromQuery] string? purchasingDocType,
+            [FromQuery] string? keyword,
             [FromQuery] int? pageNumber,
             [FromQuery] int? pageSize,
             CancellationToken ct)
@@ -94,6 +95,9 @@ namespace EXPOAPI.Controllers
 
             if (!string.IsNullOrWhiteSpace(purchasingDocType))
                 spParams["PurchasingDocType"] = purchasingDocType.Trim();
+
+            if (!string.IsNullOrWhiteSpace(keyword))
+                spParams["Keyword"] = keyword.Trim();
 
             if (pageNumber.HasValue)
             {

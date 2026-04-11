@@ -60,7 +60,10 @@ import {
 
 import { API } from "../../config";
 import type { User } from "./Login";
-import { getAccessToken, redirectToLoginExpired } from "../../utils/authSession";
+import {
+  getAccessToken,
+  redirectToLoginExpired,
+} from "../../utils/authSession";
 
 // =====================
 // Types
@@ -114,6 +117,10 @@ type ReEtaRow = {
   RequestETADate?: string;
   ResultProposeEtaDesc?: string;
   FeedbackFileName?: string;
+
+  // delay reason
+  DelayReasonTitle?: string;
+  DelayReasonDescription?: string;
 };
 
 type SummaryRow = {
@@ -344,7 +351,7 @@ function addDaysDateOnly(date: Date, days: number): Date {
 
 function formatYMD(date: Date): string {
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(
-    date.getDate()
+    date.getDate(),
   )}`;
 }
 
@@ -514,7 +521,7 @@ function SearchableSelect(props: {
                 <Check
                   className={cn(
                     "mr-2 h-4 w-4",
-                    value === opt.value ? "opacity-100" : "opacity-0"
+                    value === opt.value ? "opacity-100" : "opacity-0",
                   )}
                 />
                 <span className="truncate">{opt.label}</span>
@@ -567,13 +574,20 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
   const [remark, setRemark] = useState("");
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [vendorResponseFile, setVendorResponseFile] = useState<File | null>(
-    null
+    null,
   );
+  const [vendorDelayReasonId, setVendorDelayReasonId] = useState("");
+  const [vendorRemark, setVendorRemark] = useState("");
 
   const [selectedPO, setSelectedPO] = useState("");
   const [selectedItem, setSelectedItem] = useState("");
   const [newETADays, setNewETADays] = useState("");
   const [rescheduleReason, setRescheduleReason] = useState("");
+  const [selectedDelayReasonId, setSelectedDelayReasonId] = useState("");
+  const [delayReasons, setDelayReasons] = useState<
+    { id: number; title: string; describe: string }[]
+  >([]);
+  const [loadingDelayReasons, setLoadingDelayReasons] = useState(false);
 
   // =====================
   // Load list
@@ -665,12 +679,36 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
     setSelectedItem("");
     setNewETADays("");
     setRescheduleReason("");
+    setSelectedDelayReasonId("");
+  };
+
+  const fetchDelayReasons = async () => {
+    try {
+      setLoadingDelayReasons(true);
+      const raw = await apiFetch<any>(API.DELAY_REASONS_LIST(), {
+        method: "GET",
+      });
+      const list: any[] = Array.isArray(raw)
+        ? raw
+        : (raw?.Data ?? raw?.data ?? raw?.Items ?? raw?.items ?? []);
+      setDelayReasons(
+        list.map((r: any) => ({
+          id: r.ID ?? r.id,
+          title: r.TITLE ?? r.title ?? "",
+          describe: r.DESCRIBE ?? r.describe ?? "",
+        })),
+      );
+    } catch {
+      // silently ignore — dropdown is optional
+    } finally {
+      setLoadingDelayReasons(false);
+    }
   };
 
   const handleOpenCreateDialog = async () => {
     setCreateDialog(true);
     resetCreateForm();
-    await loadPoItems();
+    await Promise.all([loadPoItems(), fetchDelayReasons()]);
   };
 
   const handleCloseCreateDialog = () => {
@@ -680,7 +718,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
 
   const uniquePONumbers = useMemo(
     () => Array.from(new Set(poItems.map((x) => x["Purchasing Document"]))),
-    [poItems]
+    [poItems],
   );
 
   const itemsForSelectedPO = useMemo(() => {
@@ -694,7 +732,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
     return (
       poItems.find(
         (x) =>
-          x["Purchasing Document"] === selectedPO && x.Item === selectedItem
+          x["Purchasing Document"] === selectedPO && x.Item === selectedItem,
       ) || null
     );
   }, [poItems, selectedPO, selectedItem]);
@@ -734,6 +772,10 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
       return toast.error("Please provide a reason for rescheduling");
     }
 
+    if (!selectedDelayReasonId) {
+      return toast.error("Please select a category reason");
+    }
+
     if (!selectedPoItem) {
       return toast.error("PO item not found");
     }
@@ -751,6 +793,9 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
       currentEta: selectedPoItem.ReEtaDate || null,
       proposedEtaDays: days,
       reason: rescheduleReason,
+      delayReasonId: selectedDelayReasonId
+        ? parseInt(selectedDelayReasonId, 10)
+        : null,
       evidenceFileName: null,
       evidenceContentType: null,
       evidenceSize: null,
@@ -783,7 +828,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
   // =====================
   const handleOpenActionDialog = (
     type: "approve" | "reject",
-    request: ReEtaRow
+    request: ReEtaRow,
   ) => {
     setActionDialog({
       open: true,
@@ -916,6 +961,8 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
       request,
     });
     setVendorResponseFile(null);
+    setVendorDelayReasonId("");
+    setVendorRemark("");
   };
 
   const handleCloseVendorResponseDialog = () => {
@@ -924,10 +971,12 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
       request: null,
     });
     setVendorResponseFile(null);
+    setVendorDelayReasonId("");
+    setVendorRemark("");
   };
 
   const handleVendorResponseFileUpload = (
-    e: React.ChangeEvent<HTMLInputElement>
+    e: React.ChangeEvent<HTMLInputElement>,
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -949,6 +998,10 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
       return toast.error("Please upload a supporting document");
     }
 
+    if (!vendorDelayReasonId) {
+      return toast.error("Please select a delay reason");
+    }
+
     const req = vendorResponseDialog.request;
     if (!req) return;
 
@@ -961,6 +1014,10 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
         contentType: vendorResponseFile.type,
         fileSize: vendorResponseFile.size,
         base64,
+        delayReasonId: vendorDelayReasonId
+          ? Number(vendorDelayReasonId)
+          : undefined,
+        remark: vendorRemark,
       };
 
       await apiFetch<any>(API.REETA_VENDOR_RESPONSE(req.ID), {
@@ -983,10 +1040,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
   // =====================
   // Documents
   // =====================
-  const handleDownloadDoc = async (
-    docId?: number,
-    fallbackName?: string
-  ) => {
+  const handleDownloadDoc = async (docId?: number, fallbackName?: string) => {
     if (!docId) {
       return toast.error("Document not available");
     }
@@ -1025,12 +1079,12 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
 
   const pageSizeOptions: SelectOption[] = useMemo(
     () => ["10", "25", "50", "100"].map((v) => ({ value: v, label: v })),
-    []
+    [],
   );
 
   const poNumberOptions: SelectOption[] = useMemo(
     () => uniquePONumbers.map((po) => ({ value: po, label: po })),
-    [uniquePONumbers]
+    [uniquePONumbers],
   );
 
   const itemOptions: SelectOption[] = useMemo(
@@ -1039,7 +1093,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
         value: item.Item,
         label: `${item.Item} - ${item["Short Text"] || "(no description)"}`,
       })),
-    [itemsForSelectedPO]
+    [itemsForSelectedPO],
   );
 
   return (
@@ -1273,9 +1327,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                           r["Feedback Doc ID"] ||
                           r.HasVendorResponse ||
                           r["VendorResp Doc ID"]
-                        ) && (
-                          <span className="text-xs text-gray-400">-</span>
-                        )}
+                        ) && <span className="text-xs text-gray-400">-</span>}
                       </div>
                     </TableCell>
 
@@ -1287,7 +1339,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                       <Badge
                         style={{
                           backgroundColor: getStatusColor(
-                            r["Reschedule Status"]
+                            r["Reschedule Status"],
                           ),
                         }}
                         className="whitespace-nowrap text-xs text-white"
@@ -1325,7 +1377,9 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                                 size="sm"
                                 style={{ backgroundColor: "#FFA500" }}
                                 className="h-9 w-9 p-0 text-white"
-                                onClick={() => handleOpenVendorResponseDialog(r)}
+                                onClick={() =>
+                                  handleOpenVendorResponseDialog(r)
+                                }
                                 title="Upload Document"
                                 disabled={loading}
                               >
@@ -1507,7 +1561,9 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                       <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
                         ETD
                       </p>
-                      <p className="text-sm">{formatDate(selectedPoItem.ETD)}</p>
+                      <p className="text-sm">
+                        {formatDate(selectedPoItem.ETD)}
+                      </p>
                     </div>
                     <div>
                       <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
@@ -1524,8 +1580,8 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                             color: "#014357",
                           }}
                         >
-                          ({safeNumber(selectedPoItem["ETA Days"], 0)} days after
-                          ETD)
+                          ({safeNumber(selectedPoItem["ETA Days"], 0)} days
+                          after ETD)
                         </p>
                       </div>
                     </div>
@@ -1570,12 +1626,43 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                         {Math.max(
                           0,
                           parseInt(newETADays, 10) -
-                            safeNumber(selectedPoItem["ETA Days"], 0)
+                            safeNumber(selectedPoItem["ETA Days"], 0),
                         )}{" "}
                         days
                       </p>
                     </div>
                   )}
+              </div>
+
+              <div className="space-y-2">
+                <Label>
+                  Category Reason <span className="text-red-500">*</span>
+                </Label>
+                <SearchableSelect
+                  value={selectedDelayReasonId}
+                  onChange={setSelectedDelayReasonId}
+                  placeholder={
+                    loadingDelayReasons
+                      ? "Loading categories..."
+                      : "Select a category"
+                  }
+                  searchPlaceholder="Search category..."
+                  emptyText="No categories found"
+                  options={delayReasons.map((dr) => ({
+                    value: String(dr.id),
+                    label: dr.title,
+                  }))}
+                  disabled={loading || loadingDelayReasons}
+                />
+                {selectedDelayReasonId &&
+                  (() => {
+                    const found = delayReasons.find(
+                      (dr) => String(dr.id) === selectedDelayReasonId,
+                    );
+                    return found?.describe ? (
+                      <p className="text-xs text-gray-500">{found.describe}</p>
+                    ) : null;
+                  })()}
               </div>
 
               <div className="space-y-2">
@@ -1609,7 +1696,9 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
               onClick={handleSubmitRequest}
               disabled={loading}
             >
-              {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {loading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
               Submit Request
             </Button>
           </DialogFooter>
@@ -1711,7 +1800,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                           <p className="text-sm text-gray-600">
                             {safeNumber(
                               actionDialog.request["ETA Days"],
-                              actionDialog.request["Proposed ETA"]
+                              actionDialog.request["Proposed ETA"],
                             )}{" "}
                             days after ETD
                           </p>
@@ -1727,8 +1816,13 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                           <p className="mb-2 text-xs uppercase tracking-wide text-gray-500">
                             NEW ETA
                           </p>
-                          <p className="mb-1 text-xl" style={{ color: "#ED832D" }}>
-                            {formatDate(getRequestedEtaDate(actionDialog.request))}
+                          <p
+                            className="mb-1 text-xl"
+                            style={{ color: "#ED832D" }}
+                          >
+                            {formatDate(
+                              getRequestedEtaDate(actionDialog.request),
+                            )}
                           </p>
                           <p className="text-sm" style={{ color: "#ED832D" }}>
                             +{getRequestedEtaDesc(actionDialog.request)}
@@ -1740,9 +1834,40 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                         <p className="mb-2 text-xs uppercase tracking-wide text-gray-500">
                           Vendor&apos;s Reason
                         </p>
-                        <p className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm leading-relaxed">
-                          {actionDialog.request["Reschedule Reason"] || "-"}
-                        </p>
+                        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
+                          {actionDialog.request.DelayReasonTitle && (
+                            <div className="flex flex-col gap-1">
+                              <p className="text-xs uppercase tracking-wide text-gray-500">
+                                Category
+                              </p>
+                              <div className="flex items-start gap-2">
+                                <span
+                                  className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium"
+                                  style={{
+                                    backgroundColor: "rgba(1, 67, 87, 0.1)",
+                                    color: "#014357",
+                                  }}
+                                >
+                                  {actionDialog.request.DelayReasonTitle}
+                                </span>
+                              </div>
+                              {actionDialog.request.DelayReasonDescription && (
+                                <p className="text-xs text-gray-500 leading-relaxed">
+                                  {actionDialog.request.DelayReasonDescription}
+                                </p>
+                              )}
+                            </div>
+                          )}
+
+                          <div className="flex flex-col gap-1">
+                            <p className="text-xs uppercase tracking-wide text-gray-500">
+                              Remark
+                            </p>
+                            <p className="text-sm leading-relaxed">
+                              {actionDialog.request["Reschedule Reason"] || "-"}
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1805,7 +1930,9 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                             <span className="ml-1 text-red-500">*</span>
                           )}
                           {actionDialog.type === "approve" && (
-                            <span className="ml-1 text-gray-500">(Optional)</span>
+                            <span className="ml-1 text-gray-500">
+                              (Optional)
+                            </span>
                           )}
                         </Label>
                         <p className="mb-3 text-xs text-gray-500">
@@ -1947,7 +2074,9 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                 onClick={handleSubmitAction}
                 disabled={loading}
               >
-                {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                {loading ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : null}
                 {actionDialog.type === "approve"
                   ? "Approve Request"
                   : "Reject Request"}
@@ -1965,7 +2094,9 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
       >
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden">
           <DialogHeader>
-            <DialogTitle style={{ color: "#014357" }}>Request Details</DialogTitle>
+            <DialogTitle style={{ color: "#014357" }}>
+              Request Details
+            </DialogTitle>
             <DialogDescription>
               View complete information about this reschedule request.
             </DialogDescription>
@@ -1975,7 +2106,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                 <Badge
                   style={{
                     backgroundColor: getStatusColor(
-                      detailsDialog.request["Reschedule Status"]
+                      detailsDialog.request["Reschedule Status"],
                     ),
                   }}
                   className="px-4 py-1.5 text-white"
@@ -2143,9 +2274,40 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                     </h3>
                   </div>
 
-                  <p className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm leading-relaxed">
-                    {detailsDialog.request["Reschedule Reason"] || "-"}
-                  </p>
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
+                    {detailsDialog.request.DelayReasonTitle && (
+                      <div className="flex flex-col gap-1">
+                        <p className="text-xs uppercase tracking-wide text-gray-500">
+                          Category
+                        </p>
+                        <div className="flex items-start gap-2">
+                          <span
+                            className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium"
+                            style={{
+                              backgroundColor: "rgba(1, 67, 87, 0.1)",
+                              color: "#014357",
+                            }}
+                          >
+                            {detailsDialog.request.DelayReasonTitle}
+                          </span>
+                        </div>
+                        {detailsDialog.request.DelayReasonDescription && (
+                          <p className="text-xs text-gray-500 leading-relaxed">
+                            {detailsDialog.request.DelayReasonDescription}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex flex-col gap-1">
+                      <p className="text-xs uppercase tracking-wide text-gray-500">
+                        Remark
+                      </p>
+                      <p className="text-sm leading-relaxed">
+                        {detailsDialog.request["Reschedule Reason"] || "-"}
+                      </p>
+                    </div>
+                  </div>
                 </div>
 
                 {detailsDialog.request["Reschedule Status"] !== "PENDING" && (
@@ -2154,7 +2316,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                       className="mb-4 flex items-center gap-3 border-b-2 pb-3"
                       style={{
                         borderColor: getStatusColor(
-                          detailsDialog.request["Reschedule Status"]
+                          detailsDialog.request["Reschedule Status"],
                         ),
                       }}
                     >
@@ -2162,7 +2324,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                         className="h-1.5 w-1.5 rounded-full"
                         style={{
                           backgroundColor: getStatusColor(
-                            detailsDialog.request["Reschedule Status"]
+                            detailsDialog.request["Reschedule Status"],
                           ),
                         }}
                       />
@@ -2203,72 +2365,77 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                         </p>
                       </div>
 
-                      {detailsDialog.request["Feedback Doc ID"] ? (
-                        (() => {
-                          const status =
-                            detailsDialog.request["Reschedule Status"];
-                          const theme = getDocButtonTheme(status);
+                      {detailsDialog.request["Feedback Doc ID"]
+                        ? (() => {
+                            const status =
+                              detailsDialog.request["Reschedule Status"];
+                            const theme = getDocButtonTheme(status);
 
-                          return (
-                            <div>
-                              <Label className="mb-2 block">
-                                Admin&apos;s Record of Event
-                              </Label>
+                            return (
+                              <div>
+                                <Label className="mb-2 block">
+                                  Admin&apos;s Record of Event
+                                </Label>
 
-                              <div
-                                className="flex items-center justify-between rounded-lg border-2 p-4"
-                                style={{
-                                  backgroundColor: theme.softBg,
-                                  borderColor: theme.color,
-                                }}
-                              >
-                                <div className="flex items-center gap-3">
-                                  <div
-                                    className="rounded p-2"
-                                    style={{ backgroundColor: theme.color }}
-                                  >
-                                    <FileText className="h-6 w-6 text-white" />
-                                  </div>
-
-                                  <div>
-                                    <p
-                                      className="text-sm"
-                                      style={{ color: "#014357" }}
-                                    >
-                                      Doc #{" "}
-                                      {detailsDialog.request.FeedbackFileName ||
-                                        detailsDialog.request["Feedback Doc ID"]}
-                                    </p>
-                                    <p className="text-xs text-gray-600">
-                                      PDF Document
-                                    </p>
-                                  </div>
-                                </div>
-
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() =>
-                                    handleDownloadDoc(
-                                      detailsDialog.request?.["Feedback Doc ID"],
-                                      "record_of_event.pdf"
-                                    )
-                                  }
+                                <div
+                                  className="flex items-center justify-between rounded-lg border-2 p-4"
                                   style={{
+                                    backgroundColor: theme.softBg,
                                     borderColor: theme.color,
-                                    color: theme.color,
                                   }}
-                                  className={theme.hoverClass}
-                                  disabled={loading}
                                 >
-                                  <Download className="mr-2 h-4 w-4" />
-                                  Download
-                                </Button>
+                                  <div className="flex items-center gap-3">
+                                    <div
+                                      className="rounded p-2"
+                                      style={{ backgroundColor: theme.color }}
+                                    >
+                                      <FileText className="h-6 w-6 text-white" />
+                                    </div>
+
+                                    <div>
+                                      <p
+                                        className="text-sm"
+                                        style={{ color: "#014357" }}
+                                      >
+                                        Doc #{" "}
+                                        {detailsDialog.request
+                                          .FeedbackFileName ||
+                                          detailsDialog.request[
+                                            "Feedback Doc ID"
+                                          ]}
+                                      </p>
+                                      <p className="text-xs text-gray-600">
+                                        PDF Document
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() =>
+                                      handleDownloadDoc(
+                                        detailsDialog.request?.[
+                                          "Feedback Doc ID"
+                                        ],
+                                        "record_of_event.pdf",
+                                      )
+                                    }
+                                    style={{
+                                      borderColor: theme.color,
+                                      color: theme.color,
+                                    }}
+                                    className={theme.hoverClass}
+                                    disabled={loading}
+                                  >
+                                    <Download className="mr-2 h-4 w-4" />
+                                    Download
+                                  </Button>
+                                </div>
                               </div>
-                            </div>
-                          );
-                        })()
-                      ) : null}
+                            );
+                          })()
+                        : null}
 
                       {detailsDialog.request["VendorResp Doc ID"] ? (
                         <div>
@@ -2294,12 +2461,13 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                                   className="text-sm"
                                   style={{ color: "#014357" }}
                                 >
-                                  Doc # {detailsDialog.request["VendorResp Doc ID"]}
+                                  Doc #{" "}
+                                  {detailsDialog.request["VendorResp Doc ID"]}
                                 </p>
                                 <p className="text-xs text-gray-600">
                                   Uploaded{" "}
                                   {formatDate(
-                                    detailsDialog.request.VENDOR_RESPONSE_AT
+                                    detailsDialog.request.VENDOR_RESPONSE_AT,
                                   )}
                                 </p>
                               </div>
@@ -2311,7 +2479,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                               onClick={() =>
                                 handleDownloadDoc(
                                   detailsDialog.request?.["VendorResp Doc ID"],
-                                  "vendor_response.pdf"
+                                  "vendor_response.pdf",
                                 )
                               }
                               style={{
@@ -2366,9 +2534,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
             ) : (
               <Button
                 variant="outline"
-                onClick={() =>
-                  setDetailsDialog({ open: false, request: null })
-                }
+                onClick={() => setDetailsDialog({ open: false, request: null })}
                 disabled={loading}
               >
                 Close
@@ -2437,17 +2603,12 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                           <FileText className="h-6 w-6 text-white" />
                         </div>
                         <div>
-                          <p
-                            className="text-sm"
-                            style={{ color: "#014357" }}
-                          >
+                          <p className="text-sm" style={{ color: "#014357" }}>
                             Doc #{" "}
                             {vendorResponseDialog.request.FeedbackFileName ||
                               vendorResponseDialog.request["Feedback Doc ID"]}
                           </p>
-                          <p className="text-xs text-gray-600">
-                            PDF Document
-                          </p>
+                          <p className="text-xs text-gray-600">PDF Document</p>
                         </div>
                       </div>
 
@@ -2457,7 +2618,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                         onClick={() =>
                           handleDownloadDoc(
                             vendorResponseDialog.request?.["Feedback Doc ID"],
-                            "record_of_event.pdf"
+                            "record_of_event.pdf",
                           )
                         }
                         style={{ borderColor: "#d4183d", color: "#d4183d" }}
@@ -2470,6 +2631,35 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                     </div>
                   </div>
                 )}
+
+                <div>
+                  <Label className="mb-2 block">
+                    Delay Reason <span className="text-red-500">*</span>
+                  </Label>
+                  <SearchableSelect
+                    value={vendorDelayReasonId}
+                    onChange={(v) => setVendorDelayReasonId(v)}
+                    placeholder="Select a delay reason"
+                    options={delayReasons.map((r) => ({
+                      value: String(r.id),
+                      label: r.title,
+                    }))}
+                    disabled={loading || loadingDelayReasons}
+                    emptyText="No delay reasons available"
+                  />
+                </div>
+
+                <div>
+                  <Label className="mb-2 block">Remark</Label>
+                  <textarea
+                    className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    placeholder="Enter your remark..."
+                    value={vendorRemark}
+                    onChange={(e) => setVendorRemark(e.target.value)}
+                    disabled={loading}
+                    rows={3}
+                  />
+                </div>
 
                 <div>
                   <Label className="mb-2 block">
@@ -2493,9 +2683,15 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                             width: "fit-content",
                           }}
                         >
-                          <Upload className="h-6 w-6" style={{ color: "#FFA500" }} />
+                          <Upload
+                            className="h-6 w-6"
+                            style={{ color: "#FFA500" }}
+                          />
                         </div>
-                        <p className="mb-1 text-sm" style={{ color: "#014357" }}>
+                        <p
+                          className="mb-1 text-sm"
+                          style={{ color: "#014357" }}
+                        >
                           Click to upload PDF document
                         </p>
                         <p className="text-xs text-gray-500">
@@ -2566,7 +2762,9 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                 onClick={handleSubmitVendorResponse}
                 disabled={loading}
               >
-                {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                {loading ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : null}
                 Submit Document
               </Button>
             </DialogFooter>
