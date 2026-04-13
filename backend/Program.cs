@@ -91,6 +91,7 @@ builder.Services.AddScoped<IReEtaRequestService, ReEtaRequestService>();
 builder.Services.AddScoped<IReEtaRequestLogService, ReEtaRequestLogService>();
 builder.Services.Configure<SsoSettings>(builder.Configuration.GetSection("SSO"));
 builder.Services.AddScoped<IPurchaseOrderImportService, PurchaseOrderImportService>();
+builder.Services.AddScoped<IDelayReasonService, DelayReasonService>();
 
 // =========================
 // Auth Service

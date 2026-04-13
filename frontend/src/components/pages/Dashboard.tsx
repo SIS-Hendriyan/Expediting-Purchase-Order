@@ -414,7 +414,9 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
     if (group && group !== 'All') params.append(groupParamName, group);
 
     if (user.role === 'vendor' && user.company) {
-      params.append('vendor', user.company);
+      params.append('Vendor', user.company);
+      params.append('Name', user.company);
+      params.append('Company', user.company);
     } else if (vendor) {
       params.append('vendor', vendor);
     }
@@ -465,6 +467,13 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
       }
 
       const params = buildCommonParams(useDefault, 'group');
+
+      if (user.role === 'vendor' && user.company) {
+        params.set('Vendor', user.company);
+        params.set('Name', user.company);
+        params.set('Company', user.company);
+      }
+
       const url = `${API.SUMMARYDASHBOARD()}?${params.toString()}`;
       const res = await fetchWithAuth(url, { headers: buildAuthHeaders() });
       const data = await getJsonData<SummaryData>(res);
@@ -576,6 +585,8 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
 
         if (user.role === 'vendor' && user.company) {
           vendorFilter = user.company;
+          params.append('Name', user.company);
+          params.append('Company', user.company);
         } else if (vendor) {
           vendorFilter = vendor;
         }

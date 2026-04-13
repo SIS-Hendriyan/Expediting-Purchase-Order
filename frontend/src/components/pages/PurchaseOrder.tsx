@@ -3166,10 +3166,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           <div className="space-y-3">
                             <label
                               className={[
-                                "flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition",
-                                updateScheduleStatus === "yes"
-                                  ? "border-[#014357] bg-slate-50"
-                                  : "border-gray-200 hover:border-[#014357]/50",
+                                "flex items-start gap-3 rounded-lg border p-4 transition",
+                                orderToUpdate.isApproveReETA === false
+                                  ? "border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed"
+                                  : updateScheduleStatus === "yes"
+                                    ? "border-[#014357] bg-slate-50 cursor-pointer"
+                                    : "border-gray-200 hover:border-[#014357]/50 cursor-pointer",
                               ].join(" ")}
                             >
                               <input
@@ -3178,12 +3180,13 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                                 value="yes"
                                 checked={updateScheduleStatus === "yes"}
                                 onChange={() => setUpdateScheduleStatus("yes")}
+                                disabled={orderToUpdate.isApproveReETA === false}
                                 className="mt-1"
                               />
                               <div>
                                 <div
                                   className="font-medium text-sm"
-                                  style={{ color: "#014357" }}
+                                  style={{ color: orderToUpdate.isApproveReETA === false ? "#9CA3AF" : "#014357" }}
                                 >
                                   Ya, masih sesuai ETA
                                 </div>
@@ -3192,10 +3195,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
                             <label
                               className={[
-                                "flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition",
-                                updateScheduleStatus === "no"
-                                  ? "border-[#014357] bg-slate-50"
-                                  : "border-gray-200 hover:border-[#014357]/50",
+                                "flex items-start gap-3 rounded-lg border p-4 transition",
+                                orderToUpdate.isApproveReETA === false
+                                  ? "border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed"
+                                  : updateScheduleStatus === "no"
+                                    ? "border-[#014357] bg-slate-50 cursor-pointer"
+                                    : "border-gray-200 hover:border-[#014357]/50 cursor-pointer",
                               ].join(" ")}
                             >
                               <input
@@ -3204,12 +3209,13 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                                 value="no"
                                 checked={updateScheduleStatus === "no"}
                                 onChange={() => setUpdateScheduleStatus("no")}
+                                disabled={orderToUpdate.isApproveReETA === false}
                                 className="mt-1"
                               />
                               <div>
                                 <div
                                   className="font-medium text-sm"
-                                  style={{ color: "#014357" }}
+                                  style={{ color: orderToUpdate.isApproveReETA === false ? "#9CA3AF" : "#014357" }}
                                 >
                                   Tidak, lakukan Re-ETA
                                 </div>
