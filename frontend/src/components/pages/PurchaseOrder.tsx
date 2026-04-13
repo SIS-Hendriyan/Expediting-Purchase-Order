@@ -2801,11 +2801,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   <TableBody>
                     {ordersNeedingUpdate.map((o, idx) => {
                       const display = mapBackendStatusToDisplay(o.status);
-                      const etaDateValue =
-                        display === "PO Submitted" ? o.deliveryDate : o.etaDate;
-                      const d = parseDdMmmYyyy(etaDateValue);
-                      const diffDays = d ? diffDaysFromToday(d) : null;
-
                       let effectiveEtaDateStr: string | null = null;
                       if (o.reEtaDate?.trim()) {
                         effectiveEtaDateStr = o.reEtaDate;
@@ -2814,7 +2809,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       } else if (o.deliveryDate?.trim()) {
                         effectiveEtaDateStr = o.deliveryDate;
                       }
-
                       const d = parseDdMmmYyyy(effectiveEtaDateStr);
                       const diffDays = d ? diffDaysFromToday(d) : null;
 
@@ -3318,7 +3312,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           <Label>Delivery Confirmation</Label>
 
                           <div className="space-y-3">
-<<<<<<< HEAD
                             <label
                               className={[
                                 "flex items-start gap-3 rounded-lg border p-4 transition",
@@ -3344,35 +3337,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                                   style={{ color: orderToUpdate.isApproveReETA === false ? "#9CA3AF" : "#014357" }}
                                 >
                                   Ya, masih sesuai ETA
-=======
-                            {normalizeAttention(orderToUpdate.attention) !== 2 && (
-                              <label
-                                className={[
-                                  "flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition",
-                                  updateScheduleStatus === "yes"
-                                    ? "border-[#014357] bg-slate-50"
-                                    : "border-gray-200 hover:border-[#014357]/50",
-                                ].join(" ")}
-                              >
-                                <input
-                                  type="radio"
-                                  name="scheduleStatus"
-                                  value="yes"
-                                  checked={updateScheduleStatus === "yes"}
-                                  onChange={() => setUpdateScheduleStatus("yes")}
-                                  className="mt-1"
-                                />
-                                <div>
-                                  <div
-                                    className="font-medium text-sm"
-                                    style={{ color: "#014357" }}
-                                  >
-                                    Ya, masih sesuai ETA
-                                  </div>
->>>>>>> 75dc63b8427b3c3f1ebb0d103adb0037aa8a3f41
                                 </div>
-                              </label>
-                            )}
+                              </div>
+                            </label>
 
                             <label
                               className={[
