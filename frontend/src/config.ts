@@ -1,43 +1,52 @@
-﻿const rawBase = import.meta.env.VITE_API_BASE_URL || '';
+﻿const rawBase = import.meta.env.VITE_API_BASE_URL || "";
 
 export const CONFIG = {
-  apiBaseUrl: rawBase.replace(/\/+$/, ''), // hapus trailing slash
+  apiBaseUrl: rawBase.replace(/\/+$/, ""), // hapus trailing slash
 };
 
 export const API = {
-  LOGIN:      () => `${CONFIG.apiBaseUrl}/api/auth/login`,
+  LOGIN: () => `${CONFIG.apiBaseUrl}/api/auth/login`,
   VERIFY_OTP: () => `${CONFIG.apiBaseUrl}/api/auth/verify-otp`,
   SUMMARYPO: () => `${CONFIG.apiBaseUrl}/api/purchase-order/summary`,
-   LISTUSER:   () => `${CONFIG.apiBaseUrl}/api/user/`,              // GET
-    CREATEUSER: () => `${CONFIG.apiBaseUrl}/api/user/`,              // POST
-    DETAILUSER: (id: number | string) => `${CONFIG.apiBaseUrl}/api/user/${id}`, // GET
-    UPDATEUSER: (id: number | string) => `${CONFIG.apiBaseUrl}/api/user/${id}`, // PUT
-    DELETEUSER: (id: number | string) => `${CONFIG.apiBaseUrl}/api/user/${id}`, // DELETE
-    LISTVENDOR:   () => `${CONFIG.apiBaseUrl}/api/vendor/`,   
-    DETAILVENDOR: (id: number | string) => `${CONFIG.apiBaseUrl}/api/vendor/${id}`, // GET
-    ACCESSVENDOR: (id: number | string) => `${CONFIG.apiBaseUrl}/api/vendor/${id}/access`, // POST
-    IMPORT_PO: () => `${CONFIG.apiBaseUrl}/api/purchase-order/import`,
-    DETAILPO: (poid: number | string) => `${CONFIG.apiBaseUrl}/api/purchase-order/${poid}/detail`,
-    MASTERPO: () => `${CONFIG.apiBaseUrl}/api/purchase-order/master`,
-    // Re-ETA
-REETA_LIST: () => `${CONFIG.apiBaseUrl}/api/re-eta/requests`,
-REETA_DETAIL: (id: number | string) => `${CONFIG.apiBaseUrl}/api/re-eta/requests/${id}`,
-REETA_CREATE: () => `${CONFIG.apiBaseUrl}/api/re-eta/requests`,
-REETA_APPROVE: (id: number | string) => `${CONFIG.apiBaseUrl}/api/re-eta/requests/${id}/approve`,
-REETA_REJECT: (id: number | string) => `${CONFIG.apiBaseUrl}/api/re-eta/requests/${id}/reject`,
-REETA_VENDOR_RESPONSE: (id: number | string) => `${CONFIG.apiBaseUrl}/api/re-eta/requests/${id}/vendor-response`,
-REETA_LOGS: (id: number | string) => `${CONFIG.apiBaseUrl}/api/re-eta/requests/${id}/logs`,
-REETA_DOC: (docId: number | string) => `${CONFIG.apiBaseUrl}/api/re-eta/documents/${docId}`,
+  LISTUSER: () => `${CONFIG.apiBaseUrl}/api/user/`, // GET
+  CREATEUSER: () => `${CONFIG.apiBaseUrl}/api/user/`, // POST
+  DETAILUSER: (id: number | string) => `${CONFIG.apiBaseUrl}/api/user/${id}`, // GET
+  UPDATEUSER: (id: number | string) => `${CONFIG.apiBaseUrl}/api/user/${id}`, // PUT
+  DELETEUSER: (id: number | string) => `${CONFIG.apiBaseUrl}/api/user/${id}`, // DELETE
+  LISTVENDOR: () => `${CONFIG.apiBaseUrl}/api/vendor/`,
+  DETAILVENDOR: (id: number | string) =>
+    `${CONFIG.apiBaseUrl}/api/vendor/${id}`, // GET
+  ACCESSVENDOR: (id: number | string) =>
+    `${CONFIG.apiBaseUrl}/api/vendor/${id}/access`, // POST
+  IMPORT_PO: () => `${CONFIG.apiBaseUrl}/api/purchase-order/import`,
+  DETAILPO: (poid: number | string) =>
+    `${CONFIG.apiBaseUrl}/api/purchase-order/${poid}/detail`,
+  MASTERPO: () => `${CONFIG.apiBaseUrl}/api/purchase-order/master`,
+  // Re-ETA
+  REETA_LIST: () => `${CONFIG.apiBaseUrl}/api/re-eta/requests`,
+  REETA_DETAIL: (id: number | string) =>
+    `${CONFIG.apiBaseUrl}/api/re-eta/requests/${id}`,
+  REETA_CREATE: () => `${CONFIG.apiBaseUrl}/api/re-eta/requests`,
+  REETA_APPROVE: (id: number | string) =>
+    `${CONFIG.apiBaseUrl}/api/re-eta/requests/${id}/approve`,
+  REETA_REJECT: (id: number | string) =>
+    `${CONFIG.apiBaseUrl}/api/re-eta/requests/${id}/reject`,
+  REETA_VENDOR_RESPONSE: (id: number | string) =>
+    `${CONFIG.apiBaseUrl}/api/re-eta/requests/${id}/vendor-response`,
+  REETA_LOGS: (id: number | string) =>
+    `${CONFIG.apiBaseUrl}/api/re-eta/requests/${id}/logs`,
+  REETA_DOC: (docId: number | string) =>
+    `${CONFIG.apiBaseUrl}/api/re-eta/documents/${docId}`,
 
-// PO items eligible (buat Create Request dropdown)
-PO_ITEMS: () => `${CONFIG.apiBaseUrl}/api/purchase-order/items`,
+  // PO items eligible (buat Create Request dropdown)
+  PO_ITEMS: () => `${CONFIG.apiBaseUrl}/api/purchase-order/items`,
 
-    // SSO helper - backend should expose an endpoint that calls the SOAP SSO service
-    SSO_GETUSER: (nrp: string) => `${CONFIG.apiBaseUrl}/api/sso/get-user?nrp=${encodeURIComponent(nrp)}`,
-    SUMMARYDASHBOARD:  () => `${CONFIG.apiBaseUrl}/api/dashboard/summary`,
+  // SSO helper - backend should expose an endpoint that calls the SOAP SSO service
+  SSO_GETUSER: (nrp: string) =>
+    `${CONFIG.apiBaseUrl}/api/sso/get-user?nrp=${encodeURIComponent(nrp)}`,
+  SUMMARYDASHBOARD: () => `${CONFIG.apiBaseUrl}/api/dashboard/summary`,
 
-    DASHBOARD_PO_TREND: () =>
-    `${CONFIG.apiBaseUrl}/api/dashboard/po-trend`,
+  DASHBOARD_PO_TREND: () => `${CONFIG.apiBaseUrl}/api/dashboard/po-trend`,
   DASHBOARD_STATUS_DISTRIBUTION: () =>
     `${CONFIG.apiBaseUrl}/api/dashboard/status-distribution`,
   DASHBOARD_MONTHLY_COMPLETION_DELAY: () =>
@@ -48,7 +57,16 @@ PO_ITEMS: () => `${CONFIG.apiBaseUrl}/api/purchase-order/items`,
     `${CONFIG.apiBaseUrl}/api/dashboard/master-filters`,
 
   POSTATUS_UPSERT: () => `${CONFIG.apiBaseUrl}/api/PoStatus/upsert`,
-  POSTATUS_DETAIL: (idPoItem: number | string) => `${CONFIG.apiBaseUrl}/api/PoStatus/${idPoItem}`,
-POSTATUS_LIST: () => `${CONFIG.apiBaseUrl}/api/PoStatus`,
-POSTATUS_ON_DELIVERY: () => `${CONFIG.apiBaseUrl}/api/PoStatus/on-delivery`,
+  POSTATUS_DETAIL: (idPoItem: number | string) =>
+    `${CONFIG.apiBaseUrl}/api/PoStatus/${idPoItem}`,
+  POSTATUS_LIST: () => `${CONFIG.apiBaseUrl}/api/PoStatus`,
+  POSTATUS_ON_DELIVERY: () => `${CONFIG.apiBaseUrl}/api/PoStatus/on-delivery`,
+
+  // Delay Reasons
+  DELAY_REASONS_LIST: () => `${CONFIG.apiBaseUrl}/api/delayreasons`,
+  DELAY_REASONS_CREATE: () => `${CONFIG.apiBaseUrl}/api/delayreasons`,
+  DELAY_REASONS_UPDATE: (id: number | string) =>
+    `${CONFIG.apiBaseUrl}/api/delayreasons/${id}`,
+  DELAY_REASONS_DELETE: (id: number | string) =>
+    `${CONFIG.apiBaseUrl}/api/delayreasons/${id}`,
 };

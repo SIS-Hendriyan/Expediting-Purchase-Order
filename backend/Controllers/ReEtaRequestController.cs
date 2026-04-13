@@ -143,6 +143,7 @@ namespace EXPOAPI.Controllers
                     dto.CurrentEta,
                     dto.ProposedEtaDays,
                     dto.Reason,
+                    dto.DelayReasonId,
                     dto.EvidenceFileName,
                     dto.EvidenceContentType,
                     dto.EvidenceSize,

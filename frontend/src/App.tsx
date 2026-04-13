@@ -1,18 +1,25 @@
-import { useState, useEffect } from 'react';
-import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
-import { VendorManagement } from './components/pages/VendorManagement';
-import { InternalUserManagement } from './components/pages/InternalUserManagement';
-import { PurchaseOrder } from './components/pages/PurchaseOrder';
-import { RescheduleETA } from './components/pages/RescheduleETA';
-import { Dashboard } from './components/pages/Dashboard';
-import Login, { type User } from './components/pages/Login';
+import { useState, useEffect } from "react";
+import {
+  Routes,
+  Route,
+  useNavigate,
+  useLocation,
+  Navigate,
+} from "react-router-dom";
+import { VendorManagement } from "./components/pages/VendorManagement";
+import { InternalUserManagement } from "./components/pages/InternalUserManagement";
+import { DelayReasonManagement } from "./components/pages/DelayReasonManagement";
+import { PurchaseOrder } from "./components/pages/PurchaseOrder";
+import { RescheduleETA } from "./components/pages/RescheduleETA";
+import { Dashboard } from "./components/pages/Dashboard";
+import Login, { type User } from "./components/pages/Login";
 import {
   getAuthSession,
   isVendorSession,
   isInternalSession,
   clearAuthSession,
-} from './utils/authSession';
-import { OTP } from './components/pages/OTP';
+} from "./utils/authSession";
+import { OTP } from "./components/pages/OTP";
 
 import {
   Users,
@@ -25,32 +32,34 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut,
-} from 'lucide-react';
+  Database,
+} from "lucide-react";
 
-import { Button } from './components/ui/button';
+import { Button } from "./components/ui/button";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from './components/ui/tooltip';
+} from "./components/ui/tooltip";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from './components/ui/popover';
-import { Toaster } from './components/ui/sonner';
+} from "./components/ui/popover";
+import { Toaster } from "./components/ui/sonner";
 
-import logoImage from './assets/5634ad8959216fdb7980de73de586bfe04c49599.png';
-import collapsedIcon from './assets/cbde77824bc437d545969c4a519b54885b6dad7d.png';
+import logoImage from "./assets/5634ad8959216fdb7980de73de586bfe04c49599.png";
+import collapsedIcon from "./assets/cbde77824bc437d545969c4a519b54885b6dad7d.png";
 
 type Page =
-  | 'vendor-management'
-  | 'internal-user-management'
-  | 'purchase-order'
-  | 'reschedule-eta'
-  | 'dashboard'
-  | 'otp';
+  | "vendor-management"
+  | "internal-user-management"
+  | "delay-reason"
+  | "purchase-order"
+  | "reschedule-eta"
+  | "dashboard"
+  | "otp";
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -58,6 +67,7 @@ export default function App() {
   const [isRestoring, setIsRestoring] = useState(true);
 
   const [userManagementExpanded, setUserManagementExpanded] = useState(false);
+  const [masterDataExpanded, setMasterDataExpanded] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [profilePopoverOpen, setProfilePopoverOpen] = useState(false);
@@ -66,49 +76,51 @@ export default function App() {
   const location = useLocation();
 
   const derivePageFromPath = (path: string): Page => {
-    if (path.startsWith('/vendor-management')) return 'vendor-management';
-    if (path.startsWith('/internal-user-management')) return 'internal-user-management';
-    if (path.startsWith('/purchase-order')) return 'purchase-order';
-    if (path.startsWith('/reschedule-eta')) return 'reschedule-eta';
-    if (path.startsWith('/otp')) return 'otp';
-    return 'dashboard';
+    if (path.startsWith("/vendor-management")) return "vendor-management";
+    if (path.startsWith("/internal-user-management"))
+      return "internal-user-management";
+    if (path.startsWith("/delay-reason")) return "delay-reason";
+    if (path.startsWith("/purchase-order")) return "purchase-order";
+    if (path.startsWith("/reschedule-eta")) return "reschedule-eta";
+    if (path.startsWith("/otp")) return "otp";
+    return "dashboard";
   };
 
   const clearClientAuthData = () => {
     try {
       clearAuthSession();
 
-      sessionStorage.removeItem('vendorSession');
-      sessionStorage.removeItem('internalSession');
-      sessionStorage.removeItem('accessToken');
-      sessionStorage.removeItem('refreshToken');
-      sessionStorage.removeItem('token');
+      sessionStorage.removeItem("vendorSession");
+      sessionStorage.removeItem("internalSession");
+      sessionStorage.removeItem("accessToken");
+      sessionStorage.removeItem("refreshToken");
+      sessionStorage.removeItem("token");
 
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('refreshToken');
-      localStorage.removeItem('token');
+      localStorage.removeItem("accessToken");
+      localStorage.removeItem("refreshToken");
+      localStorage.removeItem("token");
     } catch (e) {
-      console.error('Failed to clear auth data:', e);
+      console.error("Failed to clear auth data:", e);
     }
   };
 
   const handleLogin = (user: User) => {
     setCurrentUser(user);
 
-    if (user.role === 'vendor') {
+    if (user.role === "vendor") {
       setVendorOtpPending(true);
-      navigate('/otp', { replace: true });
+      navigate("/otp", { replace: true });
       return;
     }
 
     setVendorOtpPending(false);
-    navigate('/dashboard', { replace: true });
+    navigate("/dashboard", { replace: true });
   };
 
   const handleOtpVerified = (user: User) => {
     setCurrentUser(user);
     setVendorOtpPending(false);
-    navigate('/dashboard', { replace: true });
+    navigate("/dashboard", { replace: true });
   };
 
   const handleLogout = () => {
@@ -118,13 +130,13 @@ export default function App() {
 
     clearClientAuthData();
 
-    navigate('/login', { replace: true });
+    navigate("/login", { replace: true });
   };
 
   useEffect(() => {
     try {
       const session = getAuthSession();
-      console.log('[restoreSession] raw session:', session);
+      console.log("[restoreSession] raw session:", session);
 
       if (!session) {
         setIsRestoring(false);
@@ -133,12 +145,16 @@ export default function App() {
 
       if (isVendorSession(session)) {
         const restoredUser: User = {
-          email: session.email || '',
-          name: session.completeName || '',
-          role: 'vendor',
+          email: session.email || "",
+          name: session.completeName || "",
+          role: "vendor",
           company: session.vendorName || undefined,
+<<<<<<< HEAD
           type: 'VENDOR',
           vendorCode: session.vendorCode || undefined,
+=======
+          type: "VENDOR",
+>>>>>>> 75dc63b8427b3c3f1ebb0d103adb0037aa8a3f41
         };
 
         setCurrentUser(restoredUser);
@@ -148,15 +164,17 @@ export default function App() {
       }
 
       if (isInternalSession(session)) {
-        const mappedRole: User['role'] =
-          String(session.role || '').toLowerCase() === 'admin' ? 'admin' : 'user';
+        const mappedRole: User["role"] =
+          String(session.role || "").toLowerCase() === "admin"
+            ? "admin"
+            : "user";
 
         const restoredUser: User = {
-          email: session.email || '',
-          name: session.name || '',
+          email: session.email || "",
+          name: session.name || "",
           role: mappedRole,
           company: session.jobsite || undefined,
-          type: 'INTERNAL',
+          type: "INTERNAL",
         };
 
         setCurrentUser(restoredUser);
@@ -167,7 +185,7 @@ export default function App() {
 
       setIsRestoring(false);
     } catch (e) {
-      console.error('[restoreSession] failed:', e);
+      console.error("[restoreSession] failed:", e);
       setIsRestoring(false);
     }
   }, []);
@@ -192,7 +210,7 @@ export default function App() {
   }
 
   if (vendorOtpPending) {
-    if (location.pathname !== '/otp') {
+    if (location.pathname !== "/otp") {
       return <Navigate to="/otp" replace />;
     }
 
@@ -203,20 +221,22 @@ export default function App() {
 
   const renderPage = () => {
     switch (currentPage) {
-      case 'vendor-management':
+      case "vendor-management":
         return <VendorManagement />;
-      case 'internal-user-management':
+      case "internal-user-management":
         return <InternalUserManagement />;
-      case 'purchase-order':
+      case "delay-reason":
+        return <DelayReasonManagement />;
+      case "purchase-order":
         return (
           <PurchaseOrder
             user={currentUser}
             onPageChange={(page) => navigate(`/${page}`)}
           />
         );
-      case 'reschedule-eta':
+      case "reschedule-eta":
         return <RescheduleETA user={currentUser} />;
-      case 'dashboard':
+      case "dashboard":
       default:
         return (
           <Dashboard
@@ -239,9 +259,9 @@ export default function App() {
       <TooltipProvider delayDuration={0}>
         <div
           className={`${
-            isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
+            isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"
           } lg:translate-x-0 fixed lg:static inset-y-0 left-0 z-50 ${
-            sidebarCollapsed ? 'w-20' : 'w-64'
+            sidebarCollapsed ? "w-20" : "w-64"
           } transition-all duration-300 bg-white border-r border-gray-200 flex flex-col overflow-hidden`}
         >
           <div className="px-6 py-4 border-b border-gray-200">
@@ -296,22 +316,24 @@ export default function App() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  onClick={() => navigate('/dashboard')}
+                  onClick={() => navigate("/dashboard")}
                   className={`w-full flex items-center ${
-                    sidebarCollapsed ? 'justify-center' : 'gap-3'
+                    sidebarCollapsed ? "justify-center" : "gap-3"
                   } px-4 py-3 rounded-lg transition-colors ${
-                    currentPage === 'dashboard'
-                      ? 'text-white'
-                      : 'text-gray-700 hover:bg-gray-100'
+                    currentPage === "dashboard"
+                      ? "text-white"
+                      : "text-gray-700 hover:bg-gray-100"
                   }`}
                   style={
-                    currentPage === 'dashboard'
-                      ? { backgroundColor: '#014357' }
+                    currentPage === "dashboard"
+                      ? { backgroundColor: "#014357" }
                       : {}
                   }
                 >
                   <BarChart3 className="h-5 w-5 flex-shrink-0" />
-                  {!sidebarCollapsed && <span className="text-left">Analytical Dashboard</span>}
+                  {!sidebarCollapsed && (
+                    <span className="text-left">Analytical Dashboard</span>
+                  )}
                 </button>
               </TooltipTrigger>
               {sidebarCollapsed && (
@@ -321,7 +343,80 @@ export default function App() {
               )}
             </Tooltip>
 
-            {currentUser.role === 'admin' && (
+            {currentUser.role === "admin" && (
+              <div>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => {
+                        if (!sidebarCollapsed) {
+                          setMasterDataExpanded((v) => !v);
+                        } else {
+                          navigate("/delay-reason");
+                        }
+                      }}
+                      className={`w-full flex items-center ${
+                        sidebarCollapsed ? "justify-center" : "justify-between"
+                      } gap-3 px-4 py-3 rounded-lg transition-colors ${
+                        currentPage === "delay-reason"
+                          ? "text-white"
+                          : "text-gray-700 hover:bg-gray-100"
+                      }`}
+                      style={
+                        currentPage === "delay-reason"
+                          ? { backgroundColor: "#014357" }
+                          : {}
+                      }
+                    >
+                      <div
+                        className={`flex items-center ${
+                          sidebarCollapsed ? "" : "gap-3"
+                        }`}
+                      >
+                        <Database className="h-5 w-5 flex-shrink-0" />
+                        {!sidebarCollapsed && (
+                          <span className="text-left">Master Data</span>
+                        )}
+                      </div>
+                      {!sidebarCollapsed && (
+                        <ChevronDown
+                          className={`h-4 w-4 transition-transform ${
+                            masterDataExpanded ? "rotate-180" : ""
+                          }`}
+                        />
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  {sidebarCollapsed && (
+                    <TooltipContent side="right">
+                      <p>Master Data</p>
+                    </TooltipContent>
+                  )}
+                </Tooltip>
+
+                {masterDataExpanded && !sidebarCollapsed && (
+                  <div className="text-left flex-1 ml-4 mt-1 space-y-1">
+                    <button
+                      onClick={() => navigate("/delay-reason")}
+                      className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-colors ${
+                        currentPage === "delay-reason"
+                          ? "text-white"
+                          : "text-gray-600 hover:bg-gray-100"
+                      }`}
+                      style={
+                        currentPage === "delay-reason"
+                          ? { backgroundColor: "#008383" }
+                          : {}
+                      }
+                    >
+                      Delay Reason
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {currentUser.role === "admin" && (
               <div>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -330,36 +425,38 @@ export default function App() {
                         if (!sidebarCollapsed) {
                           setUserManagementExpanded((v) => !v);
                         } else {
-                          navigate('/vendor-management');
+                          navigate("/vendor-management");
                         }
                       }}
                       className={`w-full flex items-center ${
-                        sidebarCollapsed ? 'justify-center' : 'justify-between'
+                        sidebarCollapsed ? "justify-center" : "justify-between"
                       } gap-3 px-4 py-3 rounded-lg transition-colors ${
-                        currentPage === 'vendor-management' ||
-                        currentPage === 'internal-user-management'
-                          ? 'text-white'
-                          : 'text-gray-700 hover:bg-gray-100'
+                        currentPage === "vendor-management" ||
+                        currentPage === "internal-user-management"
+                          ? "text-white"
+                          : "text-gray-700 hover:bg-gray-100"
                       }`}
                       style={
-                        currentPage === 'vendor-management' ||
-                        currentPage === 'internal-user-management'
-                          ? { backgroundColor: '#014357' }
+                        currentPage === "vendor-management" ||
+                        currentPage === "internal-user-management"
+                          ? { backgroundColor: "#014357" }
                           : {}
                       }
                     >
                       <div
                         className={`flex items-center ${
-                          sidebarCollapsed ? '' : 'gap-3'
+                          sidebarCollapsed ? "" : "gap-3"
                         }`}
                       >
                         <Users className="h-5 w-5 flex-shrink-0" />
-                        {!sidebarCollapsed && <span className="text-left">User Management</span>}
+                        {!sidebarCollapsed && (
+                          <span className="text-left">User Management</span>
+                        )}
                       </div>
                       {!sidebarCollapsed && (
                         <ChevronDown
                           className={`h-4 w-4 transition-transform ${
-                            userManagementExpanded ? 'rotate-180' : ''
+                            userManagementExpanded ? "rotate-180" : ""
                           }`}
                         />
                       )}
@@ -375,30 +472,30 @@ export default function App() {
                 {userManagementExpanded && !sidebarCollapsed && (
                   <div className="text-left flex-1 ml-4 mt-1 space-y-1">
                     <button
-                      onClick={() => navigate('/vendor-management')}
+                      onClick={() => navigate("/vendor-management")}
                       className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-colors ${
-                        currentPage === 'vendor-management'
-                          ? 'text-white'
-                          : 'text-gray-600 hover:bg-gray-100'
+                        currentPage === "vendor-management"
+                          ? "text-white"
+                          : "text-gray-600 hover:bg-gray-100"
                       }`}
                       style={
-                        currentPage === 'vendor-management'
-                          ? { backgroundColor: '#008383' }
+                        currentPage === "vendor-management"
+                          ? { backgroundColor: "#008383" }
                           : {}
                       }
                     >
                       Vendor Management
                     </button>
                     <button
-                      onClick={() => navigate('/internal-user-management')}
+                      onClick={() => navigate("/internal-user-management")}
                       className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-colors ${
-                        currentPage === 'internal-user-management'
-                          ? 'text-white'
-                          : 'text-gray-600 hover:bg-gray-100'
+                        currentPage === "internal-user-management"
+                          ? "text-white"
+                          : "text-gray-600 hover:bg-gray-100"
                       }`}
                       style={
-                        currentPage === 'internal-user-management'
-                          ? { backgroundColor: '#008383' }
+                        currentPage === "internal-user-management"
+                          ? { backgroundColor: "#008383" }
                           : {}
                       }
                     >
@@ -412,22 +509,24 @@ export default function App() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  onClick={() => navigate('/purchase-order')}
+                  onClick={() => navigate("/purchase-order")}
                   className={`w-full flex items-center ${
-                    sidebarCollapsed ? 'justify-center' : 'gap-3'
+                    sidebarCollapsed ? "justify-center" : "gap-3"
                   } px-4 py-3 rounded-lg transition-colors ${
-                    currentPage === 'purchase-order'
-                      ? 'text-white'
-                      : 'text-gray-700 hover:bg-gray-100'
+                    currentPage === "purchase-order"
+                      ? "text-white"
+                      : "text-gray-700 hover:bg-gray-100"
                   }`}
                   style={
-                    currentPage === 'purchase-order'
-                      ? { backgroundColor: '#014357' }
+                    currentPage === "purchase-order"
+                      ? { backgroundColor: "#014357" }
                       : {}
                   }
                 >
                   <Package className="h-5 w-5 flex-shrink-0" />
-                  {!sidebarCollapsed && <span className="text-left">Purchase Order</span>}
+                  {!sidebarCollapsed && (
+                    <span className="text-left">Purchase Order</span>
+                  )}
                 </button>
               </TooltipTrigger>
               {sidebarCollapsed && (
@@ -437,21 +536,22 @@ export default function App() {
               )}
             </Tooltip>
 
-            {(currentUser.role === 'admin' || currentUser.role === 'vendor') && (
+            {(currentUser.role === "admin" ||
+              currentUser.role === "vendor") && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
-                    onClick={() => navigate('/reschedule-eta')}
+                    onClick={() => navigate("/reschedule-eta")}
                     className={`w-full flex items-center ${
-                      sidebarCollapsed ? 'justify-center' : 'gap-3'
+                      sidebarCollapsed ? "justify-center" : "gap-3"
                     } px-4 py-3 rounded-lg transition-colors ${
-                      currentPage === 'reschedule-eta'
-                        ? 'text-white'
-                        : 'text-gray-700 hover:bg-gray-100'
+                      currentPage === "reschedule-eta"
+                        ? "text-white"
+                        : "text-gray-700 hover:bg-gray-100"
                     }`}
                     style={
-                      currentPage === 'reschedule-eta'
-                        ? { backgroundColor: '#014357' }
+                      currentPage === "reschedule-eta"
+                        ? { backgroundColor: "#014357" }
                         : {}
                     }
                   >
@@ -471,39 +571,48 @@ export default function App() {
           </nav>
 
           <div className="p-4 border-t border-gray-200">
-            <Popover open={profilePopoverOpen} onOpenChange={setProfilePopoverOpen}>
+            <Popover
+              open={profilePopoverOpen}
+              onOpenChange={setProfilePopoverOpen}
+            >
               <PopoverTrigger asChild>
                 <button
                   className={`w-full flex items-center ${
-                    sidebarCollapsed ? 'justify-center' : 'gap-3'
+                    sidebarCollapsed ? "justify-center" : "gap-3"
                   } px-4 py-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors`}
                 >
                   <div
                     className="w-8 h-8 rounded-full flex items-center justify-center text-white flex-shrink-0"
-                    style={{ backgroundColor: '#014357' }}
+                    style={{ backgroundColor: "#014357" }}
                   >
-                    {(currentUser.name || currentUser.email || 'U')
-                      .split(' ')
+                    {(currentUser.name || currentUser.email || "U")
+                      .split(" ")
                       .map((n) => n[0])
-                      .join('')
+                      .join("")
                       .toUpperCase()
                       .slice(0, 2)}
                   </div>
 
                   {!sidebarCollapsed && (
                     <div className="flex-1 min-w-0 text-left">
-                      <p className="text-sm truncate">{currentUser.name || '-'}</p>
-                      <p className="text-xs text-gray-500 truncate">{currentUser.company || '-'}</p>
-                      <p className="text-xs text-gray-500 truncate">{currentUser.email}</p>
+                      <p className="text-sm truncate">
+                        {currentUser.name || "-"}
+                      </p>
+                      <p className="text-xs text-gray-500 truncate">
+                        {currentUser.company || "-"}
+                      </p>
+                      <p className="text-xs text-gray-500 truncate">
+                        {currentUser.email}
+                      </p>
                     </div>
                   )}
                 </button>
               </PopoverTrigger>
 
               <PopoverContent
-                side={sidebarCollapsed ? 'right' : 'top'}
+                side={sidebarCollapsed ? "right" : "top"}
                 align="start"
-                className={`${sidebarCollapsed ? 'w-auto' : 'w-56'} p-0`}
+                className={`${sidebarCollapsed ? "w-auto" : "w-56"} p-0`}
                 sideOffset={8}
               >
                 <button
@@ -535,7 +644,7 @@ export default function App() {
               <div className="min-w-0">
                 <h1
                   className="text-base sm:text-xl truncate"
-                  style={{ color: '#014357' }}
+                  style={{ color: "#014357" }}
                 >
                   Procurement System
                 </h1>
@@ -545,7 +654,9 @@ export default function App() {
             <div className="hidden sm:flex items-center gap-4">
               <div className="text-right">
                 <p className="text-sm text-gray-600">Welcome back,</p>
-                <p style={{ color: '#014357' }}>{currentUser.name || currentUser.email}</p>
+                <p style={{ color: "#014357" }}>
+                  {currentUser.name || currentUser.email}
+                </p>
               </div>
             </div>
           </div>
