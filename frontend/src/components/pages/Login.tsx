@@ -18,6 +18,7 @@ export interface User {
   role: UserRole;
   company?: string;
   type?: string;
+  vendorCode?: string;
 }
 
 interface LoginProps {
@@ -267,6 +268,7 @@ export default function Login({ onLogin }: LoginProps) {
                       value={identifier}
                       onChange={(e) => setIdentifier(e.target.value)}
                       required
+                      autoComplete="username"
                       className="h-12 bg-white/80 border-gray-200 focus:border-[#014357] focus:ring-[#014357] rounded-xl"
                     />
                   </div>
@@ -283,6 +285,7 @@ export default function Login({ onLogin }: LoginProps) {
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         required
+                        autoComplete="current-password"
                         className="h-12 pr-12 bg-white/80 border-gray-200 focus:border-[#014357] focus:ring-[#014357] rounded-xl"
                       />
                       <button

@@ -10,6 +10,7 @@ export interface VendorSessionData {
   accessToken: string;
   id: string;
   vendorName: string;
+  vendorCode: string;
 }
 
 export interface InternalSessionData {
@@ -197,6 +198,7 @@ function migrateFromLegacy(): AuthSession | null {
           accessToken: v.accessToken ?? '',
           id: v.vendorId ?? v.id ?? '',
           vendorName: v.vendorName ?? '',
+          vendorCode: v.vendorCode ?? '',
         };
         saveAuthSession(migrated);
         ss.removeItem('vendorSession');

@@ -68,7 +68,7 @@ export function OTP({ user, onVerified }: OTPProps) {
           '';
 
         const vendorId = vendor?.vendor_id || vendor?.profile?.VendorID || '';
-        const vendorName = vendor?.profile?.VendorName || vendor?.VendorName || '';
+        const vendorName = vendor?.profile?.VendorName || vendor?.VendorName || vendorId;
         const accessToken = token?.access || '';
 
         // Persist vendor session
@@ -79,6 +79,7 @@ export function OTP({ user, onVerified }: OTPProps) {
           accessToken,
           id: vendorId,
           vendorName,
+          vendorCode: vendor?.profile?.VendorID || vendor?.vendor_id || '',
         });
 
         // Optional: mirror token
@@ -93,6 +94,7 @@ export function OTP({ user, onVerified }: OTPProps) {
           role: 'vendor',
           company: vendorName || vendorId,
           type: vendor?.type || 'VENDOR',
+          vendorCode: vendor?.profile?.VendorID || vendor?.vendor_id || '',
         });
         return;
       }

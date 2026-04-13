@@ -2801,11 +2801,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   <TableBody>
                     {ordersNeedingUpdate.map((o, idx) => {
                       const display = mapBackendStatusToDisplay(o.status);
-                      const etaDateValue =
-                        display === "PO Submitted" ? o.deliveryDate : o.etaDate;
-                      const d = parseDdMmmYyyy(etaDateValue);
-                      const diffDays = d ? diffDaysFromToday(d) : null;
-
                       let effectiveEtaDateStr: string | null = null;
                       if (o.reEtaDate?.trim()) {
                         effectiveEtaDateStr = o.reEtaDate;
@@ -2814,7 +2809,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       } else if (o.deliveryDate?.trim()) {
                         effectiveEtaDateStr = o.deliveryDate;
                       }
-
                       const d = parseDdMmmYyyy(effectiveEtaDateStr);
                       const diffDays = d ? diffDaysFromToday(d) : null;
 
@@ -3318,40 +3312,43 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           <Label>Delivery Confirmation</Label>
 
                           <div className="space-y-3">
-                            {normalizeAttention(orderToUpdate.attention) !== 2 && (
-                              <label
-                                className={[
-                                  "flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition",
-                                  updateScheduleStatus === "yes"
-                                    ? "border-[#014357] bg-slate-50"
-                                    : "border-gray-200 hover:border-[#014357]/50",
-                                ].join(" ")}
-                              >
-                                <input
-                                  type="radio"
-                                  name="scheduleStatus"
-                                  value="yes"
-                                  checked={updateScheduleStatus === "yes"}
-                                  onChange={() => setUpdateScheduleStatus("yes")}
-                                  className="mt-1"
-                                />
-                                <div>
-                                  <div
-                                    className="font-medium text-sm"
-                                    style={{ color: "#014357" }}
-                                  >
-                                    Ya, masih sesuai ETA
-                                  </div>
+                            <label
+                              className={[
+                                "flex items-start gap-3 rounded-lg border p-4 transition",
+                                orderToUpdate.isApproveReETA === false
+                                  ? "border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed"
+                                  : updateScheduleStatus === "yes"
+                                    ? "border-[#014357] bg-slate-50 cursor-pointer"
+                                    : "border-gray-200 hover:border-[#014357]/50 cursor-pointer",
+                              ].join(" ")}
+                            >
+                              <input
+                                type="radio"
+                                name="scheduleStatus"
+                                value="yes"
+                                checked={updateScheduleStatus === "yes"}
+                                onChange={() => setUpdateScheduleStatus("yes")}
+                                disabled={orderToUpdate.isApproveReETA === false}
+                                className="mt-1"
+                              />
+                              <div>
+                                <div
+                                  className="font-medium text-sm"
+                                  style={{ color: orderToUpdate.isApproveReETA === false ? "#9CA3AF" : "#014357" }}
+                                >
+                                  Ya, masih sesuai ETA
                                 </div>
-                              </label>
-                            )}
+                              </div>
+                            </label>
 
                             <label
                               className={[
-                                "flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition",
-                                updateScheduleStatus === "no"
-                                  ? "border-[#014357] bg-slate-50"
-                                  : "border-gray-200 hover:border-[#014357]/50",
+                                "flex items-start gap-3 rounded-lg border p-4 transition",
+                                orderToUpdate.isApproveReETA === false
+                                  ? "border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed"
+                                  : updateScheduleStatus === "no"
+                                    ? "border-[#014357] bg-slate-50 cursor-pointer"
+                                    : "border-gray-200 hover:border-[#014357]/50 cursor-pointer",
                               ].join(" ")}
                             >
                               <input
@@ -3360,12 +3357,13 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                                 value="no"
                                 checked={updateScheduleStatus === "no"}
                                 onChange={() => setUpdateScheduleStatus("no")}
+                                disabled={orderToUpdate.isApproveReETA === false}
                                 className="mt-1"
                               />
                               <div>
                                 <div
                                   className="font-medium text-sm"
-                                  style={{ color: "#014357" }}
+                                  style={{ color: orderToUpdate.isApproveReETA === false ? "#9CA3AF" : "#014357" }}
                                 >
                                   Tidak, lakukan Re-ETA
                                 </div>

@@ -150,6 +150,7 @@ export default function App() {
           role: "vendor",
           company: session.vendorName || undefined,
           type: "VENDOR",
+          vendorCode: session.vendorCode || undefined,
         };
 
         setCurrentUser(restoredUser);
