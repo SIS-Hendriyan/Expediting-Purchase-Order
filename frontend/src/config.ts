@@ -46,13 +46,22 @@ export const API = {
     `${CONFIG.apiBaseUrl}/api/sso/get-user?nrp=${encodeURIComponent(nrp)}`,
   SUMMARYDASHBOARD: () => `${CONFIG.apiBaseUrl}/api/dashboard/summary`,
 
-  DASHBOARD_PO_TREND: () => `${CONFIG.apiBaseUrl}/api/dashboard/po-trend`,
-  DASHBOARD_STATUS_DISTRIBUTION: () =>
-    `${CONFIG.apiBaseUrl}/api/dashboard/status-distribution`,
-  DASHBOARD_MONTHLY_COMPLETION_DELAY: () =>
-    `${CONFIG.apiBaseUrl}/api/dashboard/monthly-completion-delay`,
-  DASHBOARD_VENDOR_SCORECARD: () =>
-    `${CONFIG.apiBaseUrl}/api/dashboard/scorecard`,
+  DASHBOARD_PO_TREND: (vendor?: string) =>
+    vendor
+      ? `${CONFIG.apiBaseUrl}/api/dashboard/po-trend?vendor=${encodeURIComponent(vendor)}`
+      : `${CONFIG.apiBaseUrl}/api/dashboard/po-trend`,
+  DASHBOARD_STATUS_DISTRIBUTION: (vendor?: string) =>
+    vendor
+      ? `${CONFIG.apiBaseUrl}/api/dashboard/status-distribution?vendor=${encodeURIComponent(vendor)}`
+      : `${CONFIG.apiBaseUrl}/api/dashboard/status-distribution`,
+  DASHBOARD_MONTHLY_COMPLETION_DELAY: (vendor?: string) =>
+    vendor
+      ? `${CONFIG.apiBaseUrl}/api/dashboard/monthly-completion-delay?vendor=${encodeURIComponent(vendor)}`
+      : `${CONFIG.apiBaseUrl}/api/dashboard/monthly-completion-delay`,
+  DASHBOARD_VENDOR_SCORECARD: (vendor?: string) =>
+    vendor
+      ? `${CONFIG.apiBaseUrl}/api/dashboard/scorecard?vendor=${encodeURIComponent(vendor)}`
+      : `${CONFIG.apiBaseUrl}/api/dashboard/scorecard`,
   MASTER_FILTER_DASHBOARD: () =>
     `${CONFIG.apiBaseUrl}/api/dashboard/master-filters`,
 

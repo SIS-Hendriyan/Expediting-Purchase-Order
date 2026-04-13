@@ -353,13 +353,18 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
     [vendorOptions, vendor],
   );
 
+  const cleanVendorCompany = user.role === "vendor" && user.company
+    ? user.company.replace(/\?/g, "").trim()
+    : undefined;
+  console.log("vendorName - raw:", user.company, "| cleaned:", cleanVendorCompany);
+
   const currentVendorAggregate = useMemo(() => {
-    if (user.role !== "vendor" || !user.company) return undefined;
+    if (!cleanVendorCompany) return undefined;
 
     return vendorScorecardAggregates.find(
-      (v) => v.vendorName === user.company || v.vendorCode === user.company,
+      (v) => v.vendorName === cleanVendorCompany || v.vendorCode === cleanVendorCompany,
     );
-  }, [user.role, user.company, vendorScorecardAggregates]);
+  }, [cleanVendorCompany, vendorScorecardAggregates]);
 
   const currentVendorScore = currentVendorAggregate?.overallScore ?? 0;
 
@@ -392,15 +397,15 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
   }, [currentVendorAggregate]);
 
   const vendorScopedItems = useMemo(() => {
-    if (user.role !== "vendor") return [];
+    if (!cleanVendorCompany) return [];
 
     return vendorScorecardItems.filter((item) => {
-      if (!user.company) return true;
+      if (!cleanVendorCompany) return true;
       return (
-        item.vendorName === user.company || item.vendorCode === user.company
+        item.vendorName === cleanVendorCompany || item.vendorCode === cleanVendorCompany
       );
     });
-  }, [user.role, user.company, vendorScorecardItems]);
+  }, [cleanVendorCompany, vendorScorecardItems]);
 
   const sortedVendorScopedItems = useMemo(() => {
     return [...vendorScopedItems].sort((a, b) =>
@@ -471,10 +476,10 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
     if (plant) params.append("plant", plant);
     if (group && group !== "All") params.append(groupParamName, group);
 
-    if (user.role === "vendor" && user.company) {
-      params.append("Vendor", user.company);
-      params.append("Name", user.company);
-      params.append("Company", user.company);
+    if (cleanVendorCompany) {
+      params.append("Vendor", cleanVendorCompany);
+      params.append("Name", cleanVendorCompany);
+      params.append("Company", cleanVendorCompany);
     } else if (vendor) {
       params.append("vendor", vendor);
     }
@@ -529,10 +534,10 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
 
       const params = buildCommonParams(useDefault, "group");
 
-      if (user.role === "vendor" && user.company) {
-        params.set("Vendor", user.company);
-        params.set("Name", user.company);
-        params.set("Company", user.company);
+      if (cleanVendorCompany) {
+        params.set("Vendor", cleanVendorCompany);
+        params.set("Name", cleanVendorCompany);
+        params.set("Company", cleanVendorCompany);
       }
 
       const url = `${API.SUMMARYDASHBOARD()}?${params.toString()}`;
@@ -559,7 +564,8 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
       }
 
       const params = buildCommonParams(useDefault, "purchasing_group");
-      const url = `${API.DASHBOARD_PO_TREND()}?${params.toString()}`;
+      const vendorParam = cleanVendorCompany;
+      const url = `${API.DASHBOARD_PO_TREND(vendorParam)}?${params.toString()}`;
       const res = await fetchWithAuth(url, { headers: buildAuthHeaders() });
       const data = await getJsonData<PoTrendPoint[]>(res);
 
@@ -578,7 +584,8 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
       }
 
       const params = buildCommonParams(useDefault, "purchasing_group");
-      const url = `${API.DASHBOARD_STATUS_DISTRIBUTION()}?${params.toString()}`;
+      const vendorParam = cleanVendorCompany;
+      const url = `${API.DASHBOARD_STATUS_DISTRIBUTION(vendorParam)}?${params.toString()}`;
       const res = await fetchWithAuth(url, { headers: buildAuthHeaders() });
       const data = await getJsonData<any[]>(res);
 
@@ -612,7 +619,8 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
       }
 
       const params = buildCommonParams(useDefault, "group");
-      const url = `${API.DASHBOARD_MONTHLY_COMPLETION_DELAY()}?${params.toString()}`;
+      const vendorParam = cleanVendorCompany;
+      const url = `${API.DASHBOARD_MONTHLY_COMPLETION_DELAY(vendorParam)}?${params.toString()}`;
       const res = await fetchWithAuth(url, { headers: buildAuthHeaders() });
       const data = await getJsonData<MonthlyTrendPoint[]>(res);
 
@@ -649,10 +657,11 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
 
         let vendorFilter: string | undefined;
 
-        if (user.role === "vendor" && user.company) {
-          vendorFilter = user.company;
-          params.append("Name", user.company);
-          params.append("Company", user.company);
+        if (cleanVendorCompany) {
+          vendorFilter = cleanVendorCompany;
+          params.append("Vendor", cleanVendorCompany);
+          params.append("Name", cleanVendorCompany);
+          params.append("Company", cleanVendorCompany);
         } else if (vendor) {
           vendorFilter = vendor;
         }
@@ -662,7 +671,8 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
         }
       }
 
-      const url = `${API.DASHBOARD_VENDOR_SCORECARD()}?${params.toString()}`;
+      console.log("DASHBOARD_VENDOR_SCORECARD vendorName:", cleanVendorCompany);
+      const url = `${API.DASHBOARD_VENDOR_SCORECARD(cleanVendorCompany)}?${params.toString()}`;
       const res = await fetchWithAuth(url, { headers: buildAuthHeaders() });
       const data = await getJsonData<{
         items?: any[];

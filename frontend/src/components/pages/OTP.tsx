@@ -68,7 +68,7 @@ export function OTP({ user, onVerified }: OTPProps) {
           '';
 
         const vendorId = vendor?.vendor_id || vendor?.profile?.VendorID || '';
-        const vendorName = vendor?.profile?.VendorName || vendor?.VendorName || '';
+        const vendorName = vendor?.profile?.VendorName || vendor?.VendorName || vendorId;
         const accessToken = token?.access || '';
 
         // Persist vendor session

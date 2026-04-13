@@ -31,6 +31,7 @@ namespace EXPOAPI.Controllers
             [FromQuery(Name = "doc_type")] string? docType = "All",
             CancellationToken ct = default)
         {
+            vendor = vendor?.Replace("?", "");
             if (!TryParseDate(startDateStr, out var startDate, out var err))
                 return BadRequestResponse(err!);
 
@@ -70,6 +71,7 @@ namespace EXPOAPI.Controllers
             [FromQuery] string? vendor = null,
             CancellationToken ct = default)
         {
+            vendor = vendor?.Replace("?", "");
             if (!TryParseDate(startDateStr, out var startDate, out var err))
                 return BadRequestResponse(err!);
 
@@ -109,6 +111,7 @@ namespace EXPOAPI.Controllers
             [FromQuery(Name = "doc_type")] string? docType = "All",
             CancellationToken ct = default)
         {
+            vendor = vendor?.Replace("?", "");
             if (!TryParseDate(startDateStr, out var startDate, out var err))
                 return BadRequestResponse(err!);
 
@@ -148,6 +151,7 @@ namespace EXPOAPI.Controllers
             [FromQuery(Name = "doc_type")] string? docType = "All",
             CancellationToken ct = default)
         {
+            vendor = vendor?.Replace("?", "");
             if (!TryParseDate(startDateStr, out var startDate, out var err))
                 return BadRequestResponse(err!);
 
@@ -187,6 +191,7 @@ namespace EXPOAPI.Controllers
             [FromQuery(Name = "doc_type")] string? docType = "All",
             CancellationToken ct = default)
         {
+            vendor = vendor?.Replace("?", "");
             if (!TryParseDate(startDateStr, out var startDate, out var err))
                 return BadRequestResponse(err!);
 
