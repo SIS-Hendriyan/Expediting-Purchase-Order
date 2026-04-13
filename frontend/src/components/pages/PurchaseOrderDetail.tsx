@@ -37,6 +37,13 @@ import {
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import type { User } from "./Login";
@@ -48,6 +55,14 @@ interface PurchaseOrderDetailProps {
   onBack: () => void;
   onRefreshPurchaseOrders?: () => Promise<void> | void;
 }
+
+type PendingSubmitAction = "po-submitted" | "on-delivery" | "reschedule" | null;
+
+type DelayReason = {
+  id: string | number;
+  title: string;
+  describe?: string;
+};
 
 type FlowStatus =
   | "PO Submitted"
@@ -74,7 +89,6 @@ type ReEtaFile = {
   base64Data?: string | null;
   size?: number | null;
 };
-
 type NormalizedReEta = {
   id: string;
   requestDate: string | null;
@@ -83,6 +97,8 @@ type NormalizedReEta = {
   newETA: string | null;
   proposedETADays: string;
   reason: string;
+  delayReasonTitle?: string;
+  delayReasonDescription?: string;
   status: "Pending" | "Approved" | "Rejected" | string;
   responseDate: string | null;
   evidenceFile?: ReEtaFile | null;
@@ -495,6 +511,18 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
       r?.ResponseDate,
   );
 
+  const delayReasonTitle =
+    trim(
+      r?.DelayReasonTitle ?? r?.delayReasonTitle ?? r?.["Delay Reason Title"],
+    ) || "-";
+
+  const delayReasonDescription =
+    trim(
+      r?.DelayReasonDescription ??
+        r?.delayReasonDescription ??
+        r?.["Delay Reason Description"],
+    ) || "-";
+
   const requestedBy =
     trim(
       r?.RequestedBy ??
@@ -581,7 +609,6 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
       r?.FeedbackSize,
       "Waiting File",
     ) || (status !== "Approved" && status !== "Rejected" ? feedbackFile : null);
-
   return {
     id,
     requestDate,
@@ -590,6 +617,8 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
     newETA,
     proposedETADays,
     reason,
+    delayReasonTitle,
+    delayReasonDescription,
     status,
     responseDate,
     evidenceFile,
@@ -1377,6 +1406,14 @@ export function PurchaseOrderDetail({
   const [newEtd, setNewEtd] = useState<Date | undefined>(undefined);
   const [newLeadtimeDays, setNewLeadtimeDays] = useState("");
   const [rescheduleReason, setRescheduleReason] = useState("");
+  const [selectedDelayReasonId, setSelectedDelayReasonId] = useState<string | null>(null);
+  const [delayReasons, setDelayReasons] = useState<DelayReason[]>([]);
+  const [loadingDelayReasons, setLoadingDelayReasons] = useState(false);
+
+  const [confirmationModalOpen, setConfirmationModalOpen] = useState(false);
+  const [confirmationChecked, setConfirmationChecked] = useState(false);
+  const [pendingSubmitAction, setPendingSubmitAction] =
+    useState<PendingSubmitAction>(null);
 
   const fetchDetail = useCallback(
     async (signal?: AbortSignal) => {
@@ -1679,18 +1716,52 @@ export function PurchaseOrderDetail({
     hasPendingReEtaApproval,
   ]);
 
-  const handleOpenRescheduleDialog = useCallback(() => {
+  const fetchDelayReasons = useCallback(async () => {
+    try {
+      setLoadingDelayReasons(true);
+      const raw = await fetch(API.DELAY_REASONS_LIST(), {
+        method: "GET",
+        headers: buildAuthHeaders(),
+      });
+
+      if (!raw.ok) {
+        setLoadingDelayReasons(false);
+        return;
+      }
+
+      const data = await raw.json();
+      const list: any[] = Array.isArray(data)
+        ? data
+        : (data?.Data ?? data?.data ?? data?.Items ?? data?.items ?? []);
+      setDelayReasons(
+        list.map((r: any) => ({
+          id: r.ID ?? r.id,
+          title: r.TITLE ?? r.title ?? "",
+          describe: r.DESCRIBE ?? r.describe ?? "",
+        })),
+      );
+    } catch {
+      // silently ignore — dropdown is optional
+    } finally {
+      setLoadingDelayReasons(false);
+    }
+  }, []);
+
+  const handleOpenRescheduleDialog = useCallback(async () => {
     setRescheduleDialogOpen(true);
     setNewEtd(etd ?? todayStart());
     setNewLeadtimeDays(etaDays || "");
     setRescheduleReason("");
-  }, [etd, etaDays]);
+    setSelectedDelayReasonId(null);
+    await fetchDelayReasons();
+  }, [etd, etaDays, fetchDelayReasons]);
 
   const handleCloseRescheduleDialog = useCallback(() => {
     setRescheduleDialogOpen(false);
     setNewEtd(undefined);
     setNewLeadtimeDays("");
     setRescheduleReason("");
+    setSelectedDelayReasonId(null);
   }, []);
 
   const handleBack = useCallback(async () => {
@@ -1990,6 +2061,43 @@ export function PurchaseOrderDetail({
     fetchDetail,
   ]);
 
+  const openConfirmationModal = useCallback(
+    (action: PendingSubmitAction) => {
+      setPendingSubmitAction(action);
+      setConfirmationChecked(false);
+      setConfirmationModalOpen(true);
+    },
+    [],
+  );
+
+  const closeConfirmationModal = useCallback(() => {
+    setConfirmationModalOpen(false);
+    setConfirmationChecked(false);
+    setPendingSubmitAction(null);
+  }, []);
+
+  const handleClickSubmitOnDelivery = useCallback(() => {
+    if (submittingPoStatus || isWipSubmitDisabled) return;
+
+    if (hasPendingReEtaApproval) {
+      toast.error(WAITING_REETA_APPROVAL_MESSAGE);
+      return;
+    }
+
+    if (isRequiredDeliveryDatePassed) {
+      toast.error(ETA_DELIVERY_DATE_ERROR);
+      return;
+    }
+
+    openConfirmationModal("on-delivery");
+  }, [
+    submittingPoStatus,
+    isWipSubmitDisabled,
+    hasPendingReEtaApproval,
+    isRequiredDeliveryDatePassed,
+    openConfirmationModal,
+  ]);
+
   const handleSubmitReschedule = useCallback(async () => {
     try {
       if (!idPoItem) {
@@ -2023,6 +2131,11 @@ export function PurchaseOrderDetail({
         return;
       }
 
+      if (!selectedDelayReasonId) {
+        toast.error("Please select a category reason.");
+        return;
+      }
+
       const proposedEtaDays = diffDaysDateOnly(
         newEtaDateForReschedule,
         startOfDay(newEtd),
@@ -2035,6 +2148,7 @@ export function PurchaseOrderDetail({
         IdPoItem: idPoItem,
         ProposedETADays: proposedEtaDays,
         Reason: rescheduleReason.trim(),
+        DelayReasonId: selectedDelayReasonId ? Number(selectedDelayReasonId) : null,
       });
 
       toast.success("Reschedule request submitted successfully.");
@@ -2054,10 +2168,76 @@ export function PurchaseOrderDetail({
     newLeadtimeDays,
     newEtaDateForReschedule,
     rescheduleReason,
+    selectedDelayReasonId,
     submitReEtaCreate,
     handleCloseRescheduleDialog,
     fetchDetail,
   ]);
+
+  const handleClickSubmitReschedule = useCallback(() => {
+    if (submittingReschedule) return;
+
+    if (!idPoItem) {
+      toast.error("ID PO Item not found.");
+      return;
+    }
+
+    if (!currentEtaForReschedule) {
+      toast.error("Required delivery date is not set.");
+      return;
+    }
+
+    if (!newEtd) {
+      toast.error("Please select a valid new ETD.");
+      return;
+    }
+
+    const newLeadtime = parseInt(newLeadtimeDays, 10);
+    if (!newLeadtimeDays || Number.isNaN(newLeadtime) || newLeadtime <= 0) {
+      toast.error("Please enter a valid new lead time.");
+      return;
+    }
+
+    if (!newEtaDateForReschedule) {
+      toast.error("New ETA could not be calculated.");
+      return;
+    }
+
+    if (!rescheduleReason.trim()) {
+      toast.error("Please provide a reason for rescheduling.");
+      return;
+    }
+
+    if (!selectedDelayReasonId) {
+      toast.error("Please select a category reason.");
+      return;
+    }
+
+    openConfirmationModal("reschedule");
+  }, [
+    submittingReschedule,
+    idPoItem,
+    currentEtaForReschedule,
+    newEtd,
+    newLeadtimeDays,
+    newEtaDateForReschedule,
+    rescheduleReason,
+    openConfirmationModal,
+  ]);
+
+  const handleConfirmedSubmit = useCallback(() => {
+    if (!confirmationChecked || !pendingSubmitAction) return;
+
+    closeConfirmationModal();
+
+    if (pendingSubmitAction === "po-submitted") {
+      void handleSubmitOrderInformation();
+    } else if (pendingSubmitAction === "on-delivery") {
+      void handleSubmitAwb();
+    } else if (pendingSubmitAction === "reschedule") {
+      void handleSubmitReschedule();
+    }
+  }, [confirmationChecked, pendingSubmitAction, closeConfirmationModal, handleSubmitOrderInformation, handleSubmitAwb, handleSubmitReschedule]);
 
   const handleDownloadFile = useCallback((file: ReEtaFile) => {
     if (file.url) {
@@ -2119,13 +2299,13 @@ export function PurchaseOrderDetail({
       return;
     }
 
-    void handleSubmitOrderInformation();
+    openConfirmationModal("po-submitted");
   }, [
     submittingPoStatus,
     hasPendingReEtaApproval,
     isRequiredDeliveryDatePassed,
     shouldShowEtaExceededAlert,
-    handleSubmitOrderInformation,
+    openConfirmationModal,
   ]);
 
   return (
@@ -2791,7 +2971,7 @@ export function PurchaseOrderDetail({
                             : "#014357",
                         }}
                         disabled={isWipSubmitDisabled}
-                        onClick={handleSubmitAwb}
+                        onClick={handleClickSubmitOnDelivery}
                       >
                         <Truck className="mr-2 h-4 w-4" />
                         {submittingPoStatus
@@ -2874,7 +3054,14 @@ export function PurchaseOrderDetail({
                     <Label className="mb-1 block text-xs text-gray-500">
                       Reason
                     </Label>
-                    <p className="text-sm text-gray-700">{request.reason}</p>
+                    <p className="text-sm text-gray-700">
+                      {request.delayReasonTitle} :{" "}
+                      {request.delayReasonDescription}
+                      <br />
+                      <p>
+                        <strong>Reschedule Reason:</strong> {request.reason}
+                      </p>
+                    </p>
                   </div>
 
                   {request.evidenceFile && (
@@ -3021,6 +3208,28 @@ export function PurchaseOrderDetail({
             </div>
 
             <div>
+              <Label htmlFor="delayReasonCategory">
+                Category Reason <span className="text-red-500">*</span>
+              </Label>
+              <Select
+                value={selectedDelayReasonId ?? ""}
+                onValueChange={(value) => setSelectedDelayReasonId(value || null)}
+                disabled={loadingDelayReasons}
+              >
+                <SelectTrigger id="delayReasonCategory" className="mt-1">
+                  <SelectValue placeholder={loadingDelayReasons ? "Loading..." : "Select category"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {delayReasons.map((reason) => (
+                    <SelectItem key={reason.id} value={String(reason.id)}>
+                      {reason.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
               <Label htmlFor="rescheduleReason">
                 Reason for Rescheduling <span className="text-red-500">*</span>
               </Label>
@@ -3044,12 +3253,126 @@ export function PurchaseOrderDetail({
               Cancel
             </Button>
             <Button
-              onClick={handleSubmitReschedule}
+              onClick={handleClickSubmitReschedule}
               style={{ backgroundColor: "#014357" }}
               className="text-white hover:opacity-90"
               disabled={submittingReschedule}
             >
               {submittingReschedule ? "Submitting..." : "Submit Request"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={confirmationModalOpen}
+        onOpenChange={(open) => !open && closeConfirmationModal()}
+      >
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle style={{ color: "#014357" }}>
+              Pernyataan Syarat dan Ketentuan
+            </DialogTitle>
+            <DialogDescription className="text-sm text-gray-600">
+              Mohon baca seluruh ketentuan di bawah ini sebelum melanjutkan.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div
+            className="flex-1 overflow-y-auto rounded-md border border-gray-200 bg-gray-50 p-4"
+            style={{ maxHeight: "400px" }}
+          >
+            <p className="mb-4 font-medium" style={{ color: "#014357" }}>
+              Pernyataan Syarat dan Ketentuan Terkait Keterlambatan Supply
+            </p>
+            <p className="mb-4 text-sm text-gray-700">
+              Dengan ini kami sampaikan bahwa Vendor wajib memenuhi seluruh
+              komitmen pengadaan barang dan/atau jasa sesuai dengan jadwal,
+              spesifikasi, dan ketentuan yang telah disepakati dalam
+              Kontrak/PO/SOW yang berlaku.
+            </p>
+            <p className="mb-4 text-sm text-gray-700">
+              Apabila Vendor tidak memenuhi waktu supply sebagaimana tercantum
+              dalam kontrak, maka hal tersebut akan dikategorikan sebagai
+              pelanggaran kontraktual dan Procurement berhak untuk menjatuhkan
+              sanksi sesuai dengan ketentuan yang telah disepakati, termasuk
+              namun tidak terbatas pada:
+            </p>
+            <ol className="mb-4 list-inside list-decimal space-y-1 text-sm text-gray-700">
+              <li>
+                Pengenaan denda keterlambatan berdasarkan perhitungan dan
+                persentase yang ditetapkan dalam kontrak;
+              </li>
+              <li>
+                Pemotongan nilai pembayaran atas barang dan/atau jasa yang
+                disuplai;
+              </li>
+              <li>
+                Penerbitan surat peringatan tertulis (SP) kepada Vendor;
+              </li>
+              <li>
+                Pembekuan sementara aktivitas supply hingga kewajiban dipenuhi;
+              </li>
+              <li>
+                Pemutusan kontrak secara sepihak apabila keterlambatan terjadi
+                secara berulang atau berdampak signifikan terhadap operasional
+                perusahaan;
+              </li>
+              <li>
+                Evaluasi kinerja Vendor yang dapat memengaruhi keikutsertaan
+                Vendor pada proses pengadaan di masa mendatang.
+              </li>
+            </ol>
+            <p className="mb-4 text-sm text-gray-700">
+              Procurement berhak untuk menerapkan satu atau lebih sanksi
+              tersebut sesuai dengan tingkat dan dampak pelanggaran, tanpa
+              mengurangi hak-hak lain sebagaimana diatur dalam kontrak dan
+              peraturan yang berlaku.
+            </p>
+            <p className="mb-4 text-sm text-gray-700">
+              Dengan dilanjutkannya proses pekerjaan dan/atau supply, Vendor
+              dianggap telah mengetahui, menyetujui, dan bersedia mematuhi
+              seluruh ketentuan serta sanksi yang tercantum dalam kontrak dan
+              pernyataan ini.
+            </p>
+            <p className="mb-4 font-medium" style={{ color: "#014357" }}>
+              Pernyataan Konfirmasi Vendor
+            </p>
+            <p className="mb-4 text-sm text-gray-700">
+              Sebagai bentuk konfirmasi, mohon Vendor menyatakan persetujuan
+              atas pertanyaan berikut sebelum melanjutkan progres pekerjaan:
+            </p>
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg bg-white p-3 shadow-sm">
+              <input
+                type="checkbox"
+                checked={confirmationChecked}
+                onChange={(e) => setConfirmationChecked(e.target.checked)}
+                className="mt-1 h-4 w-4 rounded border-gray-300"
+              />
+              <span className="text-sm text-gray-700">
+                Saya telah membaca, memahami, dan menyetujui seluruh ketentuan
+                serta sanksi terkait keterlambatan supply sebagaimana tercantum
+                dalam kontrak dan pernyataan ini.
+              </span>
+            </label>
+          </div>
+
+          <DialogFooter className="mt-4">
+            <Button
+              variant="outline"
+              onClick={closeConfirmationModal}
+            >
+              Batal
+            </Button>
+            <Button
+              onClick={handleConfirmedSubmit}
+              disabled={!confirmationChecked}
+              style={{
+                backgroundColor: confirmationChecked ? "#014357" : "#94A3B8",
+              }}
+              className="text-white hover:opacity-90"
+            >
+              Saya Setuju &amp; Lanjutkan
             </Button>
           </DialogFooter>
         </DialogContent>

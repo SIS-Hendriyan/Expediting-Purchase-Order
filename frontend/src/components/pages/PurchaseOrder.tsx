@@ -133,6 +133,7 @@ export interface PurchaseOrderItem {
   attention?: AttentionRaw;
   isScheduled?: boolean | null;
   isApproveReETA?: boolean | null;
+  hasPendingReETA?: boolean | null;
 }
 
 interface PurchaseOrderSummary {
@@ -387,6 +388,8 @@ function unwrapPOPayload(json: AnyObj): {
     isScheduled: x?.isScheduled ?? x?.IsScheduled ?? x?.is_scheduled ?? null,
     isApproveReETA:
       x?.isApproveReETA ?? x?.IsApproveReETA ?? x?.is_approve_re_eta ?? null,
+    hasPendingReETA:
+      x?.hasPendingReETA ?? x?.HasPendingReETA ?? x?.has_pending_re_eta ?? null,
     deliveryDate:
       x?.deliveryDate ?? x?.DeliveryDate ?? x?.["Delivery Date"] ?? null,
     etaDate: x?.etaDate ?? x?.ETADate ?? x?.EtaDate ?? x?.["ETA Date"] ?? null,
@@ -986,6 +989,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const [newLeadtimeDays, setNewLeadtimeDays] = useState("");
   const [rescheduleReason, setRescheduleReason] = useState("");
   const [submittingReschedule, setSubmittingReschedule] = useState(false);
+  const [selectedDelayReasonId, setSelectedDelayReasonId] = useState<string | null>(null);
+  const [delayReasons, setDelayReasons] = useState<{ id: number | string; title: string }[]>([]);
+
+  const [confirmationModalOpen, setConfirmationModalOpen] = useState(false);
+  const [confirmationChecked, setConfirmationChecked] = useState(false);
+  const [pendingSubmitAction, setPendingSubmitAction] = useState<"update" | "reschedule" | null>(null);
 
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [uploadFileME2N, setUploadFileME2N] = useState<File | null>(null);
@@ -1144,6 +1153,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       pageNumber: number,
       pageSize: number,
       filters: AppliedAdvancedFilters,
+      keyword?: string,
     ) => {
       const url = new URL(API.SUMMARYPO());
 
@@ -1188,6 +1198,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
       if (filters.purchasingDocType && filters.purchasingDocType !== "all") {
         url.searchParams.set("purchasingDocType", filters.purchasingDocType);
+      }
+
+      if (keyword && keyword.length > 2) {
+        url.searchParams.set("keyword", keyword);
       }
 
       url.searchParams.set("pageNumber", String(pageNumber));
@@ -1270,6 +1284,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       attention: 1 | 2 | null,
       pageNumber: number,
       pageSize: number,
+      keyword?: string,
     ) => {
       setLoading(true);
       setLoadError(null);
@@ -1284,6 +1299,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         pageNumber,
         pageSize,
         appliedFilters,
+        keyword,
       );
 
       try {
@@ -1377,12 +1393,14 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       currentAttentionParam,
       currentPage,
       itemsPerPage,
+      searchQuery,
     );
   }, [
     activeTab,
     currentAttentionParam,
     currentPage,
     itemsPerPage,
+    searchQuery,
     fetchPurchaseOrders,
   ]);
 
@@ -1581,26 +1599,89 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const ordersNeedingUpdate = useMemo(() => {
     if (user.role !== "vendor") return [];
 
-    return filteredOrders
+    const today = startOfDay(new Date());
+    const twoDaysFromNow = addDaysDateOnly(today, 2);
+
+    console.log("[OrdersNeedingUpdate] Total orders:", filteredOrders.length);
+
+    const result = filteredOrders
       .filter((o) => {
         const displayStatus = mapBackendStatusToDisplay(o.status);
 
-        const isExcludedStatus =
-          displayStatus === "Received" ||
-          displayStatus === "Cancel" ||
-          isReceivedBackendStatus(o.status);
+        // Check 1: Excluded status (Received, Cancel)
+        if (displayStatus === "Received" || displayStatus === "Cancel" || isReceivedBackendStatus(o.status)) {
+          console.log(`❌ ${o.purchasingDocument} - Status "${displayStatus}" is excluded`);
+          return false;
+        }
 
-        return !isExcludedStatus;
+        // Check 2: isScheduled must be false
+        if (o.isScheduled === true) {
+          console.log(`❌ ${o.purchasingDocument} - isScheduled=true (must be false)`);
+          return false;
+        }
+
+        // Check 3: Must have ETA date (reEtaDate > etaDate > deliveryDate)
+        let effectiveEtaDateStr: string | null = null;
+        let etaSource = "";
+        if (o.reEtaDate?.trim()) {
+          effectiveEtaDateStr = o.reEtaDate;
+          etaSource = "reEtaDate";
+        } else if (o.etaDate?.trim()) {
+          effectiveEtaDateStr = o.etaDate;
+          etaSource = "etaDate";
+        } else if (o.deliveryDate?.trim()) {
+          effectiveEtaDateStr = o.deliveryDate;
+          etaSource = "deliveryDate";
+        }
+        if (!effectiveEtaDateStr) {
+          console.log(`❌ ${o.purchasingDocument} - No ETA date (etaDate: "${o.etaDate}", reEtaDate: "${o.reEtaDate}", deliveryDate: "${o.deliveryDate}")`);
+          return false;
+        }
+
+        const effectiveEtaDate = parseDdMmmYyyy(effectiveEtaDateStr);
+        if (!effectiveEtaDate) {
+          console.log(`❌ ${o.purchasingDocument} - Cannot parse ETA date: "${effectiveEtaDateStr}"`);
+          return false;
+        }
+
+        // Check 4: ETA must be <= today + 2 days (H+2)
+        // Show if approaching (H-2 or closer) OR already passed (overdue)
+        if (effectiveEtaDate > twoDaysFromNow) {
+          console.log(`❌ ${o.purchasingDocument} - ETA "${effectiveEtaDateStr}" (from ${etaSource}) > H+2, daysDiff: ${diffDaysFromToday(effectiveEtaDate)}`);
+          return false;
+        }
+
+        console.log(`✅ ${o.purchasingDocument} - PASS (ETA: ${effectiveEtaDateStr} from ${etaSource}, daysDiff: ${diffDaysFromToday(effectiveEtaDate)}, isScheduled: ${o.isScheduled})`);
+        return true;
       })
       .sort((a, b) => {
-        const da = parseDdMmmYyyy(a.etaDate);
-        const db = parseDdMmmYyyy(b.etaDate);
+        let effectiveEtaA: Date | null = null;
+        let effectiveEtaB: Date | null = null;
 
-        const va = da ? diffDaysFromToday(da) : 9999;
-        const vb = db ? diffDaysFromToday(db) : 9999;
+        if (a.reEtaDate?.trim()) {
+          effectiveEtaA = parseDdMmmYyyy(a.reEtaDate);
+        } else if (a.etaDate?.trim()) {
+          effectiveEtaA = parseDdMmmYyyy(a.etaDate);
+        } else if (a.deliveryDate?.trim()) {
+          effectiveEtaA = parseDdMmmYyyy(a.deliveryDate);
+        }
+
+        if (b.reEtaDate?.trim()) {
+          effectiveEtaB = parseDdMmmYyyy(b.reEtaDate);
+        } else if (b.etaDate?.trim()) {
+          effectiveEtaB = parseDdMmmYyyy(b.etaDate);
+        } else if (b.deliveryDate?.trim()) {
+          effectiveEtaB = parseDdMmmYyyy(b.deliveryDate);
+        }
+
+        const va = effectiveEtaA ? diffDaysFromToday(effectiveEtaA) : 9999;
+        const vb = effectiveEtaB ? diffDaysFromToday(effectiveEtaB) : 9999;
 
         return va - vb;
       });
+
+    console.log("[OrdersNeedingUpdate] Result:", result.length, "orders");
+    return result;
   }, [filteredOrders, user.role]);
 
   const handleSearchChange = useCallback((v: string) => {
@@ -1614,13 +1695,37 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   }, []);
 
   const handleOpenUpdateDialog = useCallback((order: PurchaseOrderItem) => {
+    console.log("[Update Dialog] isApproveReETA:", order.isApproveReETA, "| hasPendingReETA:", order.hasPendingReETA, "| attention:", order.attention, "| normalizeAttention:", normalizeAttention(order.attention));
     setOrderToUpdate(order);
-    setUpdateScheduleStatus("");
+    const isDelay = normalizeAttention(order.attention) === 2;
+    setUpdateScheduleStatus(isDelay ? "no" : "");
     setIsUpdateDialogOpen(true);
   }, []);
 
+  const fetchDelayReasons = useCallback(async () => {
+    try {
+      const res = await fetchWithAuth(API.DELAY_REASONS_LIST(), {
+        method: "GET",
+        headers: buildAuthHeaders(),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const list: any[] = Array.isArray(data)
+        ? data
+        : (data?.Data ?? data?.data ?? data?.Items ?? data?.items ?? []);
+      setDelayReasons(
+        list.map((r: any) => ({
+          id: r.ID ?? r.id,
+          title: r.TITLE ?? r.title ?? "",
+        })),
+      );
+    } catch {
+      // silently ignore
+    }
+  }, []);
+
   const handleOpenRescheduleDialog = useCallback(
-    (order?: PurchaseOrderItem | null) => {
+    async (order?: PurchaseOrderItem | null) => {
       const target = order ?? orderToUpdate ?? rescheduleTargetOrder ?? null;
 
       if (!target) {
@@ -1632,9 +1737,11 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       setNewEtd(todayStart());
       setNewLeadtimeDays("");
       setRescheduleReason("");
+      setSelectedDelayReasonId(null);
+      await fetchDelayReasons();
       setRescheduleDialogOpen(true);
     },
-    [orderToUpdate, rescheduleTargetOrder],
+    [orderToUpdate, rescheduleTargetOrder, fetchDelayReasons],
   );
 
   const handleCloseRescheduleDialog = useCallback(() => {
@@ -1679,6 +1786,11 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         return;
       }
 
+      if (!selectedDelayReasonId) {
+        toast.error("Please select a category reason.");
+        return;
+      }
+
       const proposedEtaDays = diffDaysDateOnly(
         newEtaDateForReschedule,
         startOfDay(newEtd),
@@ -1691,6 +1803,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         IdPoItem: idPoItem,
         ProposedETADays: proposedEtaDays,
         Reason: rescheduleReason.trim(),
+        DelayReasonId: selectedDelayReasonId ? parseInt(selectedDelayReasonId, 10) : null,
       });
 
       toast.success("Reschedule request submitted successfully.");
@@ -1699,6 +1812,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       setNewEtd(todayStart());
       setNewLeadtimeDays("");
       setRescheduleReason("");
+      setSelectedDelayReasonId(null);
 
       await fetchCardSummary();
       await fetchPurchaseOrders(
@@ -1706,6 +1820,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         currentAttentionParam,
         currentPage,
         itemsPerPage,
+        searchQuery,
       );
       await fetchMasterFilters();
     } catch (error: any) {
@@ -1732,6 +1847,21 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     rescheduleTargetOrder,
     submitReEtaCreate,
   ]);
+
+  const openConfirmationModal = useCallback(
+    (action: "update" | "reschedule") => {
+      setPendingSubmitAction(action);
+      setConfirmationChecked(false);
+      setConfirmationModalOpen(true);
+    },
+    [],
+  );
+
+  const closeConfirmationModal = useCallback(() => {
+    setConfirmationModalOpen(false);
+    setConfirmationChecked(false);
+    setPendingSubmitAction(null);
+  }, []);
 
   const handleSubmitUpdate = useCallback(async () => {
     try {
@@ -1782,6 +1912,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         currentAttentionParam,
         currentPage,
         itemsPerPage,
+        searchQuery,
       );
       await fetchMasterFilters();
     } catch (err: any) {
@@ -1805,6 +1936,16 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     currentPage,
     itemsPerPage,
   ]);
+
+  const handleConfirmedSubmit = useCallback(() => {
+    if (!confirmationChecked || !pendingSubmitAction) return;
+    closeConfirmationModal();
+    if (pendingSubmitAction === "update") {
+      void handleSubmitUpdate();
+    } else if (pendingSubmitAction === "reschedule") {
+      void handleSubmitReschedule();
+    }
+  }, [confirmationChecked, pendingSubmitAction, closeConfirmationModal, handleSubmitUpdate, handleSubmitReschedule]);
 
   const clearFilters = useCallback(() => {
     setDraftFilters({
@@ -2013,6 +2154,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         currentAttentionParam,
         currentPage,
         itemsPerPage,
+        searchQuery,
       );
       await fetchMasterFilters();
 
@@ -2664,13 +2806,25 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       const d = parseDdMmmYyyy(etaDateValue);
                       const diffDays = d ? diffDaysFromToday(d) : null;
 
+                      let effectiveEtaDateStr: string | null = null;
+                      if (o.reEtaDate?.trim()) {
+                        effectiveEtaDateStr = o.reEtaDate;
+                      } else if (o.etaDate?.trim()) {
+                        effectiveEtaDateStr = o.etaDate;
+                      } else if (o.deliveryDate?.trim()) {
+                        effectiveEtaDateStr = o.deliveryDate;
+                      }
+
+                      const d = parseDdMmmYyyy(effectiveEtaDateStr);
+                      const diffDays = d ? diffDaysFromToday(d) : null;
+
                       return (
                         <TableRow key={`${getOrderKey(o)}-${idx}`}>
                           <TableCell className="font-medium">
                             {o.purchasingDocument}
                           </TableCell>
                           <TableCell>{o.shortText}</TableCell>
-                          <TableCell>{etaDateValue || "-"}</TableCell>
+                          <TableCell>{effectiveEtaDateStr || "-"}</TableCell>
                           <TableCell>
                             {diffDays === null ? (
                               <span className="text-gray-400">-</span>
@@ -3110,7 +3264,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                               ETA Date
                             </p>
                             <p className="text-sm">
-                              {orderToUpdate.etaDate || "N/A"}
+                              {orderToUpdate.etaDate?.trim() || orderToUpdate.deliveryDate?.trim() || "N/A"}
                             </p>
                           </div>
 
@@ -3164,31 +3318,33 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           <Label>Delivery Confirmation</Label>
 
                           <div className="space-y-3">
-                            <label
-                              className={[
-                                "flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition",
-                                updateScheduleStatus === "yes"
-                                  ? "border-[#014357] bg-slate-50"
-                                  : "border-gray-200 hover:border-[#014357]/50",
-                              ].join(" ")}
-                            >
-                              <input
-                                type="radio"
-                                name="scheduleStatus"
-                                value="yes"
-                                checked={updateScheduleStatus === "yes"}
-                                onChange={() => setUpdateScheduleStatus("yes")}
-                                className="mt-1"
-                              />
-                              <div>
-                                <div
-                                  className="font-medium text-sm"
-                                  style={{ color: "#014357" }}
-                                >
-                                  Ya, masih sesuai ETA
+                            {normalizeAttention(orderToUpdate.attention) !== 2 && (
+                              <label
+                                className={[
+                                  "flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition",
+                                  updateScheduleStatus === "yes"
+                                    ? "border-[#014357] bg-slate-50"
+                                    : "border-gray-200 hover:border-[#014357]/50",
+                                ].join(" ")}
+                              >
+                                <input
+                                  type="radio"
+                                  name="scheduleStatus"
+                                  value="yes"
+                                  checked={updateScheduleStatus === "yes"}
+                                  onChange={() => setUpdateScheduleStatus("yes")}
+                                  className="mt-1"
+                                />
+                                <div>
+                                  <div
+                                    className="font-medium text-sm"
+                                    style={{ color: "#014357" }}
+                                  >
+                                    Ya, masih sesuai ETA
+                                  </div>
                                 </div>
-                              </div>
-                            </label>
+                              </label>
+                            )}
 
                             <label
                               className={[
@@ -3217,7 +3373,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                             </label>
                           </div>
 
-                          {updateScheduleStatus === "no" && (
+                          {updateScheduleStatus === "no" && orderToUpdate.hasPendingReETA !== true && (
                             <Alert
                               style={{
                                 borderColor: "#DC2626",
@@ -3245,16 +3401,16 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                             </Alert>
                           )}
 
-                          {orderToUpdate.isApproveReETA === false && (
+                          {orderToUpdate.hasPendingReETA === true && (
                             <Alert
                               style={{
-                                borderColor: "#DC2626",
-                                backgroundColor: "rgba(220, 38, 38, 0.06)",
+                                borderColor: "#ED832D",
+                                backgroundColor: "rgba(237, 131, 45, 0.06)",
                               }}
                             >
                               <AlertCircle
                                 className="h-4 w-4"
-                                style={{ color: "#DC2626" }}
+                                style={{ color: "#ED832D" }}
                               />
                               <AlertDescription className="text-sm text-gray-700">
                                 Waiting for Re-ETA approval. Please wait until
@@ -3277,12 +3433,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                     <Button
                       style={{ backgroundColor: "#014357" }}
                       className="text-white hover:opacity-90"
-                      onClick={handleSubmitUpdate}
+                      onClick={() => openConfirmationModal("update")}
                       disabled={
                         submittingUpdate ||
                         !updateScheduleStatus ||
-                        updateScheduleStatus === "no" ||
-                        orderToUpdate.isApproveReETA === false
+                        normalizeAttention(orderToUpdate.attention) === 2 ||
+                        orderToUpdate.hasPendingReETA === true
                       }
                     >
                       {submittingUpdate ? "Submitting..." : "Submit Update"}
@@ -3314,6 +3470,33 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                     rescheduleTargetOrder,
                   )}
                 />
+
+                <div>
+                  <Label>
+                    Category Reason <span className="text-red-500">*</span>
+                  </Label>
+                  <Select
+                    value={selectedDelayReasonId ?? ""}
+                    onValueChange={(value) => setSelectedDelayReasonId(value || null)}
+                  >
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {delayReasons.length > 0 ? (
+                        delayReasons.map((reason) => (
+                          <SelectItem key={reason.id} value={String(reason.id)}>
+                            {reason.title}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <SelectItem value="" disabled>
+                          No categories available
+                        </SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
 
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div>
@@ -3398,7 +3581,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   Cancel
                 </Button>
                 <Button
-                  onClick={handleSubmitReschedule}
+                  onClick={() => openConfirmationModal("reschedule")}
                   style={{ backgroundColor: "#014357" }}
                   className="text-white hover:opacity-90"
                   disabled={submittingReschedule}
@@ -3505,6 +3688,91 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   }
                 >
                   {uploading ? "Uploading..." : "Upload"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog
+            open={confirmationModalOpen}
+            onOpenChange={(open) => !open && closeConfirmationModal()}
+          >
+            <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col">
+              <DialogHeader>
+                <DialogTitle style={{ color: "#014357" }}>
+                  Pernyataan Syarat dan Ketentuan
+                </DialogTitle>
+                <DialogDescription className="text-sm text-gray-600">
+                  Mohon baca seluruh ketentuan di bawah ini sebelum melanjutkan.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div
+                className="flex-1 overflow-y-auto rounded-md border border-gray-200 bg-gray-50 p-4"
+                style={{ maxHeight: "400px" }}
+              >
+                <p className="mb-4 font-medium" style={{ color: "#014357" }}>
+                  Pernyataan Syarat dan Ketentuan Terkait Keterlambatan Supply
+                </p>
+                <p className="mb-4 text-sm text-gray-700">
+                  Dengan ini kami sampaikan bahwa Vendor wajib memenuhi seluruh
+                  komitmen pengadaan barang dan/atau jasa sesuai dengan jadwal,
+                  spesifikasi, dan ketentuan yang telah disepakati dalam
+                  Kontrak/PO/SOW yang berlaku.
+                </p>
+                <p className="mb-4 text-sm text-gray-700">
+                  Apabila Vendor tidak memenuhi waktu supply sebagaimana tercantum
+                  dalam kontrak, maka hal tersebut akan dikategorikan sebagai
+                  pelanggaran kontraktual dan Procurement berhak untuk menjatuhkan
+                  sanksi sesuai dengan ketentuan yang telah disepakati, termasuk
+                  namun tidak terbatas pada:
+                </p>
+                <ol className="mb-4 list-inside list-decimal space-y-1 text-sm text-gray-700">
+                  <li>Pengenaan denda keterlambatan berdasarkan perhitungan dan persentase yang ditetapkan dalam kontrak;</li>
+                  <li>Pemotongan nilai pembayaran atas barang dan/atau jasa yang disuplai;</li>
+                  <li>Penerbitan surat peringatan tertulis (SP) kepada Vendor;</li>
+                  <li>Pembekuan sementara aktivitas supply hingga kewajiban dipenuhi;</li>
+                  <li>Pemutusan kontrak secara sepihak apabila keterlambatan terjadi secara berulang atau berdampak signifikan terhadap operasional perusahaan;</li>
+                  <li>Evaluasi kinerja Vendor yang dapat memengaruhi keikutsertaan Vendor pada proses pengadaan di masa mendatang.</li>
+                </ol>
+                <p className="mb-4 text-sm text-gray-700">
+                  Procurement berhak untuk menerapkan satu atau lebih sanksi tersebut sesuai dengan tingkat dan dampak pelanggaran, tanpa mengurangi hak-hak lain sebagaimana diatur dalam kontrak dan peraturan yang berlaku.
+                </p>
+                <p className="mb-4 text-sm text-gray-700">
+                  Dengan dilanjutkannya proses pekerjaan dan/atau supply, Vendor dianggap telah mengetahui, menyetujui, dan bersedia mematuhi seluruh ketentuan serta sanksi yang tercantum dalam kontrak dan pernyataan ini.
+                </p>
+                <p className="mb-4 font-medium" style={{ color: "#014357" }}>
+                  Pernyataan Konfirmasi Vendor
+                </p>
+                <p className="mb-4 text-sm text-gray-700">
+                  Sebagai bentuk konfirmasi, mohon Vendor menyatakan persetujuan atas pertanyaan berikut sebelum melanjutkan progres pekerjaan:
+                </p>
+                <label className="flex cursor-pointer items-start gap-3 rounded-lg bg-white p-3 shadow-sm">
+                  <input
+                    type="checkbox"
+                    checked={confirmationChecked}
+                    onChange={(e) => setConfirmationChecked(e.target.checked)}
+                    className="mt-1 h-4 w-4 rounded border-gray-300"
+                  />
+                  <span className="text-sm text-gray-700">
+                    Saya telah membaca, memahami, dan menyetujui seluruh ketentuan serta sanksi terkait keterlambatan supply sebagaimana tercantum dalam kontrak dan pernyataan ini.
+                  </span>
+                </label>
+              </div>
+
+              <DialogFooter className="mt-4">
+                <Button variant="outline" onClick={closeConfirmationModal}>
+                  Batal
+                </Button>
+                <Button
+                  onClick={handleConfirmedSubmit}
+                  disabled={!confirmationChecked}
+                  style={{
+                    backgroundColor: confirmationChecked ? "#014357" : "#94A3B8",
+                  }}
+                  className="text-white hover:opacity-90"
+                >
+                  Saya Setuju &amp; Lanjutkan
                 </Button>
               </DialogFooter>
             </DialogContent>

@@ -125,6 +125,7 @@ namespace EXPOAPI.Services
             DateTime? currentEta,
             int? proposedEtaDays,
             string reason,
+            int? delayReasonId,
             string? evidenceFileName,
             string? evidenceContentType,
             long? evidenceSize,
@@ -139,6 +140,7 @@ namespace EXPOAPI.Services
             dp.Add("CurrentETA", currentEta?.Date);
             dp.Add("ProposedETADays", proposedEtaDays); // ✅ match SP
             dp.Add("Reason", reason);
+            dp.Add("DelayReasonID", delayReasonId);
 
             dp.Add("EvidenceFileName", evidenceFileName);
             dp.Add("EvidenceContentType", evidenceContentType);
@@ -311,6 +313,6 @@ namespace EXPOAPI.Services
             return dict.ToDictionary(k => k.Key, v => (object?)v.Value);
         }
 
-        
+
     }
 }
