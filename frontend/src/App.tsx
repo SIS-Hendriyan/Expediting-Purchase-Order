@@ -149,12 +149,10 @@ export default function App() {
           name: session.completeName || "",
           role: "vendor",
           company: session.vendorName || undefined,
-<<<<<<< HEAD
           type: 'VENDOR',
           vendorCode: session.vendorCode || undefined,
-=======
           type: "VENDOR",
->>>>>>> 75dc63b8427b3c3f1ebb0d103adb0037aa8a3f41
+
         };
 
         setCurrentUser(restoredUser);

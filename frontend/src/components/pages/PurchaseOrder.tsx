@@ -3318,7 +3318,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           <Label>Delivery Confirmation</Label>
 
                           <div className="space-y-3">
-<<<<<<< HEAD
                             <label
                               className={[
                                 "flex items-start gap-3 rounded-lg border p-4 transition",
@@ -3344,7 +3343,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                                   style={{ color: orderToUpdate.isApproveReETA === false ? "#9CA3AF" : "#014357" }}
                                 >
                                   Ya, masih sesuai ETA
-=======
                             {normalizeAttention(orderToUpdate.attention) !== 2 && (
                               <label
                                 className={[
@@ -3369,7 +3367,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                                   >
                                     Ya, masih sesuai ETA
                                   </div>
->>>>>>> 75dc63b8427b3c3f1ebb0d103adb0037aa8a3f41
                                 </div>
                               </label>
                             )}
