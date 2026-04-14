@@ -866,10 +866,10 @@ function UploadFileField({
               style={{ color: "#014357" }}
             />
             <div className="flex flex-col min-w-0">
-              <span className="text-xs font-medium text-gray-800 truncate max-w-[220px]">
+              <span className="text-xs font-medium text-gray-800 truncate max-w-[220px] mt-4">
                 {file.name}
               </span>
-              <span className="text-[11px] text-gray-500">
+              <span className="text-xs text-gray-500 mb-4">
                 {(file.size / 1024).toFixed(1)} KB
               </span>
             </div>
@@ -2608,16 +2608,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
             {user.role === "admin" && (
               <div className="flex gap-2 w-full sm:w-auto">
-                <Button
-                  variant="outline"
-                  className="flex-1 sm:flex-none"
-                  size="sm"
-                  onClick={handleDownloadTemplate}
-                >
-                  <FileSpreadsheet className="h-4 w-4 sm:mr-2" />
-                  <span className="hidden sm:inline">Template</span>
-                </Button>
-
                 <Button
                   variant="outline"
                   className="flex-1 sm:flex-none"

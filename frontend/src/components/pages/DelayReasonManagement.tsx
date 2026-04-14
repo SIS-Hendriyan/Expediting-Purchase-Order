@@ -577,7 +577,6 @@ export function DelayReasonManagement() {
           <Table className="min-w-full text-sm">
             <TableHeader>
               <TableRow className="h-10">
-                <TableHead className="px-4 py-3 w-14 text-center">No</TableHead>
                 <TableHead className="px-4 py-3">Title</TableHead>
                 <TableHead className="px-4 py-3">Description</TableHead>
                 <TableHead className="px-4 py-3">Created By</TableHead>
@@ -590,7 +589,7 @@ export function DelayReasonManagement() {
               {isLoading ? (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
+                    colSpan={5}
                     className="px-4 py-8 text-center text-sm text-gray-400"
                   >
                     Loading...
@@ -599,7 +598,7 @@ export function DelayReasonManagement() {
               ) : paginatedReasons.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
+                    colSpan={5}
                     className="px-4 py-8 text-center text-sm text-gray-400"
                   >
                     <div className="flex flex-col items-center gap-2">
@@ -615,11 +614,6 @@ export function DelayReasonManagement() {
               ) : (
                 paginatedReasons.map((reason, index) => (
                   <TableRow key={reason.ID} className="h-12">
-                    {/* No */}
-                    <TableCell className="px-4 py-2 align-middle text-center text-gray-500">
-                      {startIndex + index + 1}
-                    </TableCell>
-
                     {/* Title */}
                     <TableCell className="px-4 py-2 align-middle font-medium">
                       <div className="flex items-center gap-2">

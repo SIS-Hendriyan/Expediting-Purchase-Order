@@ -40,7 +40,7 @@ public sealed class AuthService
             return null;
 
         if (identifier.Contains("@"))
-            return await AuthenticateVendorAsync(identifier, password, ct);
+            return await VendorAuthAsync(identifier, password, ct);
 
         return await AuthenticateInternalAsync(identifier, password, ct);
     }
@@ -48,46 +48,56 @@ public sealed class AuthService
     // =========================
     // VENDOR AUTHENTICATION
     // =========================
-    public async Task<VendorLoginResult?> AuthenticateVendorAsync(string email, string password, CancellationToken ct = default)
+    public async Task<(int statusCode, VendorLoginResult? result)> VendorAuthAsync(string email, string password, CancellationToken ct = default)
     {
         email = (email ?? "").Trim();
         password = password ?? "";
 
         if (string.IsNullOrWhiteSpace(email) || string.IsNullOrEmpty(password))
-            return null;
+            return (400, null);
 
-        using var cn = _db.CreateVendor();
+        using var cn = _db.CreateMain();
 
-        const string sql = @"
-SELECT
-    CAST(Id AS nvarchar(50)) AS Id,
-    CompleteName,
-    Email,
-    PasswordHash,
-    IsActive
-FROM dbo.APP_USERS_T
-WHERE Email = @Email;
-";
-
-        var row = await cn.QuerySingleOrDefaultAsync<VendorUserRow>(
-            new CommandDefinition(sql, new { Email = email }, cancellationToken: ct)
+        using var reader = await cn.ExecuteReaderAsync(
+            new CommandDefinition(
+                "EXEC [exp].[VENDOR_AUTH_SP] @Email = @Email, @Password = @Password;",
+                new { Email = email, Password = password },
+                cancellationToken: ct
+            )
         );
 
-        if (row is null) return null;
-        if (!row.IsActive) return null;
-        if (string.IsNullOrWhiteSpace(row.PasswordHash)) return null;
+        if (!reader.Read())
+            return (500, null);
 
-        if (!VerifyIdentityV3(row.PasswordHash!, password))
-            return null;
+        var statusCode = reader.GetInt32(0);
+
+        if (statusCode != 200)
+            return (statusCode, null);
+
+        var passwordHash = reader.IsDBNull(1) ? null : reader.GetString(1);
+        var userId = reader.IsDBNull(2) ? null : reader.GetString(2);
+        var vendorId = reader.IsDBNull(3) ? null : reader.GetString(3);
+        var vendorName = reader.IsDBNull(4) ? null : reader.GetString(4);
+        var emailResult = reader.IsDBNull(5) ? null : reader.GetString(5);
+        var userNameResult = reader.IsDBNull(6) ? null : reader.GetString(6);
+
+        if (string.IsNullOrWhiteSpace(passwordHash))
+            return (500, null);
+
+        if (!VerifyIdentityV3(passwordHash, password))
+            return (401, null);
+
+        var profile = await FetchVendorProfileAsync(vendorId!, ct);
+        if (profile == null)
+            return (500, null);
 
         var account = new VendorAccount(
-            vendor_id: row.Id ?? "",
-            complete_name: row.CompleteName ?? "",
-            email: row.Email ?? ""
+            vendor_id: vendorId!,
+            complete_name: userNameResult ?? "",
+            email: emailResult ?? ""
         );
 
-        var profile = await FetchVendorProfileAsync(account.vendor_id, ct);
-        return new VendorLoginResult(account: account, profile: profile);
+        return (200, new VendorLoginResult(account: account, profile: profile));
     }
 
     // =========================
