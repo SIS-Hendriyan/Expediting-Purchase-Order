@@ -410,7 +410,8 @@ function isAwaitingVendorDoc(row: ReEtaRow) {
 }
 
 function getRequestedEtaDate(row?: ReEtaRow | null): string | null {
-  return row?.RequestETADate || row?.ResultETA || null;
+  console.log(row?.ResultETA);
+  return row?.ResultETA || row?.RequestETADate || null;
 }
 
 function getRequestedEtaDesc(row?: ReEtaRow | null): string {

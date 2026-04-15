@@ -114,6 +114,7 @@ export interface PurchaseOrderItem {
   documentDate: string;
   deliveryDate: string | null;
   etaDate: string | null;
+  newEtaDate: string | null;
   purchasingDocType: string;
   purchasingGroup: string;
   shortText: string;
@@ -170,6 +171,7 @@ type ColumnKey =
   | "documentDate"
   | "deliveryDate"
   | "etaDate"
+  | "newEtaDate"
   | "purchasingDocType"
   | "purchasingGroup"
   | "shortText"
