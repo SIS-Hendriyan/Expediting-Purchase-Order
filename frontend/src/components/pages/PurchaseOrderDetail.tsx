@@ -297,6 +297,11 @@ const toIsoDateTime = (v?: Date | null): string | null => {
   return v.toISOString();
 };
 
+const formatDateOnly = (v?: Date | null): string | null => {
+  if (!v || Number.isNaN(v.getTime())) return null;
+  return format(v, "yyyy-MM-dd");
+};
+
 const toNumberOrZero = (value: unknown): number => {
   if (value === null || value === undefined || value === "") return 0;
   const n = Number(value);
@@ -1107,8 +1112,7 @@ function StatusRelatedInformation({
   const ReceivedIcon = getStatusIcon("Received");
 
   const awb = trim(poDetail?.AWB) || "-";
-  const actualDeliveryDate =
-    parseServerDate(poDetail?.FinalActualDeliveryDate) ?? null;
+  const actualDeliveryDate = parseServerDate(poDetail?.ActualDeliveryDate) ?? null;
   const receivedAt = parseServerDate(poDetail?.["GR Created Date"]) ?? null;
 
   const awbFileName = trim(poDetail?.AWBFileName) || "AWB Document";
@@ -1200,15 +1204,6 @@ function StatusRelatedInformation({
               <Label className="block text-sm text-gray-500">Remarks</Label>
               <p className="text-[18px] text-black">{remarks}</p>
             </div>
-
-            <div>
-              <Label className="block text-sm text-gray-500">
-                Delivery Date
-              </Label>
-              <p className="text-[18px] text-black">
-                {reEtaDate ? format(reEtaDate, "MMM dd, yyyy") : "-"}
-              </p>
-            </div>
           </div>
         </>
       )}
@@ -1261,7 +1256,7 @@ function StatusRelatedInformation({
             </div>
 
             <div>
-              <Label className="block text-sm text-gray-500">New ETA</Label>
+              <Label className="block text-sm text-gray-500">ETA</Label>
               <p className="text-[18px] text-black">
                 {onDeliveryNewEta
                   ? format(onDeliveryNewEta, "MMM dd, yyyy")
@@ -1765,6 +1760,7 @@ export function PurchaseOrderDetail({
   }, []);
 
   const handleBack = useCallback(async () => {
+    console.log("[Detail] handleBack called, onRefreshPurchaseOrders:", !!onRefreshPurchaseOrders);
     try {
       await onRefreshPurchaseOrders?.();
     } finally {
@@ -1932,7 +1928,7 @@ export function PurchaseOrderDetail({
 
       await submitPoStatusUpdate({
         IDPOItem: idPoItem,
-        ETD: toIsoDateTime(etd),
+        ETD: formatDateOnly(etd),
         ETA: days,
         WIPRemark: remarks.trim(),
       });
@@ -2021,7 +2017,7 @@ export function PurchaseOrderDetail({
       formData.append("AWB", awb.trim());
       formData.append(
         "ActualDeliveryDate",
-        toIsoDateTime(actualDeliveryDate) || "",
+        formatDateOnly(actualDeliveryDate) || "",
       );
       formData.append("LeadtimeDelivery", String(leadtime));
       formData.append("Quantity", String(qty));
@@ -2471,9 +2467,8 @@ export function PurchaseOrderDetail({
 
                             {shouldShowEtaExceededAlertInline &&
                               etd &&
-                              deliveryDate &&
-                              etaExceededDays !== null &&
-                              etaExceededDays > 0 && (
+                              etaDifference !== null &&
+                              etaDifference > 0 && (
                                 <div className="mt-2 flex items-center gap-1.5 border-t border-gray-200 pt-2">
                                   <AlertCircle
                                     className="h-3.5 w-3.5"
@@ -2484,7 +2479,7 @@ export function PurchaseOrderDetail({
                                     style={{ color: "#ED832D" }}
                                   >
                                     This exceeds the required delivery date by{" "}
-                                    {etaExceededDays} days
+                                    {etaDifference} days
                                   </p>
                                 </div>
                               )}
@@ -2631,11 +2626,6 @@ export function PurchaseOrderDetail({
                 const etaDifference =
                   previousEta && newCalculatedEta
                     ? diffDaysDateOnly(newCalculatedEta, previousEta)
-                    : null;
-
-                const etaExceededDays =
-                  newCalculatedEta && deliveryDate
-                    ? diffDaysDateOnly(newCalculatedEta, deliveryDate)
                     : null;
 
                 return (
@@ -2905,8 +2895,8 @@ export function PurchaseOrderDetail({
                             <div className="min-w-0 flex-1">
                               <p className="text-sm text-gray-700">
                                 New ETA exceeds the required delivery date
-                                {etaExceededDays && etaExceededDays > 0
-                                  ? ` by ${etaExceededDays} days`
+                                {etaDifference && etaDifference > 0
+                                  ? ` by ${etaDifference} days`
                                   : ""}
                                 . Please{" "}
                                 <button
@@ -2963,14 +2953,48 @@ export function PurchaseOrderDetail({
                         </div>
                       )}
 
+                      {!isCalculatedDeliveryDateBeyondPoDeliveryDate &&
+                        etaDifference !== null &&
+                        etaDifference > 0 && (
+                        <div
+                          className="mb-4 flex items-start gap-3 rounded-lg p-3"
+                          style={{
+                            backgroundColor: "rgba(220, 38, 38, 0.06)",
+                            border: "1px solid rgba(220, 38, 38, 0.15)",
+                          }}
+                        >
+                          <AlertCircle
+                            className="mt-0.5 h-4 w-4 shrink-0"
+                            style={{ color: "#DC2626" }}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm text-gray-700">
+                              New ETA exceeds the required delivery date by{" "}
+                              {etaDifference} day{etaDifference > 1 ? "s" : ""}.
+                              Please{" "}
+                              <button
+                                className="btn-underlined-text inline cursor-pointer border-none bg-transparent p-0 underline"
+                                style={{ color: "#014357" }}
+                                onClick={handleOpenRescheduleDialog}
+                                type="button"
+                              >
+                                submit a Re-ETA request again
+                              </button>{" "}
+                              before updating the delivery status.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
                       <Button
                         className="w-full text-white"
                         style={{
-                          backgroundColor: isWipSubmitDisabled
-                            ? "#9CA3AF"
-                            : "#014357",
+                          backgroundColor:
+                            isWipSubmitDisabled || (etaDifference !== null && etaDifference > 0)
+                              ? "#9CA3AF"
+                              : "#014357",
                         }}
-                        disabled={isWipSubmitDisabled}
+                        disabled={isWipSubmitDisabled || (etaDifference !== null && etaDifference > 0)}
                         onClick={handleClickSubmitOnDelivery}
                       >
                         <Truck className="mr-2 h-4 w-4" />
