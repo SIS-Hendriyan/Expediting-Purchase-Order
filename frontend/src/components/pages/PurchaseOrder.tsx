@@ -1291,6 +1291,8 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       setLoading(true);
       setLoadError(null);
 
+      console.log("[PO] fetchPurchaseOrders called with:", { tab, attention, pageNumber, pageSize, keyword });
+
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 60_000);
 
@@ -1303,6 +1305,8 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         appliedFilters,
         keyword,
       );
+
+      console.log("[PO] Request URL:", url.toString());
 
       try {
         const res = await fetchWithAuth(url.toString(), {
@@ -1349,6 +1353,17 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     },
     [buildListUrl, appliedFilters],
   );
+
+  const refreshPurchaseOrdersList = useCallback(async () => {
+    console.log("[PO] Refreshing purchase orders list...");
+    await fetchPurchaseOrders(
+      activeTab,
+      currentAttentionParam,
+      currentPage,
+      itemsPerPage,
+      searchQuery,
+    );
+  }, [activeTab, currentAttentionParam, currentPage, itemsPerPage, searchQuery, fetchPurchaseOrders]);
 
   const fetchMasterFilters = useCallback(async () => {
     setLoadingMasterFilters(true);
@@ -2576,6 +2591,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
           user={user}
           orderId={String(selectedOrderId)}
           onBack={() => setSelectedOrderId(null)}
+          onRefreshPurchaseOrders={refreshPurchaseOrdersList}
         />
       ) : (
         <>

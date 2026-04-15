@@ -459,88 +459,44 @@ namespace EXPOAPI.Services
 
         private static DateTime? ParseDateTime(object? value)
         {
-            if (value is null)
-                return null;
+            if (value is null) return null;
 
             // Already DateTime
             if (value is DateTime dt)
-                return DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+                return DateTime.SpecifyKind(dt.Date, DateTimeKind.Utc);
 
             // Already DateTimeOffset → convert to UTC
             if (value is DateTimeOffset dto)
-                return dto.UtcDateTime;
-
-            // DateOnly → convert to DateTime (no timezone issue)
-            if (value is DateOnly dateOnly)
-                return dateOnly.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
-
-            // Handle numeric (Excel OLE Automation date)
-            if (value is double || value is int || value is long)
-            {
-                try
-                {
-                    var oaDate = Convert.ToDouble(value);
-                    var fromOa = DateTime.FromOADate(oaDate);
-                    return DateTime.SpecifyKind(fromOa, DateTimeKind.Utc);
-                }
-                catch
-                {
-                    return null;
-                }
-            }
+                // ✅ Ambil date part dari LOCAL offset nya
+                // BUKAN dari UTC nya
+                return DateTime.SpecifyKind(dto.LocalDateTime.Date, DateTimeKind.Utc);
 
             var text = value.ToString()?.Trim();
-            if (string.IsNullOrWhiteSpace(text))
-                return null;
+            if (string.IsNullOrWhiteSpace(text)) return null;
 
-            // Try parse DateOnly format first (yyyy-MM-dd, dd/MM/yyyy, etc.)
-            // to avoid timezone conversion issue
-            string[] dateOnlyFormats =
+            // ✅ Jika ada "T" → ambil date part sebelum T saja
+            // "2026-04-14T17:00:00.000Z" → ambil "2026-04-14"
+            if (text.Contains('T'))
+            {
+                var datePart = text.Split('T')[0]; // "2026-04-14"
+                if (DateOnly.TryParse(datePart, out var dateOnly))
+                    return dateOnly.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            }
+
+            string[] formats =
             [
                 "yyyy-MM-dd",
         "dd/MM/yyyy",
         "MM/dd/yyyy",
         "dd-MM-yyyy",
-        "MM-dd-yyyy",
-        "dd MMM yyyy",
-        "dd MMMM yyyy",
         "yyyy/MM/dd"
             ];
 
-            if (DateOnly.TryParseExact(text, dateOnlyFormats,
-                    CultureInfo.InvariantCulture,
-                    DateTimeStyles.None, out var parsedDateOnly))
+            if (DateOnly.TryParseExact(text, formats,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out var parsed))
             {
-                return parsedDateOnly.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
-            }
-
-            // Try parse full DateTime with UTC awareness
-            string[] dateTimeFormats =
-            [
-                "yyyy-MM-ddTHH:mm:ss",
-        "yyyy-MM-ddTHH:mm:ssZ",
-        "yyyy-MM-ddTHH:mm:ss.fff",
-        "yyyy-MM-ddTHH:mm:ss.fffZ",
-        "dd/MM/yyyy HH:mm:ss",
-        "MM/dd/yyyy HH:mm:ss",
-        "yyyy-MM-dd HH:mm:ss"
-            ];
-
-            if (DateTime.TryParseExact(text, dateTimeFormats,
-                    CultureInfo.InvariantCulture,
-                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
-                    out var parsedExact))
-            {
-                return parsedExact;
-            }
-
-            // Fallback: general parse, force UTC to avoid timezone shift
-            if (DateTime.TryParse(text,
-                    CultureInfo.InvariantCulture,
-                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
-                    out var parsed))
-            {
-                return parsed;
+                return parsed.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
             }
 
             return null;
