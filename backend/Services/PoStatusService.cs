@@ -461,9 +461,11 @@ namespace EXPOAPI.Services
         {
             if (value is null) return null;
 
+            // Already DateTime
             if (value is DateTime dt)
                 return DateTime.SpecifyKind(dt.Date, DateTimeKind.Utc);
 
+            // Already DateTimeOffset → convert to UTC
             if (value is DateTimeOffset dto)
                 // ✅ Ambil date part dari LOCAL offset nya
                 // BUKAN dari UTC nya
