@@ -49,50 +49,52 @@ public sealed class AuthController : ControllerBase
         // ========= VENDOR FLOW =========
         if (userName.Contains("@"))
         {
-            VendorLoginResult? result;
             try
             {
-                result = await _auth.AuthenticateVendorAsync(userName, password, ct);
+                var (statusCode, result) = await _auth.VendorAuthAsync(userName, password, ct);
+
+                if (statusCode != 200 || result == null)
+                {
+                    return statusCode switch
+                    {
+                        400 => Fail("Email or password is required.", 400),
+                        401 => Fail("Password does not match on Expo Credentials.", 401),
+                        403 => Fail("You currently dont have access to EXPO. Please contact the administrator to request access.", 403),
+                        404 => Fail("User with this email is not found.", 404),
+                        _ => Fail("Authentication failed.", 500)
+                    };
+                }
+
+                var profile = result.profile;
+                var otpEmail = profile?.Email ?? result.account.email;
+                var otpCode = profile?.OTP ?? "";
+
+                object data = new
+                {
+                    account = result.account,
+                    profile = result.profile
+                };
+
+                if (!string.IsNullOrWhiteSpace(otpEmail) && !string.IsNullOrWhiteSpace(otpCode))
+                {
+                    try
+                    {
+                        await _otpEmail.SendVendorOtpEmailAsync(otpEmail, otpCode, ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        return Fail($"gagal mengirim OTP email: {GetInner(ex).Message}", 500);
+                    }
+
+                    data = "VENDOR";
+                }
+
+                return Success("login vendor berhasil", data);
             }
             catch (Exception ex)
             {
                 return Fail($"internal error (vendor): {GetInner(ex).Message}", 500);
             }
-
-            if (result is null)
-                return Fail("email atau password salah", 401);
-
-            var profile = result.profile;
-
-            var otpEmail = profile?.Email ?? result.account.email;
-            var otpCode = profile?.OTP ?? "";
-
-            // default: return object account+profile
-            object data = new
-            {
-                account = result.account,
-                profile = result.profile
-            };
-
-            // Flask behavior: if OTP exists -> send email and return "VENDOR"
-            if (!string.IsNullOrWhiteSpace(otpEmail) && !string.IsNullOrWhiteSpace(otpCode))
-            {
-                try
-                {
-                    await _otpEmail.SendVendorOtpEmailAsync(otpEmail, otpCode, ct);
-                }
-                catch (Exception ex)
-                {
-                    // kalau email gagal, masih bisa login? kamu bisa pilih:
-                    // - tetap 200 tapi info gagal email, atau
-                    // - 500
-                    return Fail($"gagal mengirim OTP email: {GetInner(ex).Message}", 500);
-                }
-
-                data = "VENDOR";
-            }
-
-            return Success("login vendor berhasil", data);
         }
 
         // ========= INTERNAL FLOW =========

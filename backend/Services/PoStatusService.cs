@@ -1,8 +1,9 @@
 ﻿using Dapper;
+using EXPOAPI.Helpers;
 using Microsoft.IdentityModel.JsonWebTokens;
 using System.Data;
+using System.Globalization;
 using System.Security.Claims;
-using EXPOAPI.Helpers;
 
 namespace EXPOAPI.Services
 {
@@ -461,19 +462,89 @@ namespace EXPOAPI.Services
             if (value is null)
                 return null;
 
+            // Already DateTime
             if (value is DateTime dt)
-                return dt;
+                return DateTime.SpecifyKind(dt, DateTimeKind.Utc);
 
+            // Already DateTimeOffset → convert to UTC
             if (value is DateTimeOffset dto)
-                return dto.DateTime;
+                return dto.UtcDateTime;
+
+            // DateOnly → convert to DateTime (no timezone issue)
+            if (value is DateOnly dateOnly)
+                return dateOnly.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+
+            // Handle numeric (Excel OLE Automation date)
+            if (value is double || value is int || value is long)
+            {
+                try
+                {
+                    var oaDate = Convert.ToDouble(value);
+                    var fromOa = DateTime.FromOADate(oaDate);
+                    return DateTime.SpecifyKind(fromOa, DateTimeKind.Utc);
+                }
+                catch
+                {
+                    return null;
+                }
+            }
 
             var text = value.ToString()?.Trim();
             if (string.IsNullOrWhiteSpace(text))
                 return null;
 
-            return DateTime.TryParse(text, out var parsed) ? parsed : null;
-        }
+            // Try parse DateOnly format first (yyyy-MM-dd, dd/MM/yyyy, etc.)
+            // to avoid timezone conversion issue
+            string[] dateOnlyFormats =
+            [
+                "yyyy-MM-dd",
+        "dd/MM/yyyy",
+        "MM/dd/yyyy",
+        "dd-MM-yyyy",
+        "MM-dd-yyyy",
+        "dd MMM yyyy",
+        "dd MMMM yyyy",
+        "yyyy/MM/dd"
+            ];
 
+            if (DateOnly.TryParseExact(text, dateOnlyFormats,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None, out var parsedDateOnly))
+            {
+                return parsedDateOnly.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            }
+
+            // Try parse full DateTime with UTC awareness
+            string[] dateTimeFormats =
+            [
+                "yyyy-MM-ddTHH:mm:ss",
+        "yyyy-MM-ddTHH:mm:ssZ",
+        "yyyy-MM-ddTHH:mm:ss.fff",
+        "yyyy-MM-ddTHH:mm:ss.fffZ",
+        "dd/MM/yyyy HH:mm:ss",
+        "MM/dd/yyyy HH:mm:ss",
+        "yyyy-MM-dd HH:mm:ss"
+            ];
+
+            if (DateTime.TryParseExact(text, dateTimeFormats,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                    out var parsedExact))
+            {
+                return parsedExact;
+            }
+
+            // Fallback: general parse, force UTC to avoid timezone shift
+            if (DateTime.TryParse(text,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                    out var parsed))
+            {
+                return parsed;
+            }
+
+            return null;
+        }
         private static byte[]? ParseBytes(object? value)
         {
             if (value is null)

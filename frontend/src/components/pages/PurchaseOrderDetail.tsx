@@ -3058,9 +3058,9 @@ export function PurchaseOrderDetail({
                       {request.delayReasonTitle} :{" "}
                       {request.delayReasonDescription}
                       <br />
-                      <p>
+                      <span>
                         <strong>Reschedule Reason:</strong> {request.reason}
-                      </p>
+                      </span>
                     </p>
                   </div>
 

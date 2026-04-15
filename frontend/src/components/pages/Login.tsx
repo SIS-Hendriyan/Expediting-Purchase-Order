@@ -151,6 +151,10 @@ export default function Login({ onLogin }: LoginProps) {
         return;
       }
 
+      if (json.ResponseCode === 403) {
+        throw new Error(json.Message || 'You currently dont have access to EXPO. Please contact the administrator to request access.');
+      }
+
       throw new Error(json.Message || 'Login gagal. Periksa kembali kredensial Anda.');
     } catch (err: any) {
       if (err?.name === 'AbortError') {
