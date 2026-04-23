@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -116,10 +116,10 @@ namespace EXPOAPI.Controllers
                     return BadRequestResponse("invalid pageSize. Minimum value is 1.");
                 }
 
-                if (pageSize.Value > 1000)
-                {
-                    return BadRequestResponse("invalid pageSize. Maximum value is 1000.");
-                }
+                //if (pageSize.Value > 1000)
+                //{
+                //    return BadRequestResponse("invalid pageSize. Maximum value is 1000.");
+                //}
 
                 spParams["PageSize"] = pageSize.Value;
             }
@@ -264,6 +264,57 @@ namespace EXPOAPI.Controllers
                     StatusCodes.Status500InternalServerError,
                     ApiResponse.Fail($"failed to fetch purchase order items: {ex.Message}", 500, null)
                 );
+            }
+        }
+
+        // GET /api/purchase-order/needing-update
+        [HttpGet("needing-update")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> NeedingUpdate(
+            [FromQuery] string? vendorName,
+            [FromQuery] string? plant,
+            [FromQuery] string? storageLocation,
+            [FromQuery] string? purchasingGroup,
+            [FromQuery] string? purchasingDocType,
+            [FromQuery] string? keyword,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 10,
+            CancellationToken ct = default)
+        {
+            if (page < 1)
+                return BadRequestResponse("invalid page. Minimum value is 1.");
+
+            if (pageSize < 1)
+                return BadRequestResponse("invalid pageSize. Minimum value is 1.");
+
+            if (pageSize > 1000)
+                return BadRequestResponse("invalid pageSize. Maximum value is 1000.");
+
+            try
+            {
+                var data = await _po.GetPurchaseOrdersNeedingUpdateAsync(
+                    Normalize(vendorName),
+                    Normalize(plant),
+                    Normalize(storageLocation),
+                    Normalize(purchasingGroup),
+                    Normalize(purchasingDocType),
+                    Normalize(keyword),
+                    page,
+                    pageSize,
+                    ct
+                );
+
+                return OkResponse("purchase orders needing update retrieved", data);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return ServerErrorResponse($"failed to fetch purchase orders needing update: {ex.Message}");
             }
         }
 

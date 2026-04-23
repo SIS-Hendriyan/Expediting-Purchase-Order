@@ -1,4 +1,4 @@
-﻿const rawBase = import.meta.env.VITE_API_BASE_URL || "";
+const rawBase = import.meta.env.VITE_API_BASE_URL || "";
 
 export const CONFIG = {
   apiBaseUrl: rawBase.replace(/\/+$/, ""), // hapus trailing slash
@@ -40,6 +40,9 @@ export const API = {
 
   // PO items eligible (buat Create Request dropdown)
   PO_ITEMS: () => `${CONFIG.apiBaseUrl}/api/purchase-order/items`,
+
+  // PO needing update
+  PO_NEEDING_UPDATE: () => `${CONFIG.apiBaseUrl}/api/purchase-order/needing-update`,
 
   // SSO helper - backend should expose an endpoint that calls the SOAP SSO service
   SSO_GETUSER: (nrp: string) =>

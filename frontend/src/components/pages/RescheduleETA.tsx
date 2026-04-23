@@ -939,6 +939,15 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
 
       const payload = unwrap(raw);
 
+      // Pastikan Current ETA di modal sama persis dengan nilai di kolom tabel
+      if (
+        payload &&
+        typeof payload === "object" &&
+        request["Current ETA"] !== undefined
+      ) {
+        payload["Current ETA"] = request["Current ETA"];
+      }
+
       setDetailsDialog({
         open: true,
         request: payload || request,

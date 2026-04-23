@@ -2467,8 +2467,8 @@ export function PurchaseOrderDetail({
 
                             {shouldShowEtaExceededAlertInline &&
                               etd &&
-                              etaDifference !== null &&
-                              etaDifference > 0 && (
+                              etaExceededDays !== null &&
+                              etaExceededDays > 0 && (
                                 <div className="mt-2 flex items-center gap-1.5 border-t border-gray-200 pt-2">
                                   <AlertCircle
                                     className="h-3.5 w-3.5"
@@ -2479,7 +2479,7 @@ export function PurchaseOrderDetail({
                                     style={{ color: "#ED832D" }}
                                   >
                                     This exceeds the required delivery date by{" "}
-                                    {etaDifference} days
+                                    {etaExceededDays} days
                                   </p>
                                 </div>
                               )}
