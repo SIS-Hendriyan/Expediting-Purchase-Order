@@ -2479,7 +2479,7 @@ export function PurchaseOrderDetail({
                                     style={{ color: "#ED832D" }}
                                   >
                                     This exceeds the required delivery date by{" "}
-                                    {etaExceededDays} days
+                                    {etaDifference} days
                                   </p>
                                 </div>
                               )}
