@@ -976,6 +976,19 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+
+  // Needing Update state
+  const [needingUpdateItems, setNeedingUpdateItems] = useState<PurchaseOrderItem[]>([]);
+  const [needingUpdateMeta, setNeedingUpdateMeta] = useState<{
+    TotalFiltered: number;
+    PageSize: number;
+    PageNumber: number;
+    TotalPages: number;
+  } | null>(null);
+  const [needingUpdatePage, setNeedingUpdatePage] = useState(1);
+  const [needingUpdatePageSize, setNeedingUpdatePageSize] = useState(10);
+  const [loadingNeedingUpdate, setLoadingNeedingUpdate] = useState(false);
 
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
   const [orderToUpdate, setOrderToUpdate] = useState<PurchaseOrderItem | null>(
@@ -1365,6 +1378,102 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     );
   }, [activeTab, currentAttentionParam, currentPage, itemsPerPage, searchQuery, fetchPurchaseOrders]);
 
+  const fetchNeedingUpdate = useCallback(
+    async (page: number, pageSize: number, keyword?: string) => {
+      if (user.role !== "vendor") return;
+      if (!vendorName) return;
+
+      setLoadingNeedingUpdate(true);
+
+      const url = new URL(API.PO_NEEDING_UPDATE());
+      url.searchParams.set("vendorName", vendorName);
+      url.searchParams.set("page", String(page));
+      url.searchParams.set("pageSize", String(pageSize));
+
+      if (keyword && keyword.length > 2) {
+        url.searchParams.set("keyword", keyword);
+      }
+
+      try {
+        const res = await fetchWithAuth(url.toString(), {
+          method: "GET",
+          headers: buildAuthHeaders(),
+        });
+
+        if (!res.ok) {
+          throw new Error(await parseErrorResponse(res));
+        }
+
+        const json = await res.json();
+        const lvl1 = (json?.data ?? json?.Data ?? json?.payload ?? json?.result ?? json) as AnyObj;
+        const lvl2 = (lvl1?.Data ?? lvl1?.data ?? lvl1) as AnyObj;
+
+        const itemsRaw =
+          lvl2?.items ??
+          lvl2?.Items ??
+          lvl2?.rows ??
+          lvl2?.Rows ??
+          [];
+
+        const items = (
+          Array.isArray(itemsRaw) ? itemsRaw : toArray(itemsRaw)
+        ) as PurchaseOrderItem[];
+
+        const normalizedItems = items.map((x: any) => ({
+          ...x,
+          id: normalizeItemId(x),
+          isScheduled: x?.isScheduled ?? x?.IsScheduled ?? x?.is_scheduled ?? null,
+          isApproveReETA:
+            x?.isApproveReETA ?? x?.IsApproveReETA ?? x?.is_approve_re_eta ?? null,
+          hasPendingReETA:
+            x?.hasPendingReETA ?? x?.HasPendingReETA ?? x?.has_pending_re_eta ?? null,
+          deliveryDate:
+            x?.deliveryDate ?? x?.DeliveryDate ?? x?.["Delivery Date"] ?? null,
+          etaDate: x?.etaDate ?? x?.ETADate ?? x?.EtaDate ?? x?.["ETA Date"] ?? null,
+          qtyOrder:
+            x?.qtyOrder ??
+            x?.QtyOrder ??
+            x?.["Qty Order"] ??
+            x?.quantityOrder ??
+            x?.QuantityOrder ??
+            x?.orderQty ??
+            x?.OrderQty ??
+            null,
+          reEtaDate:
+            x?.reEtaDate ??
+            x?.ReEtaDate ??
+            x?.["Re-ETA Date"] ??
+            x?.latestReEtaDate ??
+            x?.LatestReEtaDate ??
+            x?.proposedETA ??
+            x?.ProposedETA ??
+            null,
+        })) as PurchaseOrderItem[];
+
+        const metaRaw = (lvl2?.meta ?? lvl2?.Meta ?? null) as AnyObj;
+        const meta = metaRaw
+          ? {
+              TotalFiltered: Number(metaRaw.TotalFiltered ?? metaRaw.totalFiltered ?? 0),
+              PageSize: Number(metaRaw.PageSize ?? metaRaw.pageSize ?? pageSize),
+              PageNumber: Number(metaRaw.PageNumber ?? metaRaw.pageNumber ?? page),
+              TotalPages: Number(metaRaw.TotalPages ?? metaRaw.totalPages ?? 0),
+            }
+          : null;
+
+        setNeedingUpdateItems(normalizedItems);
+        setNeedingUpdateMeta(meta);
+      } catch (err: any) {
+        if (err?.message !== "Session expired") {
+          console.error("[PO] needing update fetch failed:", err);
+          toast.error(err?.message || "Failed to load orders needing update");
+        }
+      } finally {
+        setLoadingNeedingUpdate(false);
+      }
+    },
+    [user.role, vendorName],
+  );
+
   const fetchMasterFilters = useCallback(async () => {
     setLoadingMasterFilters(true);
 
@@ -1424,6 +1533,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   useEffect(() => {
     void fetchMasterFilters();
   }, [fetchMasterFilters]);
+
+  useEffect(() => {
+    if (user.role === "vendor") {
+      void fetchNeedingUpdate(needingUpdatePage, needingUpdatePageSize, searchQuery);
+    }
+  }, [user.role, needingUpdatePage, needingUpdatePageSize, searchQuery, fetchNeedingUpdate]);
 
   const scopedOrders = useMemo(() => {
     let list = orders;
@@ -1613,97 +1728,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     [user.role, appliedFilters],
   );
 
-  const ordersNeedingUpdate = useMemo(() => {
-    if (user.role !== "vendor") return [];
-
-    const today = startOfDay(new Date());
-    const twoDaysFromNow = addDaysDateOnly(today, 2);
-
-    console.log("[OrdersNeedingUpdate] Total orders:", filteredOrders.length);
-
-    const result = filteredOrders
-      .filter((o) => {
-        const displayStatus = mapBackendStatusToDisplay(o.status);
-
-        // Check 1: Excluded status (Received, Cancel)
-        if (displayStatus === "Received" || displayStatus === "Cancel" || isReceivedBackendStatus(o.status)) {
-          console.log(`❌ ${o.purchasingDocument} - Status "${displayStatus}" is excluded`);
-          return false;
-        }
-
-        // Check 2: isScheduled must be false
-        if (o.isScheduled === true) {
-          console.log(`❌ ${o.purchasingDocument} - isScheduled=true (must be false)`);
-          return false;
-        }
-
-        // Check 3: Must have ETA date (reEtaDate > etaDate > deliveryDate)
-        let effectiveEtaDateStr: string | null = null;
-        let etaSource = "";
-        if (o.reEtaDate?.trim()) {
-          effectiveEtaDateStr = o.reEtaDate;
-          etaSource = "reEtaDate";
-        } else if (o.etaDate?.trim()) {
-          effectiveEtaDateStr = o.etaDate;
-          etaSource = "etaDate";
-        } else if (o.deliveryDate?.trim()) {
-          effectiveEtaDateStr = o.deliveryDate;
-          etaSource = "deliveryDate";
-        }
-        if (!effectiveEtaDateStr) {
-          console.log(`❌ ${o.purchasingDocument} - No ETA date (etaDate: "${o.etaDate}", reEtaDate: "${o.reEtaDate}", deliveryDate: "${o.deliveryDate}")`);
-          return false;
-        }
-
-        const effectiveEtaDate = parseDdMmmYyyy(effectiveEtaDateStr);
-        if (!effectiveEtaDate) {
-          console.log(`❌ ${o.purchasingDocument} - Cannot parse ETA date: "${effectiveEtaDateStr}"`);
-          return false;
-        }
-
-        // Check 4: ETA must be <= today + 2 days (H+2)
-        // Show if approaching (H-2 or closer) OR already passed (overdue)
-        if (effectiveEtaDate > twoDaysFromNow) {
-          console.log(`❌ ${o.purchasingDocument} - ETA "${effectiveEtaDateStr}" (from ${etaSource}) > H+2, daysDiff: ${diffDaysFromToday(effectiveEtaDate)}`);
-          return false;
-        }
-
-        console.log(`✅ ${o.purchasingDocument} - PASS (ETA: ${effectiveEtaDateStr} from ${etaSource}, daysDiff: ${diffDaysFromToday(effectiveEtaDate)}, isScheduled: ${o.isScheduled})`);
-        return true;
-      })
-      .sort((a, b) => {
-        let effectiveEtaA: Date | null = null;
-        let effectiveEtaB: Date | null = null;
-
-        if (a.reEtaDate?.trim()) {
-          effectiveEtaA = parseDdMmmYyyy(a.reEtaDate);
-        } else if (a.etaDate?.trim()) {
-          effectiveEtaA = parseDdMmmYyyy(a.etaDate);
-        } else if (a.deliveryDate?.trim()) {
-          effectiveEtaA = parseDdMmmYyyy(a.deliveryDate);
-        }
-
-        if (b.reEtaDate?.trim()) {
-          effectiveEtaB = parseDdMmmYyyy(b.reEtaDate);
-        } else if (b.etaDate?.trim()) {
-          effectiveEtaB = parseDdMmmYyyy(b.etaDate);
-        } else if (b.deliveryDate?.trim()) {
-          effectiveEtaB = parseDdMmmYyyy(b.deliveryDate);
-        }
-
-        const va = effectiveEtaA ? diffDaysFromToday(effectiveEtaA) : 9999;
-        const vb = effectiveEtaB ? diffDaysFromToday(effectiveEtaB) : 9999;
-
-        return va - vb;
-      });
-
-    console.log("[OrdersNeedingUpdate] Result:", result.length, "orders");
-    return result;
-  }, [filteredOrders, user.role]);
+  const ordersNeedingUpdate = needingUpdateItems;
 
   const handleSearchChange = useCallback((v: string) => {
     setSearchQuery(v);
     setCurrentPage(1);
+    setNeedingUpdatePage(1);
   }, []);
 
   const handleItemsPerPageChange = useCallback((v: string) => {
@@ -2269,8 +2299,32 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     }
   }, []);
 
-  const handleDownloadPOData = useCallback(() => {
+  const handleDownloadPOData = useCallback(async () => {
     try {
+      setExporting(true);
+
+      const exportUrl = buildListUrl(
+        activeTab,
+        currentAttentionParam,
+        1,
+        2147483647,
+        appliedFilters,
+        searchQuery,
+      );
+
+      const res = await fetchWithAuth(exportUrl.toString(), {
+        method: "GET",
+        headers: buildAuthHeaders(),
+      });
+
+      if (!res.ok) {
+        throw new Error(await parseErrorResponse(res));
+      }
+
+      const json = await res.json();
+      const unwrapped = unwrapPOPayload(json);
+      const exportOrders = Array.isArray(unwrapped.items) ? unwrapped.items : [];
+
       const orderedKeys: ColumnKey[] = [
         "purchaseRequisition",
         "itemOfRequisition",
@@ -2317,7 +2371,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         return escaped;
       };
 
-      const rows = filteredOrders.map((o) => {
+      const rows = exportOrders.map((o) => {
         const row = cols.map((k) => escapeCell((o as any)[k]));
         row.push(escapeCell(mapBackendStatusToDisplay(o.status)));
         return row.join(",");
@@ -2343,11 +2397,21 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       URL.revokeObjectURL(url);
 
       toast.success("Export complete");
-    } catch (err) {
+    } catch (err: any) {
       console.error("[PO] export failed", err);
-      toast.error("Failed to export PO data");
+      toast.error(err?.message || "Failed to export PO data");
+    } finally {
+      setExporting(false);
     }
-  }, [filteredOrders, visibleColumns, user.role]);
+  }, [
+    activeTab,
+    currentAttentionParam,
+    appliedFilters,
+    searchQuery,
+    buildListUrl,
+    visibleColumns,
+    user.role,
+  ]);
 
   const columns = useMemo(() => {
     const mk = (
@@ -2631,9 +2695,16 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   className="flex-1 sm:flex-none"
                   size="sm"
                   onClick={handleDownloadPOData}
+                  disabled={exporting}
                 >
-                  <Download className="h-4 w-4 sm:mr-2" />
-                  <span className="hidden sm:inline">Export</span>
+                  {exporting ? (
+                    <Loader className="h-4 w-4 sm:mr-2 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4 sm:mr-2" />
+                  )}
+                  <span className="hidden sm:inline">
+                    {exporting ? "Exporting..." : "Export"}
+                  </span>
                 </Button>
 
                 <Button
@@ -2872,6 +2943,92 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   </TableBody>
                 </Table>
               </div>
+
+              {/* Needing Update Pagination */}
+              {needingUpdateMeta && needingUpdateMeta.TotalPages > 1 && (
+                <div className="flex items-center justify-between mt-4 px-2">
+                  <div className="text-sm text-gray-600">
+                    Showing{" "}
+                    {needingUpdateItems.length === 0
+                      ? 0
+                      : (needingUpdatePage - 1) * needingUpdatePageSize + 1}{" "}
+                    to{" "}
+                    {Math.min(
+                      needingUpdatePage * needingUpdatePageSize,
+                      needingUpdateMeta.TotalFiltered,
+                    )}{" "}
+                    of {needingUpdateMeta.TotalFiltered} results
+                  </div>
+
+                  <Pagination>
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious
+                          onClick={() =>
+                            setNeedingUpdatePage((p) => Math.max(1, p - 1))
+                          }
+                          className={
+                            needingUpdatePage === 1
+                              ? "pointer-events-none opacity-50"
+                              : "cursor-pointer"
+                          }
+                        />
+                      </PaginationItem>
+
+                      {[...Array(needingUpdateMeta.TotalPages)].map((_, i) => {
+                        const page = i + 1;
+
+                        if (
+                          page === 1 ||
+                          page === needingUpdateMeta.TotalPages ||
+                          (page >= needingUpdatePage - 1 &&
+                            page <= needingUpdatePage + 1)
+                        ) {
+                          return (
+                            <PaginationItem key={page}>
+                              <PaginationLink
+                                onClick={() => setNeedingUpdatePage(page)}
+                                isActive={needingUpdatePage === page}
+                                className="cursor-pointer"
+                              >
+                                {page}
+                              </PaginationLink>
+                            </PaginationItem>
+                          );
+                        }
+
+                        if (
+                          page === needingUpdatePage - 2 ||
+                          page === needingUpdatePage + 2
+                        ) {
+                          return <PaginationEllipsis key={page} />;
+                        }
+
+                        return null;
+                      })}
+
+                      <PaginationItem>
+                        <PaginationNext
+                          onClick={() =>
+                            setNeedingUpdatePage((p) =>
+                              Math.min(needingUpdateMeta.TotalPages, p + 1),
+                            )
+                          }
+                          className={
+                            needingUpdatePage === needingUpdateMeta.TotalPages
+                              ? "pointer-events-none opacity-50"
+                              : "cursor-pointer"
+                          }
+                        />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
+
+                  <div className="text-sm text-gray-600 whitespace-nowrap">
+                    Page {needingUpdatePage} of {needingUpdateMeta.TotalPages}
+                  </div>
+                </div>
+              )}
             </Card>
           )}
 
@@ -2928,28 +3085,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                             </label>
                           </div>
 
-                          {user.role !== "vendor" && (
-                            <div className="flex items-center space-x-2">
-                              <Checkbox
-                                id="col-item"
-                                checked={visibleColumns.item}
-                                disabled
-                              />
-                              <label
-                                htmlFor="col-item"
-                                className="text-sm cursor-not-allowed text-gray-700"
-                              >
-                                Item
-                              </label>
-                            </div>
-                          )}
-
                           <Separator className="my-3" />
 
                           {(Object.keys(visibleColumns) as ColumnKey[])
                             .filter(
                               (k) =>
-                                !["purchasingDocument", "item"].includes(k),
+                                !["purchasingDocument"].includes(k),
                             )
                             .map((k) => (
                               <div

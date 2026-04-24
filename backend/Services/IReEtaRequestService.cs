@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -18,7 +18,10 @@ namespace EXPOAPI.Services
             int pageSize = 20,
             CancellationToken ct = default);
 
-        Task<Dictionary<string, object?>> GetDetailAsync(long id, CancellationToken ct = default);
+        Task<Dictionary<string, object?>> GetDetailAsync(
+            string? id = null,
+            string? purchaseDocument = null,
+            CancellationToken ct = default);
 
         Task<Dictionary<string, object?>> CreateAsync(
             string idPoItem,

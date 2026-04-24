@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Card } from "../ui/card";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -31,6 +31,7 @@ import {
   X,
   FileText,
   AlertCircle,
+  AlertTriangle,
   Plus,
   Download,
   FileCheck,
@@ -113,6 +114,8 @@ type ReEtaRow = {
   // detail fields
   ShortText?: string;
   ETD?: string;
+  CurrentETD?: string;
+  CurrentNewETA?: string;
   "ETA Days"?: number;
   RequestETADate?: string;
   ResultProposeEtaDesc?: string;
@@ -423,6 +426,16 @@ function getRequestedEtaDesc(row?: ReEtaRow | null): string {
   return `${proposed} day(s)`;
 }
 
+function getEtaDayDifference(request: ReEtaRow): number {
+  const currentEta = parseDateOnly(request["Current ETA"]);
+  const newEta = parseDateOnly(getRequestedEtaDate(request));
+  if (!currentEta || !newEta) return 0;
+
+  const diffMs = newEta.getTime() - currentEta.getTime();
+  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+  return diffDays;
+}
+
 function getDocButtonTheme(status?: RequestStatus) {
   if (status === "APPROVED") {
     return {
@@ -467,6 +480,9 @@ function SearchableSelect(props: {
   searchPlaceholder?: string;
   emptyText?: string;
   className?: string;
+  onSearch?: (keyword: string) => Promise<void> | void;
+  loading?: boolean;
+  minSearchLength?: number;
 }) {
   const {
     value,
@@ -477,13 +493,51 @@ function SearchableSelect(props: {
     searchPlaceholder = "Search...",
     emptyText = "No results",
     className,
+    onSearch,
+    loading,
+    minSearchLength = 1,
   } = props;
 
   const [open, setOpen] = useState(false);
+  const [searchKeyword, setSearchKeyword] = useState("");
+  const lastSearchedRef = useRef<string>("");
   const selectedLabel = options.find((o) => o.value === value)?.label ?? "";
 
+  // Debounce search
+  useEffect(() => {
+    if (!onSearch) return;
+
+    const trimmed = searchKeyword.trim();
+    if (!trimmed || trimmed.length < minSearchLength) return;
+
+    // Hindari fetch ulang untuk keyword yang sama
+    if (trimmed === lastSearchedRef.current) return;
+
+    const timer = setTimeout(() => {
+      lastSearchedRef.current = trimmed;
+      void onSearch(trimmed);
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchKeyword, onSearch, minSearchLength]);
+
+  const showMinSearchMessage =
+    onSearch && (!searchKeyword || searchKeyword.length < minSearchLength);
+
+  const actualEmptyText = showMinSearchMessage
+    ? `Type at least ${minSearchLength} characters to search...`
+    : emptyText;
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (!nextOpen) {
+      lastSearchedRef.current = "";
+      setSearchKeyword("");
+    }
+  };
+
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <Button
           type="button"
@@ -501,34 +555,54 @@ function SearchableSelect(props: {
       </PopoverTrigger>
 
       <PopoverContent
-        className="w-[--radix-popover-trigger-width] p-0"
+        className="w-[--radix-popover-trigger-width] max-h-[400px] p-0"
         align="start"
+        side="bottom"
+        sideOffset={4}
+        avoidCollisions={false}
       >
-        <Command>
-          <CommandInput placeholder={searchPlaceholder} />
-          <CommandEmpty>{emptyText}</CommandEmpty>
+        <Command className="flex flex-col">
+          <CommandInput
+            placeholder={searchPlaceholder}
+            value={searchKeyword}
+            onValueChange={setSearchKeyword}
+          />
 
-          <CommandGroup className="max-h-[260px] overflow-auto">
-            {options.map((opt) => (
-              <CommandItem
-                key={opt.value}
-                value={opt.label}
-                disabled={opt.disabled}
-                onSelect={() => {
-                  onChange(opt.value);
-                  setOpen(false);
-                }}
-              >
-                <Check
-                  className={cn(
-                    "mr-2 h-4 w-4",
-                    value === opt.value ? "opacity-100" : "opacity-0",
-                  )}
-                />
-                <span className="truncate">{opt.label}</span>
-              </CommandItem>
-            ))}
-          </CommandGroup>
+          {loading && (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+            </div>
+          )}
+
+          {!loading && (
+            <>
+              <CommandEmpty>{actualEmptyText}</CommandEmpty>
+              <div className="max-h-[320px] overflow-y-auto overflow-x-hidden">
+                <CommandGroup>
+                  {options.map((opt) => (
+                    <CommandItem
+                      key={opt.value}
+                      value={opt.label}
+                      disabled={opt.disabled}
+                      onSelect={() => {
+                        onChange(opt.value);
+                        setOpen(false);
+                        setSearchKeyword("");
+                      }}
+                    >
+                      <Check
+                        className={cn(
+                          "mr-2 h-4 w-4",
+                          value === opt.value ? "opacity-100" : "opacity-0",
+                        )}
+                      />
+                      <span className="truncate">{opt.label}</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </div>
+            </>
+          )}
         </Command>
       </PopoverContent>
     </Popover>
@@ -589,6 +663,8 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
     { id: number; title: string; describe: string }[]
   >([]);
   const [loadingDelayReasons, setLoadingDelayReasons] = useState(false);
+  const [loadingPoItems, setLoadingPoItems] = useState(false);
+  const [pendingReEtaAlert, setPendingReEtaAlert] = useState<string | null>(null);
 
   // =====================
   // Load list
@@ -648,32 +724,42 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
   // =====================
   // Create dialog helpers
   // =====================
-  const loadPoItems = async () => {
-    try {
-      const qs = new URLSearchParams();
-      qs.set("eligibleOnly", "true");
-      qs.set("page", "1");
-      qs.set("pageSize", "200");
+  const loadPoItems = useCallback(
+    async (keyword?: string) => {
+      try {
+        setLoadingPoItems(true);
+        const qs = new URLSearchParams();
+        qs.set("eligibleOnly", "true");
+        qs.set("page", "1");
+        qs.set("pageSize", "50");
 
-      if (user.role === "vendor" && user.company) {
-        qs.set("vendor", user.company);
+        if (keyword && keyword.trim()) {
+          qs.set("q", keyword.trim());
+        }
+
+        if (user.role === "vendor" && user.company) {
+          qs.set("vendor", user.company);
+        }
+
+        const raw = await apiFetch<any>(`${API.PO_ITEMS()}?${qs.toString()}`, {
+          method: "GET",
+        });
+
+        const payload = unwrap(raw);
+        const items: PoItemRow[] = payload?.items || payload || [];
+
+        setPoItems(items);
+      } catch (e: any) {
+        if (e?.message !== "Session expired") {
+          toast.error(e.message || "Failed to load PO items");
+          setPoItems([]);
+        }
+      } finally {
+        setLoadingPoItems(false);
       }
-
-      const raw = await apiFetch<any>(`${API.PO_ITEMS()}?${qs.toString()}`, {
-        method: "GET",
-      });
-
-      const payload = unwrap(raw);
-      const items: PoItemRow[] = payload?.items || payload || [];
-
-      setPoItems(items);
-    } catch (e: any) {
-      if (e?.message !== "Session expired") {
-        toast.error(e.message || "Failed to load PO items");
-        setPoItems([]);
-      }
-    }
-  };
+    },
+    [user.role, user.company],
+  );
 
   const resetCreateForm = () => {
     setSelectedPO("");
@@ -681,6 +767,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
     setNewETADays("");
     setRescheduleReason("");
     setSelectedDelayReasonId("");
+    setPendingReEtaAlert(null);
   };
 
   const fetchDelayReasons = async () => {
@@ -709,12 +796,40 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
   const handleOpenCreateDialog = async () => {
     setCreateDialog(true);
     resetCreateForm();
-    await Promise.all([loadPoItems(), fetchDelayReasons()]);
+    setPoItems([]);
+    await fetchDelayReasons();
   };
 
   const handleCloseCreateDialog = () => {
     setCreateDialog(false);
     resetCreateForm();
+  };
+
+  const checkPendingReEta = async (purchaseDocument: string) => {
+    if (!purchaseDocument) {
+      setPendingReEtaAlert(null);
+      return;
+    }
+
+    try {
+      const url = `${API.REETA_DETAIL(0)}?purchaseDocument=${encodeURIComponent(purchaseDocument)}`;
+      const raw = await apiFetch<any>(url, { method: "GET" });
+      const payload = unwrap(raw);
+
+      const status = payload?.["Reschedule Status"] ?? payload?.rescheduleStatus ?? "";
+      if (String(status).toUpperCase() === "PENDING") {
+        setPendingReEtaAlert(
+          "Waiting for Re-ETA approval. Please wait until the request is reviewed before proceeding."
+        );
+      } else {
+        setPendingReEtaAlert(null);
+      }
+    } catch (e: any) {
+      if (e?.message !== "Session expired") {
+        console.error("[ReEta] check pending failed:", e);
+      }
+      setPendingReEtaAlert(null);
+    }
   };
 
   const uniquePONumbers = useMemo(
@@ -938,6 +1053,15 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
       });
 
       const payload = unwrap(raw);
+
+      // Pastikan Current ETA di modal sama persis dengan nilai di kolom tabel
+      if (
+        payload &&
+        typeof payload === "object" &&
+        request["Current ETA"] !== undefined
+      ) {
+        payload["Current ETA"] = request["Current ETA"];
+      }
 
       setDetailsDialog({
         open: true,
@@ -1523,11 +1647,16 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                   onChange={(v) => {
                     setSelectedPO(v);
                     setSelectedItem("");
+                    setPendingReEtaAlert(null);
+                    void checkPendingReEta(v);
                   }}
                   placeholder="Select a purchase order"
-                  searchPlaceholder="Search PO number..."
+                  searchPlaceholder="Type at least 2 characters..."
                   options={poNumberOptions}
                   disabled={loading}
+                  onSearch={(keyword) => loadPoItems(keyword)}
+                  loading={loadingPoItems}
+                  minSearchLength={2}
                 />
               </div>
 
@@ -1680,6 +1809,22 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                   disabled={loading}
                 />
               </div>
+
+              {pendingReEtaAlert && (
+                <div
+                  className="flex items-start gap-3 rounded-lg p-3"
+                  style={{
+                    backgroundColor: "rgba(237, 131, 45, 0.06)",
+                    border: "1px solid rgba(237, 131, 45, 0.15)",
+                  }}
+                >
+                  <AlertCircle
+                    className="mt-0.5 h-4 w-4 shrink-0"
+                    style={{ color: "#ED832D" }}
+                  />
+                  <p className="text-sm text-gray-700">{pendingReEtaAlert}</p>
+                </div>
+              )}
             </div>
           </ScrollArea>
 
@@ -1692,10 +1837,12 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
               Cancel
             </Button>
             <Button
-              style={{ backgroundColor: "#014357" }}
+              style={{
+                backgroundColor: pendingReEtaAlert ? "#9CA3AF" : "#014357",
+              }}
               className="text-white hover:opacity-90"
               onClick={handleSubmitRequest}
-              disabled={loading}
+              disabled={loading || !!pendingReEtaAlert}
             >
               {loading ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1766,10 +1913,18 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                         </div>
                         <div>
                           <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
-                            PO Number
+                            Vendor
                           </p>
                           <p className="text-sm">
-                            {actionDialog.request["PO Number"]}
+                            {actionDialog.request["Vendor Name"] || "-"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                            PO
+                          </p>
+                          <p className="text-sm">
+                            {actionDialog.request["PO Number"] || "-"}
                           </p>
                         </div>
                         <div>
@@ -1777,57 +1932,133 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                             Item
                           </p>
                           <p className="text-sm">
-                            {actionDialog.request["PO Item No"]}
+                            {actionDialog.request["PO Item No"] || "-"}
                           </p>
                         </div>
                         <div>
                           <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
-                            Vendor
+                            Item Description
                           </p>
                           <p className="text-sm">
-                            {actionDialog.request["Vendor Name"]}
+                            {actionDialog.request.ShortText || "-"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                            Request Date
+                          </p>
+                          <p className="text-sm">
+                            {formatDate(actionDialog.request.CREATED_AT)}
                           </p>
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-4 pt-2">
-                        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                          <p className="mb-2 text-xs uppercase tracking-wide text-gray-500">
-                            Current ETA
-                          </p>
-                          <p className="mb-1 text-xl">
-                            {formatDate(actionDialog.request["Current ETA"])}
-                          </p>
-                          <p className="text-sm text-gray-600">
-                            {safeNumber(
-                              actionDialog.request["ETA Days"],
-                              actionDialog.request["Proposed ETA"],
-                            )}{" "}
-                            days after ETD
-                          </p>
-                        </div>
-
-                        <div
-                          className="rounded-lg border p-4"
-                          style={{
-                            backgroundColor: "#FFF4E6",
-                            borderColor: "#ED832D",
-                          }}
+                      <div>
+                        <h3
+                          className="text-lg tracking-wide mb-4"
+                          style={{ color: "#014357" }}
                         >
-                          <p className="mb-2 text-xs uppercase tracking-wide text-gray-500">
-                            NEW ETA
-                          </p>
-                          <p
-                            className="mb-1 text-xl"
-                            style={{ color: "#ED832D" }}
+                          ETA Details
+                        </h3>
+
+                        {(() => {
+                          const diff = getEtaDayDifference(
+                            actionDialog.request,
+                          );
+                          if (diff > 0) {
+                            return (
+                              <div
+                                className="mb-4 flex items-center gap-3 rounded-lg p-3"
+                                style={{
+                                  backgroundColor:
+                                    "rgba(237, 131, 45, 0.06)",
+                                  border:
+                                    "1px solid rgba(237, 131, 45, 0.15)",
+                                }}
+                              >
+                                <AlertTriangle
+                                  className="h-4 w-4 shrink-0"
+                                  style={{ color: "#ED832D" }}
+                                />
+                                <p className="text-sm text-gray-700">
+                                  New ETA is {diff} day{diff > 1 ? "s" : ""}{" "}
+                                  later than current ETA
+                                </p>
+                              </div>
+                            );
+                          }
+                          return null;
+                        })()}
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
+                            <div>
+                              <p className="mb-1 text-xs uppercase tracking-wide text-gray-500">
+                                CURRENT ETD
+                              </p>
+                              <p className="text-sm font-medium">
+                                {formatDate(actionDialog.request.CurrentETD) || "-"}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="mb-1 text-xs uppercase tracking-wide text-gray-500">
+                                CURRENT ETA
+                              </p>
+                              <p className="text-sm font-medium">
+                                {formatDate(
+                                  actionDialog.request["Current ETA"],
+                                ) || "-"}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-600">
+                                {safeNumber(
+                                  actionDialog.request["ETA Days"],
+                                  actionDialog.request["Proposed ETA"],
+                                )}{" "}
+                                days after ETD
+                              </p>
+                            </div>
+                          </div>
+
+                          <div
+                            className="rounded-lg border p-4 space-y-3"
+                            style={{
+                              backgroundColor: "#FFF4E6",
+                              borderColor: "#ED832D",
+                            }}
                           >
-                            {formatDate(
-                              getRequestedEtaDate(actionDialog.request),
-                            )}
-                          </p>
-                          <p className="text-sm" style={{ color: "#ED832D" }}>
-                            +{getRequestedEtaDesc(actionDialog.request)}
-                          </p>
+                            <div>
+                              <p className="mb-1 text-xs uppercase tracking-wide text-gray-500">
+                                NEW ETD
+                              </p>
+                              <p
+                                className="text-sm font-medium"
+                                style={{ color: "#ED832D" }}
+                              >
+                                {formatDate(actionDialog.request.CurrentNewETA) || "-"}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="mb-1 text-xs uppercase tracking-wide text-gray-500">
+                                NEW ETA
+                              </p>
+                              <p
+                                className="text-sm font-medium"
+                                style={{ color: "#ED832D" }}
+                              >
+                                {formatDate(
+                                  getRequestedEtaDate(actionDialog.request),
+                                ) || "-"}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs" style={{ color: "#ED832D" }}>
+                                +
+                                {getRequestedEtaDesc(actionDialog.request)}
+                              </p>
+                            </div>
+                          </div>
                         </div>
                       </div>
 
@@ -2149,7 +2380,15 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                     </div>
                     <div>
                       <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
-                        PO Number
+                        Vendor
+                      </p>
+                      <p className="text-sm">
+                        {detailsDialog.request["Vendor Name"] || "-"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                        PO
                       </p>
                       <p className="text-sm">
                         {detailsDialog.request["PO Number"] || "-"}
@@ -2165,43 +2404,18 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                     </div>
                     <div>
                       <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
-                        Vendor
-                      </p>
-                      <p className="text-sm">
-                        {detailsDialog.request["Vendor Name"] || "-"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
                         Item Description
                       </p>
                       <p className="text-sm">
                         {detailsDialog.request.ShortText || "-"}
                       </p>
                     </div>
-
-                    <div className="invisible">
-                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
-                        Spacer
-                      </p>
-                      <p className="text-sm">-</p>
-                    </div>
-
                     <div>
                       <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
                         Request Date
                       </p>
                       <p className="text-sm">
                         {formatDate(detailsDialog.request.CREATED_AT)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
-                        ETD
-                      </p>
-                      <p className="text-sm">
-                        {formatDate(detailsDialog.request.ETD)}
                       </p>
                     </div>
                   </div>
@@ -2224,36 +2438,98 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                     </h3>
                   </div>
 
+                  {(() => {
+                    const diff = getEtaDayDifference(detailsDialog.request);
+                    if (diff > 0) {
+                      return (
+                        <div
+                          className="mb-4 flex items-center gap-3 rounded-lg p-3"
+                          style={{
+                            backgroundColor: "rgba(237, 131, 45, 0.06)",
+                            border: "1px solid rgba(237, 131, 45, 0.15)",
+                          }}
+                        >
+                          <AlertTriangle
+                            className="h-4 w-4 shrink-0"
+                            style={{ color: "#ED832D" }}
+                          />
+                          <p className="text-sm text-gray-700">
+                            New ETA is {diff} day{diff > 1 ? "s" : ""} later
+                            than current ETA
+                          </p>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                      <p className="mb-2 text-xs uppercase tracking-wide text-gray-500">
-                        Current ETA
-                      </p>
-                      <p className="mb-1 text-xl">
-                        {formatDate(detailsDialog.request["Current ETA"])}
-                      </p>
-                      <p className="text-sm text-gray-600">
-                        {safeNumber(detailsDialog.request["ETA Days"], 0)} days
-                        after ETD
-                      </p>
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
+                      <div>
+                        <p className="mb-1 text-xs uppercase tracking-wide text-gray-500">
+                          CURRENT ETD
+                        </p>
+                        <p className="text-sm font-medium">
+                          {formatDate(detailsDialog.request.CurrentETD) || "-"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="mb-1 text-xs uppercase tracking-wide text-gray-500">
+                          CURRENT ETA
+                        </p>
+                        <p className="text-sm font-medium">
+                          {formatDate(
+                            detailsDialog.request["Current ETA"],
+                          ) || "-"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-600">
+                          {safeNumber(
+                            detailsDialog.request["ETA Days"],
+                            0,
+                          )}{" "}
+                          days after ETD
+                        </p>
+                      </div>
                     </div>
 
                     <div
-                      className="rounded-lg border p-4"
+                      className="rounded-lg border p-4 space-y-3"
                       style={{
                         backgroundColor: "#FFF4E6",
                         borderColor: "#ED832D",
                       }}
                     >
-                      <p className="mb-2 text-xs uppercase tracking-wide text-gray-500">
-                        NEW ETA
-                      </p>
-                      <p className="mb-1 text-xl" style={{ color: "#ED832D" }}>
-                        {formatDate(getRequestedEtaDate(detailsDialog.request))}
-                      </p>
-                      <p className="text-sm" style={{ color: "#ED832D" }}>
-                        +{getRequestedEtaDesc(detailsDialog.request)}
-                      </p>
+                      <div>
+                        <p className="mb-1 text-xs uppercase tracking-wide text-gray-500">
+                          NEW ETD
+                        </p>
+                        <p
+                          className="text-sm font-medium"
+                          style={{ color: "#ED832D" }}
+                        >
+                          {formatDate(detailsDialog.request.CurrentNewETA) || "-"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="mb-1 text-xs uppercase tracking-wide text-gray-500">
+                          NEW ETA
+                        </p>
+                        <p
+                          className="text-sm font-medium"
+                          style={{ color: "#ED832D" }}
+                        >
+                          {formatDate(
+                            getRequestedEtaDate(detailsDialog.request),
+                          ) || "-"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs" style={{ color: "#ED832D" }}>
+                          +{getRequestedEtaDesc(detailsDialog.request)}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>

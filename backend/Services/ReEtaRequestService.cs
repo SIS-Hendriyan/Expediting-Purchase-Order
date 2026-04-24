@@ -1,4 +1,4 @@
-﻿using Dapper;
+using Dapper;
 using Microsoft.Data.SqlClient;
 using System;
 using System.Collections.Generic;
@@ -93,23 +93,35 @@ namespace EXPOAPI.Services
             }
         }
 
-        public async Task<Dictionary<string, object?>> GetDetailAsync(long id, CancellationToken ct = default)
+        public async Task<Dictionary<string, object?>> GetDetailAsync(
+            string? id = null,
+            string? purchaseDocument = null,
+            CancellationToken ct = default)
         {
             using var cn = _db.CreateMain();
 
             try
             {
+                var dp = new DynamicParameters();
+                if(id != "0")
+                {
+                    dp.Add("ID", id);
+
+                }
+                dp.Add("PurchaseDocument", purchaseDocument);
+
                 var row = (await cn.QueryAsync<dynamic>(new CommandDefinition(
                     SP_DETAIL,
-                    new { ID = id },
+                    dp,
                     commandType: CommandType.StoredProcedure,
                     cancellationToken: ct
                 ))).FirstOrDefault();
 
                 return row == null ? new Dictionary<string, object?>() : ToDict(row);
             }
+           
             catch (OperationCanceledException) { throw; }
-            catch (SqlException ex)
+            catch (Exception ex)
             {
                 throw new InvalidOperationException($"DB error executing {SP_DETAIL}: {ex.Message}", ex);
             }

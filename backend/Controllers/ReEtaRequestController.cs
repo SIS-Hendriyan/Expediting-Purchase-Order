@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using EXPOAPI.Models;
@@ -57,18 +57,21 @@ namespace EXPOAPI.Controllers
         // GET /api/re-eta/requests/{id}
         // id is STRING (NVARCHAR) e.g. POREETANUMBER or request key
         // =========================================================
-        [HttpGet("requests/{id}")]
+        [HttpGet("requests/{id?}")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> GetDetail([FromRoute] long id, CancellationToken ct = default)
+        public async Task<IActionResult> GetDetail(
+            [FromRoute] string? id = null,
+            [FromQuery] string? purchaseDocument = null,
+            CancellationToken ct = default)
         {
-            if (id <= 0)
-                return BadRequest(ApiResponse.Fail("invalid id", 400, null));
+            if (string.IsNullOrWhiteSpace(id) && string.IsNullOrWhiteSpace(purchaseDocument))
+                return BadRequest(ApiResponse.Fail("invalid id or purchase document", 400, null));
 
             try
             {
-                var data = await _reEta.GetDetailAsync(id, ct);
+                var data = await _reEta.GetDetailAsync(id, purchaseDocument, ct);
                 return Ok(ApiResponse.Ok("re-eta request detail retrieved", data, 200));
             }
             catch (Exception ex)

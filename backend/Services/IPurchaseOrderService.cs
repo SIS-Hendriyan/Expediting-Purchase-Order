@@ -1,4 +1,4 @@
-﻿namespace EXPOAPI.Services
+namespace EXPOAPI.Services
 {
     public interface IPurchaseOrderService
     {
@@ -77,5 +77,16 @@
 
         Task<(List<Dictionary<string, object?>> StatusFlow, List<Dictionary<string, object?>> ReEtaRequests, Dictionary<string, object?>? PoDetail)>
             GetPurchaseOrderDetailAsync(string poid, CancellationToken ct = default);
+
+        Task<Dictionary<string, object?>> GetPurchaseOrdersNeedingUpdateAsync(
+            string? vendorName = null,
+            string? plant = null,
+            string? storageLocation = null,
+            string? purchasingGroup = null,
+            string? purchasingDocType = null,
+            string? keyword = null,
+            int page = 1,
+            int pageSize = 10,
+            CancellationToken ct = default);
     }
 }

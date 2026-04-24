@@ -1,4 +1,4 @@
-﻿using Dapper;
+using Dapper;
 using Microsoft.Data.SqlClient;
 using System;
 using System.Collections.Generic;
@@ -24,6 +24,9 @@ namespace EXPOAPI.Services
 
         // ✅ NEW SP for eligible items
         private const string SP_PO_ITEMS_ELIGIBLE_REETA = "[exp].[PO_ITEM_ELIGIBLE_FOR_REETA_SP]";
+
+        // ✅ SP for purchase orders needing update
+        private const string SP_PO_NEEDING_UPDATE = "[exp].[Purchase_Order_Needing_Update_SP]";
 
         // status mapping sama seperti Python
         private static readonly Dictionary<string, string> StatusMap = new(StringComparer.OrdinalIgnoreCase)
@@ -576,6 +579,71 @@ namespace EXPOAPI.Services
             catch (SqlException ex)
             {
                 throw new InvalidOperationException($"DB error executing {SP_PO_ITEMS_ELIGIBLE_REETA}: {ex.Message}", ex);
+            }
+        }
+
+        // ------------------------------------------------------------
+        // Purchase_Order_Needing_Update_SP -> 2 result sets: items + pagination
+        // ------------------------------------------------------------
+        public async Task<Dictionary<string, object?>> GetPurchaseOrdersNeedingUpdateAsync(
+            string? vendorName = null,
+            string? plant = null,
+            string? storageLocation = null,
+            string? purchasingGroup = null,
+            string? purchasingDocType = null,
+            string? keyword = null,
+            int page = 1,
+            int pageSize = 10,
+            CancellationToken ct = default)
+        {
+            if (page <= 0) page = 1;
+            if (pageSize <= 0) pageSize = 10;
+            if (pageSize > 1000) pageSize = 1000;
+
+            var dp = new DynamicParameters();
+            AddString(dp, "VendorName", vendorName);
+            AddString(dp, "Plant", plant);
+            AddString(dp, "StorageLocation", storageLocation);
+            AddString(dp, "PurchasingGroup", purchasingGroup);
+            AddString(dp, "PurchasingDocType", purchasingDocType);
+            AddString(dp, "Keyword", keyword);
+            dp.Add("PageNumber", page);
+            dp.Add("PageSize", pageSize);
+
+            using var cn = _db.CreateMain();
+
+            try
+            {
+                using var grid = await cn.QueryMultipleAsync(new CommandDefinition(
+                    SP_PO_NEEDING_UPDATE,
+                    dp,
+                    commandType: CommandType.StoredProcedure,
+                    cancellationToken: ct
+                ));
+
+                // result set #1: items
+                var items = (await grid.ReadAsync<dynamic>()).Select(ToDict).ToList();
+
+                // result set #2: pagination info
+                var metaRow = (await grid.ReadAsync<dynamic>()).FirstOrDefault();
+                var meta = metaRow != null ? ToDict(metaRow) : new Dictionary<string, object?>();
+
+                // normalize fallback
+                meta.TryAdd("TotalFiltered", 0L);
+                meta.TryAdd("PageSize", pageSize);
+                meta.TryAdd("PageNumber", page);
+                meta.TryAdd("TotalPages", 0L);
+
+                return new Dictionary<string, object?>
+                {
+                    ["items"] = items,
+                    ["meta"] = meta
+                };
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (SqlException ex)
+            {
+                throw new InvalidOperationException($"DB error executing {SP_PO_NEEDING_UPDATE}: {ex.Message}", ex);
             }
         }
 
