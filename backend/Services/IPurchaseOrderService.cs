@@ -88,5 +88,14 @@ namespace EXPOAPI.Services
             int page = 1,
             int pageSize = 10,
             CancellationToken ct = default);
+
+        Task<Dictionary<string, object?>> GetVendorPerformanceOverviewAsync(
+            string vendorName,
+            CancellationToken ct = default);
+
+        Task<Dictionary<string, object?>> GetVendorEvaluationSummaryAsync(
+            string role,
+            string? vendorName = null,
+            CancellationToken ct = default);
     }
 }

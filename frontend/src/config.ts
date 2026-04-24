@@ -68,6 +68,13 @@ export const API = {
   MASTER_FILTER_DASHBOARD: () =>
     `${CONFIG.apiBaseUrl}/api/dashboard/master-filters`,
 
+  DASHBOARD_VENDOR_PERFORMANCE: (vendorName: string) =>
+    `${CONFIG.apiBaseUrl}/api/dashboard/vendor-performance?vendorName=${encodeURIComponent(vendorName)}`,
+  DASHBOARD_VENDOR_EVALUATION: (role: string, vendorName?: string) =>
+    vendorName
+      ? `${CONFIG.apiBaseUrl}/api/dashboard/vendor-evaluation?role=${role}&vendorName=${encodeURIComponent(vendorName)}`
+      : `${CONFIG.apiBaseUrl}/api/dashboard/vendor-evaluation?role=${role}`,
+
   POSTATUS_UPSERT: () => `${CONFIG.apiBaseUrl}/api/PoStatus/upsert`,
   POSTATUS_DETAIL: (idPoItem: number | string) =>
     `${CONFIG.apiBaseUrl}/api/PoStatus/${idPoItem}`,

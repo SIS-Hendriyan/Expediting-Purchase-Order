@@ -766,5 +766,93 @@ namespace EXPOAPI.Services
                 return 0;
             }
         }
+
+        // =========================================================
+        // Vendor Performance Overview
+        // =========================================================
+        private const string SP_VENDOR_PERFORMANCE_OVERVIEW = "[exp].[Vendor_Performance_Overview_SP]";
+        private const string SP_VENDOR_EVALUATION_SUMMARY = "[exp].[Vendor_Evaluation_Summary_SP]";
+
+        public async Task<Dictionary<string, object?>> GetVendorPerformanceOverviewAsync(
+            string vendorName,
+            CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(vendorName))
+                return new Dictionary<string, object?>();
+
+            using var cn = _db.CreateMain();
+
+            var dp = new DynamicParameters();
+            dp.Add("VendorName", vendorName.Trim());
+
+            try
+            {
+                var row = (await cn.QueryAsync<dynamic>(new CommandDefinition(
+                    SP_VENDOR_PERFORMANCE_OVERVIEW,
+                    dp,
+                    commandType: CommandType.StoredProcedure,
+                    cancellationToken: ct
+                ))).FirstOrDefault();
+
+                return row == null ? new Dictionary<string, object?>() : ToDict(row);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (SqlException ex)
+            {
+                throw new InvalidOperationException($"DB error executing {SP_VENDOR_PERFORMANCE_OVERVIEW}: {ex.Message}", ex);
+            }
+        }
+
+        public async Task<Dictionary<string, object?>> GetVendorEvaluationSummaryAsync(
+            string role,
+            string? vendorName = null,
+            CancellationToken ct = default)
+        {
+            using var cn = _db.CreateMain();
+
+            var dp = new DynamicParameters();
+            dp.Add("Role", role?.Trim() ?? "");
+            if (!string.IsNullOrWhiteSpace(vendorName))
+                dp.Add("VendorName", vendorName.Trim());
+
+            try
+            {
+                using var grid = await cn.QueryMultipleAsync(new CommandDefinition(
+                    SP_VENDOR_EVALUATION_SUMMARY,
+                    dp,
+                    commandType: CommandType.StoredProcedure,
+                    cancellationToken: ct
+                ));
+
+                var isVendorRole = string.Equals(role?.Trim(), "VENDOR", StringComparison.OrdinalIgnoreCase);
+
+                if (isVendorRole)
+                {
+                    var items = (await grid.ReadAsync<dynamic>()).Select(ToDict).ToList();
+                    return new Dictionary<string, object?>
+                    {
+                        ["items"] = items
+                    };
+                }
+                else
+                {
+                    var vendors = (await grid.ReadAsync<dynamic>()).Select(ToDict).ToList();
+                    var items = !grid.IsConsumed
+                        ? (await grid.ReadAsync<dynamic>()).Select(ToDict).ToList()
+                        : new List<Dictionary<string, object?>>();
+
+                    return new Dictionary<string, object?>
+                    {
+                        ["vendors"] = vendors,
+                        ["items"] = items
+                    };
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (SqlException ex)
+            {
+                throw new InvalidOperationException($"DB error executing {SP_VENDOR_EVALUATION_SUMMARY}: {ex.Message}", ex);
+            }
+        }
     }
 }

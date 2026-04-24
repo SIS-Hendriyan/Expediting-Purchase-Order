@@ -235,6 +235,45 @@ namespace EXPOAPI.Controllers
             }
         }
 
+        [HttpGet("vendor-performance")]
+        public async Task<IActionResult> VendorPerformance(
+            [FromQuery(Name = "vendorName")] string? vendorName,
+            CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(vendorName))
+                return BadRequestResponse("vendorName is required");
+
+            try
+            {
+                var data = await _po.GetVendorPerformanceOverviewAsync(vendorName, ct);
+                return OkResponse("Vendor performance overview retrieved", data);
+            }
+            catch
+            {
+                return ServerErrorResponse("Failed to fetch vendor performance overview");
+            }
+        }
+
+        [HttpGet("vendor-evaluation")]
+        public async Task<IActionResult> VendorEvaluation(
+            [FromQuery] string? role,
+            [FromQuery(Name = "vendorName")] string? vendorName,
+            CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(role))
+                return BadRequestResponse("role is required");
+
+            try
+            {
+                var data = await _po.GetVendorEvaluationSummaryAsync(role, vendorName, ct);
+                return OkResponse("Vendor evaluation summary retrieved", data);
+            }
+            catch
+            {
+                return ServerErrorResponse("Failed to fetch vendor evaluation summary");
+            }
+        }
+
         // =========================
         // Response helpers: responseCode ikut HTTP status
         // =========================
