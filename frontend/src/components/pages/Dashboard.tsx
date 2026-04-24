@@ -28,12 +28,14 @@ import {
   CalendarIcon,
   ChevronDown,
   ChevronUp,
-  Award,
   SlidersHorizontal,
   ArrowUp,
   ArrowDown,
   ArrowRight,
   Download,
+  Clock,
+  Zap,
+  TrendingUp,
 } from "lucide-react";
 import {
   Select,
@@ -111,30 +113,20 @@ interface MonthlyTrendPoint {
   avgDelay: number;
 }
 
-interface VendorScorecardItemUI {
-  poNumber: string;
-  itemOfRequisition: string;
-  vendorCode: string;
+interface EvaluationItem {
   vendorName: string;
-  otd: number;
-  communication: number;
-  reETAAccepted: number;
-  reETARejected: number;
-  excellencePoint: number;
-  overallScore: number;
+  poNumber: string;
+  item: string;
+  otdPercentage: number;
+  otdDelay: number;
+  responseTime: number;
 }
 
-interface VendorScorecardAggregateUI {
-  vendorCode: string;
+interface VendorAggregate {
   vendorName: string;
-  otd: number;
-  communication: number;
-  reETAAccepted: number;
-  reETARejected: number;
-  excellencePoint: number;
-  overallScore: number;
-  itemsCount: number;
-  items: VendorScorecardItemUI[];
+  otdPercentage: number;
+  otdDelay: number;
+  responseTime: number;
 }
 
 interface VendorOption {
@@ -320,21 +312,24 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
 
   const [scorecardCurrentPage, setScorecardCurrentPage] = useState(1);
   const [scorecardItemsPerPage, setScorecardItemsPerPage] = useState(10);
-  const [expandedVendors, setExpandedVendors] = useState<string[]>([]);
-  const [scorecardSortOrder, setScorecardSortOrder] = useState<"asc" | "desc">(
-    "desc",
-  );
 
-  const [vendorScorecardItems, setVendorScorecardItems] = useState<
-    VendorScorecardItemUI[]
+  const [evaluationItems, setEvaluationItems] = useState<
+    EvaluationItem[]
   >([]);
-  const [vendorScorecardAggregates, setVendorScorecardAggregates] = useState<
-    VendorScorecardAggregateUI[]
+  const [vendorAggregates, setVendorAggregates] = useState<
+    VendorAggregate[]
   >([]);
+  const [expandedVendors, setExpandedVendors] = useState<string[]>([]);
   const [vendorScorecardLoading, setVendorScorecardLoading] = useState(false);
   const [vendorScorecardError, setVendorScorecardError] = useState<
     string | null
   >(null);
+
+  const [vendorPerformance, setVendorPerformance] = useState<{
+    OTD_Percentage?: number;
+    Delay_Leadtime?: number;
+    Response_Time?: number;
+  } | null>(null);
 
   const totalPO = summary?.TotalPO ?? 0;
   const outstandingQty = summary?.OutstandingQuantity ?? 0;
@@ -356,77 +351,12 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
   const cleanVendorCompany = user.role === "vendor" && user.company
     ? user.company.replace(/\?/g, "").trim()
     : undefined;
-  console.log("vendorName - raw:", user.company, "| cleaned:", cleanVendorCompany);
 
-  const currentVendorAggregate = useMemo(() => {
-    if (!cleanVendorCompany) return undefined;
+  const isVendorRole = user.role === "vendor";
 
-    return vendorScorecardAggregates.find(
-      (v) => v.vendorName === cleanVendorCompany || v.vendorCode === cleanVendorCompany,
-    );
-  }, [cleanVendorCompany, vendorScorecardAggregates]);
-
-  const currentVendorScore = currentVendorAggregate?.overallScore ?? 0;
-
-  const vendorComposition = useMemo(() => {
-    if (!currentVendorAggregate) return [];
-
-    return [
-      { category: "OTD", value: currentVendorAggregate.otd, color: "#008383" },
-      {
-        category: "Communication",
-        value: currentVendorAggregate.communication,
-        color: "#5C8CB6",
-      },
-      {
-        category: "Re-ETA Accepted",
-        value: currentVendorAggregate.reETAAccepted,
-        color: "#6AA75D",
-      },
-      {
-        category: "Re-ETA Rejected",
-        value: currentVendorAggregate.reETARejected,
-        color: "#D4183D",
-      },
-      {
-        category: "Excellence Point",
-        value: currentVendorAggregate.excellencePoint,
-        color: "#ED832D",
-      },
-    ];
-  }, [currentVendorAggregate]);
-
-  const vendorScopedItems = useMemo(() => {
-    if (!cleanVendorCompany) return [];
-
-    return vendorScorecardItems.filter((item) => {
-      if (!cleanVendorCompany) return true;
-      return (
-        item.vendorName === cleanVendorCompany || item.vendorCode === cleanVendorCompany
-      );
-    });
-  }, [cleanVendorCompany, vendorScorecardItems]);
-
-  const sortedVendorScopedItems = useMemo(() => {
-    return [...vendorScopedItems].sort((a, b) =>
-      scorecardSortOrder === "desc"
-        ? b.overallScore - a.overallScore
-        : a.overallScore - b.overallScore,
-    );
-  }, [vendorScopedItems, scorecardSortOrder]);
-
-  const sortedVendorAggregates = useMemo(() => {
-    return [...vendorScorecardAggregates].sort((a, b) =>
-      scorecardSortOrder === "desc"
-        ? b.overallScore - a.overallScore
-        : a.overallScore - b.overallScore,
-    );
-  }, [vendorScorecardAggregates, scorecardSortOrder]);
-
-  const scorecardDataLength =
-    user.role === "vendor"
-      ? sortedVendorScopedItems.length
-      : sortedVendorAggregates.length;
+  const scorecardDataLength = isVendorRole
+    ? evaluationItems.length
+    : vendorAggregates.length;
 
   const scorecardTotalPages = Math.max(
     1,
@@ -451,17 +381,17 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
     };
   }, [scorecardCurrentPage, scorecardItemsPerPage, scorecardDataLength]);
 
-  const paginatedVendorItems = useMemo(() => {
+  const paginatedEvaluationItems = useMemo(() => {
     const startIndex = (scorecardCurrentPage - 1) * scorecardItemsPerPage;
     const endIndex = startIndex + scorecardItemsPerPage;
-    return sortedVendorScopedItems.slice(startIndex, endIndex);
-  }, [sortedVendorScopedItems, scorecardCurrentPage, scorecardItemsPerPage]);
+    return evaluationItems.slice(startIndex, endIndex);
+  }, [evaluationItems, scorecardCurrentPage, scorecardItemsPerPage]);
 
   const paginatedVendorAggregates = useMemo(() => {
     const startIndex = (scorecardCurrentPage - 1) * scorecardItemsPerPage;
     const endIndex = startIndex + scorecardItemsPerPage;
-    return sortedVendorAggregates.slice(startIndex, endIndex);
-  }, [sortedVendorAggregates, scorecardCurrentPage, scorecardItemsPerPage]);
+    return vendorAggregates.slice(startIndex, endIndex);
+  }, [vendorAggregates, scorecardCurrentPage, scorecardItemsPerPage]);
 
   const buildCommonParams = (
     useDefault: boolean,
@@ -643,102 +573,35 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
         return;
       }
 
-      const params = new URLSearchParams();
+      const isVendor = user.role === "vendor";
+      const role = isVendor ? "VENDOR" : "USER";
+      const vendorNameParam = isVendor && cleanVendorCompany ? cleanVendorCompany : undefined;
 
-      if (!useDefault) {
-        if (startDate)
-          params.append("start_date", formatLocalDateParam(startDate));
-        if (endDate) params.append("end_date", formatLocalDateParam(endDate));
-        if (plant) params.append("plant", plant);
-        if (group && group !== "All") params.append("group", group);
-
-        const mappedDocType = mapDocTypeForApi(docType);
-        if (mappedDocType) params.append("doc_type", mappedDocType);
-
-        let vendorFilter: string | undefined;
-
-        if (cleanVendorCompany) {
-          vendorFilter = cleanVendorCompany;
-          params.append("Vendor", cleanVendorCompany);
-          params.append("Name", cleanVendorCompany);
-          params.append("Company", cleanVendorCompany);
-        } else if (vendor) {
-          vendorFilter = vendor;
-        }
-
-        if (vendorFilter) {
-          params.append("vendor", vendorFilter);
-        }
-      }
-
-      console.log("DASHBOARD_VENDOR_SCORECARD vendorName:", cleanVendorCompany);
-      const url = `${API.DASHBOARD_VENDOR_SCORECARD(cleanVendorCompany)}?${params.toString()}`;
+      const url = API.DASHBOARD_VENDOR_EVALUATION(role, vendorNameParam);
       const res = await fetchWithAuth(url, { headers: buildAuthHeaders() });
-      const data = await getJsonData<{
-        items?: any[];
-        vendor_aggregates?: any[];
-      }>(res);
+      const data = await getJsonData<{ vendors?: any[]; items?: any[] }>(res);
 
-      const items = Array.isArray(data.items) ? data.items : [];
-      const aggregates = Array.isArray(data.vendor_aggregates)
-        ? data.vendor_aggregates
-        : [];
+      const rawItems = Array.isArray(data.items) ? data.items : [];
+      const rawVendors = Array.isArray(data.vendors) ? data.vendors : [];
 
-      const uiItems: VendorScorecardItemUI[] = items.map((i) => ({
-        poNumber: i.PONumber,
-        itemOfRequisition: i.ItemOfRequisition,
-        vendorCode: i.VendorCode,
-        vendorName: i.VendorName,
-        otd: Number(i.OTD ?? 0),
-        communication: Number(i.Communication ?? 0),
-        reETAAccepted: Number(i.ReETAAccepted ?? 0),
-        reETARejected: Number(i.ReETARejected ?? 0),
-        excellencePoint: Number(i.ExcellencePoint ?? 0),
-        overallScore: Number(i.OverallScore ?? 0),
+      const uiItems: EvaluationItem[] = rawItems.map((i) => ({
+        vendorName: i.VendorName ?? "",
+        poNumber: i["Purchasing Document"] ?? "",
+        item: i.Item ?? "",
+        otdPercentage: Number(i.OTD_Percentage ?? 0),
+        otdDelay: Number(i.OTD_Delay ?? 0),
+        responseTime: Number(i.RT ?? 0),
       }));
 
-      const aggregatesMap: Record<string, VendorScorecardAggregateUI> = {};
+      const uiVendors: VendorAggregate[] = rawVendors.map((v) => ({
+        vendorName: v.VendorName ?? "",
+        otdPercentage: Number(v.OTD_Percentage ?? 0),
+        otdDelay: Number(v.OTD_Delay ?? 0),
+        responseTime: Number(v.RT ?? 0),
+      }));
 
-      for (const agg of aggregates) {
-        const key = `${agg.VendorCode}|${agg.VendorName}`;
-        aggregatesMap[key] = {
-          vendorCode: agg.VendorCode,
-          vendorName: agg.VendorName,
-          otd: Number(agg.OTD ?? 0),
-          communication: Number(agg.Communication ?? 0),
-          reETAAccepted: Number(agg.ReETAAccepted ?? 0),
-          reETARejected: Number(agg.ReETARejected ?? 0),
-          excellencePoint: Number(agg.ExcellencePoint ?? 0),
-          overallScore: Number(agg.OverallScore ?? 0),
-          itemsCount: Number(agg.ItemsCount ?? 0),
-          items: [],
-        };
-      }
-
-      for (const item of uiItems) {
-        const key = `${item.vendorCode}|${item.vendorName}`;
-
-        if (!aggregatesMap[key]) {
-          aggregatesMap[key] = {
-            vendorCode: item.vendorCode,
-            vendorName: item.vendorName,
-            otd: item.otd,
-            communication: item.communication,
-            reETAAccepted: item.reETAAccepted,
-            reETARejected: item.reETARejected,
-            excellencePoint: item.excellencePoint,
-            overallScore: item.overallScore,
-            itemsCount: 0,
-            items: [],
-          };
-        }
-
-        aggregatesMap[key].items.push(item);
-        aggregatesMap[key].itemsCount = aggregatesMap[key].items.length;
-      }
-
-      setVendorScorecardItems(uiItems);
-      setVendorScorecardAggregates(Object.values(aggregatesMap));
+      setEvaluationItems(uiItems);
+      setVendorAggregates(uiVendors);
     } catch (err: any) {
       console.error("Failed to fetch vendor scorecard", err);
       if (err?.message !== "Session expired") {
@@ -751,12 +614,35 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
     }
   };
 
+  const fetchVendorPerformance = async () => {
+    if (!cleanVendorCompany) return;
+
+    try {
+      const url = API.DASHBOARD_VENDOR_PERFORMANCE(cleanVendorCompany);
+      const res = await fetchWithAuth(url, { headers: buildAuthHeaders() });
+      const data = await getJsonData<{
+        OTD_Percentage?: number;
+        Delay_Leadtime?: number;
+        Response_Time?: number;
+      }>(res);
+
+      setVendorPerformance({
+        OTD_Percentage: Number(data?.OTD_Percentage ?? 0),
+        Delay_Leadtime: Number(data?.Delay_Leadtime ?? 0),
+        Response_Time: Number(data?.Response_Time ?? 0),
+      });
+    } catch (err: any) {
+      console.error("Failed to fetch vendor performance", err);
+    }
+  };
+
   const reloadAllData = (useDefault = false) => {
     void fetchSummary(useDefault);
     void fetchPoTrend(useDefault);
     void fetchStatusDistribution(useDefault);
     void fetchMonthlyCompletionDelay(useDefault);
     void fetchVendorScorecard(useDefault);
+    void fetchVendorPerformance();
   };
 
   const handleApplyFilters = () => {
@@ -776,10 +662,6 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
     reloadAllData(true);
   };
 
-  const toggleVendor = (vendorRaw: string) => {
-    setVendor((prev) => (prev === vendorRaw ? "" : vendorRaw));
-  };
-
   const toggleVendorExpansion = (vendorName: string) => {
     setExpandedVendors((prev) =>
       prev.includes(vendorName)
@@ -788,39 +670,28 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
     );
   };
 
-  const toggleScorecardSort = () => {
-    setScorecardSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
-    setScorecardCurrentPage(1);
+  const toggleVendor = (vendorRaw: string) => {
+    setVendor((prev) => (prev === vendorRaw ? "" : vendorRaw));
   };
 
   const handleExportVendorScorecard = () => {
     const fileDate = getFileDate();
 
-    if (user.role === "vendor") {
+    if (isVendorRole) {
       const rows: (string | number)[][] = [
         [
-          "Purchase Order",
-          "Item of Requisition",
-          "Vendor Code",
-          "Vendor Name",
-          "OTD (%)",
-          "Communication (%)",
-          "Re-ETA Accepted (%)",
-          "Re-ETA Rejected (%)",
-          "Excellence Point (%)",
-          "Overall Score (%)",
+          "PO",
+          "Item",
+          "OTD Percentage",
+          "OTD Delay",
+          "Response Time",
         ],
-        ...sortedVendorScopedItems.map((record) => [
+        ...evaluationItems.map((record) => [
           record.poNumber,
-          record.itemOfRequisition,
-          record.vendorCode,
-          record.vendorName,
-          record.otd,
-          record.communication,
-          record.reETAAccepted,
-          record.reETARejected,
-          record.excellencePoint,
-          record.overallScore,
+          record.item,
+          record.otdPercentage,
+          record.otdDelay,
+          record.responseTime,
         ]),
       ];
 
@@ -830,56 +701,31 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
 
     const rows: (string | number)[][] = [
       [
-        "Vendor Code",
-        "Vendor Name",
-        "OTD (%)",
-        "Communication (%)",
-        "Re-ETA Accepted (%)",
-        "Re-ETA Rejected (%)",
-        "Excellence Point (%)",
-        "Overall Score (%)",
-        "Items Count",
-        "Row Type",
-        "PO Number",
-        "Item of Requisition",
+        "Vendor",
+        "PO",
+        "Item",
+        "OTD Percentage",
+        "OTD Delay",
+        "Response Time",
       ],
+      ...vendorAggregates.flatMap((vendor) => {
+        const vendorItems = evaluationItems.filter(
+          (item) => item.vendorName === vendor.vendorName,
+        );
+        return vendorItems.length > 0
+          ? vendorItems.map((item) => [
+              vendor.vendorName,
+              item.poNumber,
+              item.item,
+              item.otdPercentage,
+              item.otdDelay,
+              item.responseTime,
+            ])
+          : [[vendor.vendorName, "", "", vendor.otdPercentage, vendor.otdDelay, vendor.responseTime]];
+      }),
     ];
 
-    sortedVendorAggregates.forEach((vendorData) => {
-      rows.push([
-        vendorData.vendorCode,
-        vendorData.vendorName,
-        vendorData.otd,
-        vendorData.communication,
-        vendorData.reETAAccepted,
-        vendorData.reETARejected,
-        vendorData.excellencePoint,
-        vendorData.overallScore,
-        vendorData.itemsCount,
-        "SUMMARY",
-        "",
-        "",
-      ]);
-
-      vendorData.items.forEach((item) => {
-        rows.push([
-          item.vendorCode,
-          item.vendorName,
-          item.otd,
-          item.communication,
-          item.reETAAccepted,
-          item.reETARejected,
-          item.excellencePoint,
-          item.overallScore,
-          "",
-          "DETAIL",
-          item.poNumber,
-          item.itemOfRequisition,
-        ]);
-      });
-    });
-
-    downloadCsvFile(`vendor-scorecard-${fileDate}.csv`, rows);
+    downloadXlsLikeTsvFile(`vendor-scorecard-${fileDate}.xls`, rows);
   };
 
   const renderPercentageLabel = ({
@@ -1246,60 +1092,83 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 mb-3 sm:mb-4">
             <Card className="p-6 sm:col-span-2 lg:col-span-2">
-              <div className="flex items-start justify-between mb-2">
-                <div
-                  className="p-3 rounded-lg"
-                  style={{ backgroundColor: "rgba(0, 131, 131, 0.1)" }}
-                >
-                  <CheckCircle
-                    className="h-6 w-6"
-                    style={{ color: "#008383" }}
-                  />
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-medium text-gray-700">
+                  Vendor Performance
+                </h3>
+                <div className="flex items-center gap-1 text-green-600 text-xs">
+                  <TrendingUp className="h-3.5 w-3.5" />
+                  2%
                 </div>
               </div>
 
-              <div className="flex items-start gap-6">
-                <div className="flex-shrink-0">
-                  <div className="text-gray-600 text-sm mb-[25px]">
-                    Vendor Average Score
+              <div className="flex flex-row gap-3">
+                <div
+                  className="flex-1 rounded-lg p-3 text-center"
+                  style={{
+                    backgroundColor: "rgba(0, 131, 131, 0.06)",
+                    border: "1px solid rgba(0, 131, 131, 0.15)",
+                  }}
+                >
+                  <div className="text-[10px] text-gray-500 mb-1">OTD %</div>
+                  <div className="text-xl font-semibold" style={{ color: "#008383" }}>
+                    {vendorPerformance?.OTD_Percentage ?? 0}<span className="text-xs font-normal">%</span>
                   </div>
-                  <div className="text-3xl my-1" style={{ color: "#008383" }}>
-                    {currentVendorScore.toFixed(1)}%
-                  </div>
-                  <div className="text-xs text-gray-500 mt-[25px]">
-                    Overall performance rating
+                  <div className="mt-2">
+                    <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: "rgba(0, 131, 131, 0.1)" }}>
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{
+                          width: `${vendorPerformance?.OTD_Percentage ?? 0}%`,
+                          backgroundColor: "#008383",
+                        }}
+                      />
+                    </div>
                   </div>
                 </div>
 
-                <div className="flex-1 min-w-0 pt-1">
-                  <div className="space-y-2.5">
-                    {vendorComposition.map((item, index) => (
+                <div
+                  className="flex-1 rounded-lg p-3 text-center"
+                  style={{
+                    backgroundColor: "rgba(237, 131, 45, 0.06)",
+                    border: "1px solid rgba(237, 131, 45, 0.15)",
+                  }}
+                >
+                  <div className="text-[10px] text-gray-500 mb-1">Delay Leadtime</div>
+                  <div className="text-xl font-semibold" style={{ color: "#ED832D" }}>
+                    {vendorPerformance?.Delay_Leadtime ?? 0}<span className="text-xs font-normal"> days</span>
+                  </div>
+                  <div className="mt-2">
+                    <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: "rgba(237, 131, 45, 0.1)" }}>
                       <div
-                        key={index}
-                        className="flex items-center justify-between gap-3"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <div
-                            className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                            style={{ backgroundColor: item.color }}
-                          />
-                          <span className="text-xs text-gray-600 truncate">
-                            {item.category}
-                          </span>
-                        </div>
-                        <span
-                          className="text-xs flex-shrink-0"
-                          style={{ color: item.color }}
-                        >
-                          {item.value}%
-                        </span>
-                      </div>
-                    ))}
-                    {vendorComposition.length === 0 && (
-                      <div className="text-xs text-gray-400">
-                        No scorecard data yet for this vendor.
-                      </div>
-                    )}
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{ width: `${Math.min((vendorPerformance?.Delay_Leadtime ?? 0) / 10 * 100, 100)}%`, backgroundColor: "#ED832D" }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  className="flex-1 rounded-lg p-3 text-center"
+                  style={{
+                    backgroundColor: "rgba(92, 140, 182, 0.06)",
+                    border: "1px solid rgba(92, 140, 182, 0.15)",
+                  }}
+                >
+                  <div className="text-[10px] text-gray-500 mb-1">Response Time</div>
+                  <div className="text-xl font-semibold" style={{ color: "#5C8CB6" }}>
+                    {vendorPerformance?.Response_Time ?? 0}<span className="text-xs font-normal">/100</span>
+                  </div>
+                  <div className="mt-2">
+                    <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: "rgba(92, 140, 182, 0.1)" }}>
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{
+                          width: `${vendorPerformance?.Response_Time ?? 0}%`,
+                          backgroundColor: "#5C8CB6",
+                        }}
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1311,7 +1180,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
               ),
               iconBg: "rgba(1, 67, 87, 0.1)",
               iconColor: "#014357",
-              title: "Total Purchase Order Items",
+              title: "Total Purchase Orders",
               value: totalPO,
               subtitle: "+18 from last month",
               cardClassName: "lg:col-span-1",
@@ -1339,6 +1208,10 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                   style={{ backgroundColor: "rgba(212, 24, 61, 0.1)" }}
                 >
                   <AlertTriangle className="h-6 w-6 text-red-600" />
+                </div>
+                <div className="flex items-center gap-1 text-red-500 text-xs">
+                  <TrendingUp className="h-3.5 w-3.5" />
+                  8%
                 </div>
               </div>
 
@@ -1715,147 +1588,81 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                   {user.role !== "vendor" && (
                     <TableHead className="text-gray-700">Vendor</TableHead>
                   )}
-                  {user.role === "vendor" && (
-                    <TableHead className="text-gray-700">
-                      Purchase Order
-                    </TableHead>
+                  {isVendorRole && (
+                    <TableHead className="text-gray-700">PO</TableHead>
                   )}
-                  {user.role === "vendor" && (
-                    <TableHead className="text-gray-700">
-                      Item of Requisition
-                    </TableHead>
+                  {isVendorRole && (
+                    <TableHead className="text-gray-700">Item</TableHead>
                   )}
                   <TableHead className="text-center text-gray-700">
-                    OTD
+                    OTD Percentage
                   </TableHead>
                   <TableHead className="text-center text-gray-700">
-                    Communication
+                    OTD Delay
                   </TableHead>
                   <TableHead className="text-center text-gray-700">
-                    Re-ETA Accepted
-                  </TableHead>
-                  <TableHead className="text-center text-gray-700">
-                    Re-ETA Rejected
-                  </TableHead>
-                  <TableHead className="text-center text-gray-700">
-                    Excellence Point
-                  </TableHead>
-                  <TableHead className="text-center text-gray-700 sticky right-0 bg-white z-10 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.1)]">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-auto p-0 hover:bg-transparent"
-                      onClick={toggleScorecardSort}
-                    >
-                      <span className="mr-1">Overall Score</span>
-                      {scorecardSortOrder === "desc" ? (
-                        <ArrowDown className="h-4 w-4" />
-                      ) : (
-                        <ArrowUp className="h-4 w-4" />
-                      )}
-                    </Button>
+                    Response Time
                   </TableHead>
                 </TableRow>
               </TableHeader>
 
               <TableBody>
-                {user.role === "vendor" ? (
-                  vendorScorecardLoading &&
-                  sortedVendorScopedItems.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={8}
-                        className="text-center text-gray-500 py-6"
-                      >
-                        Loading vendor scorecard...
-                      </TableCell>
-                    </TableRow>
-                  ) : sortedVendorScopedItems.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={8}
-                        className="text-center text-gray-500 py-6"
-                      >
-                        No scorecard data available.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    paginatedVendorItems.map((record, index) => (
-                      <TableRow
-                        key={`${record.poNumber}-${record.itemOfRequisition}-${index}`}
-                      >
-                        <TableCell className="text-gray-900">
-                          <span className="font-semibold">
-                            {record.poNumber}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-gray-900">
-                          <span className="font-semibold">
-                            {record.itemOfRequisition}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-center text-gray-900">
-                          {record.otd}%
-                        </TableCell>
-                        <TableCell className="text-center text-gray-900">
-                          {record.communication}%
-                        </TableCell>
-                        <TableCell className="text-center text-gray-900">
-                          {record.reETAAccepted}%
-                        </TableCell>
-                        <TableCell className="text-center text-gray-900">
-                          {record.reETARejected}%
-                        </TableCell>
-                        <TableCell className="text-center text-gray-900">
-                          {record.excellencePoint}%
-                        </TableCell>
-                        <TableCell className="text-center sticky right-0 bg-white z-10 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.1)]">
-                          <div className="flex items-center justify-center gap-1.5">
-                            <Award
-                              className="h-4 w-4"
-                              style={{ color: "#6AA75D" }}
-                            />
-                            <span className="text-gray-900 font-semibold">
-                              {record.overallScore}%
-                            </span>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )
-                ) : vendorScorecardLoading &&
-                  sortedVendorAggregates.length === 0 ? (
+                {vendorScorecardLoading && scorecardDataLength === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={8}
+                      colSpan={isVendorRole ? 5 : 4}
                       className="text-center text-gray-500 py-6"
                     >
                       Loading vendor scorecard...
                     </TableCell>
                   </TableRow>
-                ) : sortedVendorAggregates.length === 0 ? (
+                ) : scorecardDataLength === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={8}
+                      colSpan={isVendorRole ? 5 : 4}
                       className="text-center text-gray-500 py-6"
                     >
                       No scorecard data available.
                     </TableCell>
                   </TableRow>
+                ) : isVendorRole ? (
+                  paginatedEvaluationItems.map((record, index) => (
+                    <TableRow key={`${record.poNumber}-${record.item}-${index}`}>
+                      <TableCell className="text-gray-900">
+                        <span className="font-semibold">
+                          {record.poNumber}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-gray-900">
+                        {record.item}
+                      </TableCell>
+                      <TableCell className="text-center text-gray-900">
+                        {record.otdPercentage}%
+                      </TableCell>
+                      <TableCell className="text-center text-gray-900">
+                        {record.otdDelay}
+                      </TableCell>
+                      <TableCell className="text-center text-gray-900">
+                        {record.responseTime}
+                      </TableCell>
+                    </TableRow>
+                  ))
                 ) : (
                   paginatedVendorAggregates.flatMap((vendorData) => {
-                    const rowKey = `${vendorData.vendorCode}|${vendorData.vendorName}`;
                     const isExpanded = expandedVendors.includes(
                       vendorData.vendorName,
+                    );
+                    const vendorItems = evaluationItems.filter(
+                      (item) => item.vendorName === vendorData.vendorName,
                     );
                     const rows: JSX.Element[] = [];
 
                     rows.push(
                       <TableRow
-                        key={rowKey}
+                        key={`vendor-${vendorData.vendorName}`}
                         className="bg-gray-50 hover:bg-gray-100"
                       >
-                        <TableCell className="text-gray-900">
+                        <TableCell>
                           <Button
                             variant="ghost"
                             size="sm"
@@ -1877,39 +1684,22 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                           </span>
                         </TableCell>
                         <TableCell className="text-center text-gray-900">
-                          {vendorData.otd}%
+                          {vendorData.otdPercentage}%
                         </TableCell>
                         <TableCell className="text-center text-gray-900">
-                          {vendorData.communication}%
+                          {vendorData.otdDelay}
                         </TableCell>
                         <TableCell className="text-center text-gray-900">
-                          {vendorData.reETAAccepted}%
-                        </TableCell>
-                        <TableCell className="text-center text-gray-900">
-                          {vendorData.reETARejected}%
-                        </TableCell>
-                        <TableCell className="text-center text-gray-900">
-                          {vendorData.excellencePoint}%
-                        </TableCell>
-                        <TableCell className="text-center sticky right-0 bg-gray-50 z-10 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.1)]">
-                          <div className="flex items-center justify-center gap-1.5">
-                            <Award
-                              className="h-4 w-4"
-                              style={{ color: "#6AA75D" }}
-                            />
-                            <span className="text-gray-900 font-semibold">
-                              {vendorData.overallScore}%
-                            </span>
-                          </div>
+                          {vendorData.responseTime}
                         </TableCell>
                       </TableRow>,
                     );
 
                     if (isExpanded) {
-                      vendorData.items.forEach((item, idx) => {
+                      vendorItems.forEach((item, idx) => {
                         rows.push(
                           <TableRow
-                            key={`${rowKey}-${item.poNumber}-${item.itemOfRequisition}-${idx}`}
+                            key={`item-${vendorData.vendorName}-${item.poNumber}-${item.item}-${idx}`}
                             className="bg-white hover:bg-gray-50"
                           >
                             <TableCell></TableCell>
@@ -1919,29 +1709,18 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                                   PO: {item.poNumber}
                                 </span>
                                 <span className="text-xs text-gray-500">
-                                  Item: {item.itemOfRequisition}
+                                  Item: {item.item}
                                 </span>
                               </div>
                             </TableCell>
                             <TableCell className="text-center text-gray-700 text-sm">
-                              {item.otd}%
+                              {item.otdPercentage}%
                             </TableCell>
                             <TableCell className="text-center text-gray-700 text-sm">
-                              {item.communication}%
+                              {item.otdDelay}
                             </TableCell>
                             <TableCell className="text-center text-gray-700 text-sm">
-                              {item.reETAAccepted}%
-                            </TableCell>
-                            <TableCell className="text-center text-gray-700 text-sm">
-                              {item.reETARejected}%
-                            </TableCell>
-                            <TableCell className="text-center text-gray-700 text-sm">
-                              {item.excellencePoint}%
-                            </TableCell>
-                            <TableCell className="text-center sticky right-0 bg-white z-10 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.1)]">
-                              <span className="text-gray-700 text-sm">
-                                {item.overallScore}%
-                              </span>
+                              {item.responseTime}
                             </TableCell>
                           </TableRow>,
                         );
