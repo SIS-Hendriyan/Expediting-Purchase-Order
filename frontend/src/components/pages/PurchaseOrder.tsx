@@ -592,7 +592,7 @@ const vendorColumns: ColumnVis = {
   purchaseRequisition: false,
   itemOfRequisition: true,
   purchasingDocument: true,
-  item: false,
+  item: true,
   documentDate: false,
   deliveryDate: true,
   etaDate: true,
