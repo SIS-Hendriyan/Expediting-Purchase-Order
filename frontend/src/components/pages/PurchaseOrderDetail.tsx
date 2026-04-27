@@ -1749,14 +1749,14 @@ export function PurchaseOrderDetail({
 
   const handleOpenRescheduleDialog = useCallback(async () => {
     setRescheduleDialogOpen(true);
-    setNewEtd(etd ?? todayStart());
+    setNewEtd(actualDeliveryDate ?? todayStart());
     setNewLeadtimeDays(
       status === "Work in Progress" ? leadtimeDelivery || "" : etaDays || "",
     );
     setRescheduleReason("");
     setSelectedDelayReasonId(null);
     await fetchDelayReasons();
-  }, [etd, etaDays, leadtimeDelivery, status, fetchDelayReasons]);
+  }, [actualDeliveryDate, etaDays, leadtimeDelivery, status, fetchDelayReasons]);
 
   const handleCloseRescheduleDialog = useCallback(() => {
     setRescheduleDialogOpen(false);
@@ -2156,6 +2156,15 @@ export function PurchaseOrderDetail({
 
       toast.success("Reschedule request submitted successfully.");
       handleCloseRescheduleDialog();
+
+      setEtd(undefined);
+      setEtaDays("");
+      setRemarks("");
+      setAwb("");
+      setActualDeliveryDate(undefined);
+      setLeadtimeDelivery("");
+      setQuantity("");
+
       await fetchDetail();
     } catch (error: any) {
       if (error?.message !== "Session expired") {
@@ -2893,6 +2902,7 @@ export function PurchaseOrderDetail({
                       )}
 
                       {!shouldShowExpiredDeliveryAlert &&
+                        !hasPendingReEtaApproval &&
                         isCalculatedDeliveryDateBeyondPoDeliveryDate && (
                           <div
                             className="mb-4 flex items-start gap-3 rounded-lg p-3"
@@ -2966,7 +2976,8 @@ export function PurchaseOrderDetail({
                         </div>
                       )}
 
-                      {!isCalculatedDeliveryDateBeyondPoDeliveryDate &&
+                      {!hasPendingReEtaApproval &&
+                        !isCalculatedDeliveryDateBeyondPoDeliveryDate &&
                         etaDifference !== null &&
                         etaDifference > 0 && (
                         <div
