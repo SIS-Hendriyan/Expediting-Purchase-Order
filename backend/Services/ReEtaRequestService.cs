@@ -96,6 +96,7 @@ namespace EXPOAPI.Services
         public async Task<Dictionary<string, object?>> GetDetailAsync(
             string? id = null,
             string? purchaseDocument = null,
+            string? item = null,
             CancellationToken ct = default)
         {
             using var cn = _db.CreateMain();
@@ -109,6 +110,7 @@ namespace EXPOAPI.Services
 
                 }
                 dp.Add("PurchaseDocument", purchaseDocument);
+                dp.Add("Item", item);
 
                 var row = (await cn.QueryAsync<dynamic>(new CommandDefinition(
                     SP_DETAIL,

@@ -592,7 +592,7 @@ const vendorColumns: ColumnVis = {
   purchaseRequisition: false,
   itemOfRequisition: true,
   purchasingDocument: true,
-  item: true,
+  item: false,
   documentDate: false,
   deliveryDate: true,
   etaDate: true,
@@ -979,7 +979,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const [exporting, setExporting] = useState(false);
 
   // Needing Update state
-  const [needingUpdateItems, setNeedingUpdateItems] = useState<PurchaseOrderItem[]>([]);
+  const [needingUpdateItems, setNeedingUpdateItems] = useState<
+    PurchaseOrderItem[]
+  >([]);
   const [needingUpdateMeta, setNeedingUpdateMeta] = useState<{
     TotalFiltered: number;
     PageSize: number;
@@ -1004,12 +1006,18 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const [newLeadtimeDays, setNewLeadtimeDays] = useState("");
   const [rescheduleReason, setRescheduleReason] = useState("");
   const [submittingReschedule, setSubmittingReschedule] = useState(false);
-  const [selectedDelayReasonId, setSelectedDelayReasonId] = useState<string | null>(null);
-  const [delayReasons, setDelayReasons] = useState<{ id: number | string; title: string }[]>([]);
+  const [selectedDelayReasonId, setSelectedDelayReasonId] = useState<
+    string | null
+  >(null);
+  const [delayReasons, setDelayReasons] = useState<
+    { id: number | string; title: string }[]
+  >([]);
 
   const [confirmationModalOpen, setConfirmationModalOpen] = useState(false);
   const [confirmationChecked, setConfirmationChecked] = useState(false);
-  const [pendingSubmitAction, setPendingSubmitAction] = useState<"update" | "reschedule" | null>(null);
+  const [pendingSubmitAction, setPendingSubmitAction] = useState<
+    "update" | "reschedule" | null
+  >(null);
 
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [uploadFileME2N, setUploadFileME2N] = useState<File | null>(null);
@@ -1304,7 +1312,13 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       setLoading(true);
       setLoadError(null);
 
-      console.log("[PO] fetchPurchaseOrders called with:", { tab, attention, pageNumber, pageSize, keyword });
+      console.log("[PO] fetchPurchaseOrders called with:", {
+        tab,
+        attention,
+        pageNumber,
+        pageSize,
+        keyword,
+      });
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 60_000);
@@ -1376,7 +1390,14 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       itemsPerPage,
       searchQuery,
     );
-  }, [activeTab, currentAttentionParam, currentPage, itemsPerPage, searchQuery, fetchPurchaseOrders]);
+  }, [
+    activeTab,
+    currentAttentionParam,
+    currentPage,
+    itemsPerPage,
+    searchQuery,
+    fetchPurchaseOrders,
+  ]);
 
   const fetchNeedingUpdate = useCallback(
     async (page: number, pageSize: number, keyword?: string) => {
@@ -1405,15 +1426,15 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         }
 
         const json = await res.json();
-        const lvl1 = (json?.data ?? json?.Data ?? json?.payload ?? json?.result ?? json) as AnyObj;
+        const lvl1 = (json?.data ??
+          json?.Data ??
+          json?.payload ??
+          json?.result ??
+          json) as AnyObj;
         const lvl2 = (lvl1?.Data ?? lvl1?.data ?? lvl1) as AnyObj;
 
         const itemsRaw =
-          lvl2?.items ??
-          lvl2?.Items ??
-          lvl2?.rows ??
-          lvl2?.Rows ??
-          [];
+          lvl2?.items ?? lvl2?.Items ?? lvl2?.rows ?? lvl2?.Rows ?? [];
 
         const items = (
           Array.isArray(itemsRaw) ? itemsRaw : toArray(itemsRaw)
@@ -1422,14 +1443,22 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         const normalizedItems = items.map((x: any) => ({
           ...x,
           id: normalizeItemId(x),
-          isScheduled: x?.isScheduled ?? x?.IsScheduled ?? x?.is_scheduled ?? null,
+          isScheduled:
+            x?.isScheduled ?? x?.IsScheduled ?? x?.is_scheduled ?? null,
           isApproveReETA:
-            x?.isApproveReETA ?? x?.IsApproveReETA ?? x?.is_approve_re_eta ?? null,
+            x?.isApproveReETA ??
+            x?.IsApproveReETA ??
+            x?.is_approve_re_eta ??
+            null,
           hasPendingReETA:
-            x?.hasPendingReETA ?? x?.HasPendingReETA ?? x?.has_pending_re_eta ?? null,
+            x?.hasPendingReETA ??
+            x?.HasPendingReETA ??
+            x?.has_pending_re_eta ??
+            null,
           deliveryDate:
             x?.deliveryDate ?? x?.DeliveryDate ?? x?.["Delivery Date"] ?? null,
-          etaDate: x?.etaDate ?? x?.ETADate ?? x?.EtaDate ?? x?.["ETA Date"] ?? null,
+          etaDate:
+            x?.etaDate ?? x?.ETADate ?? x?.EtaDate ?? x?.["ETA Date"] ?? null,
           qtyOrder:
             x?.qtyOrder ??
             x?.QtyOrder ??
@@ -1453,9 +1482,15 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         const metaRaw = (lvl2?.meta ?? lvl2?.Meta ?? null) as AnyObj;
         const meta = metaRaw
           ? {
-              TotalFiltered: Number(metaRaw.TotalFiltered ?? metaRaw.totalFiltered ?? 0),
-              PageSize: Number(metaRaw.PageSize ?? metaRaw.pageSize ?? pageSize),
-              PageNumber: Number(metaRaw.PageNumber ?? metaRaw.pageNumber ?? page),
+              TotalFiltered: Number(
+                metaRaw.TotalFiltered ?? metaRaw.totalFiltered ?? 0,
+              ),
+              PageSize: Number(
+                metaRaw.PageSize ?? metaRaw.pageSize ?? pageSize,
+              ),
+              PageNumber: Number(
+                metaRaw.PageNumber ?? metaRaw.pageNumber ?? page,
+              ),
               TotalPages: Number(metaRaw.TotalPages ?? metaRaw.totalPages ?? 0),
             }
           : null;
@@ -1536,9 +1571,19 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
   useEffect(() => {
     if (user.role === "vendor") {
-      void fetchNeedingUpdate(needingUpdatePage, needingUpdatePageSize, searchQuery);
+      void fetchNeedingUpdate(
+        needingUpdatePage,
+        needingUpdatePageSize,
+        searchQuery,
+      );
     }
-  }, [user.role, needingUpdatePage, needingUpdatePageSize, searchQuery, fetchNeedingUpdate]);
+  }, [
+    user.role,
+    needingUpdatePage,
+    needingUpdatePageSize,
+    searchQuery,
+    fetchNeedingUpdate,
+  ]);
 
   const scopedOrders = useMemo(() => {
     let list = orders;
@@ -1742,7 +1787,16 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   }, []);
 
   const handleOpenUpdateDialog = useCallback((order: PurchaseOrderItem) => {
-    console.log("[Update Dialog] isApproveReETA:", order.isApproveReETA, "| hasPendingReETA:", order.hasPendingReETA, "| attention:", order.attention, "| normalizeAttention:", normalizeAttention(order.attention));
+    console.log(
+      "[Update Dialog] isApproveReETA:",
+      order.isApproveReETA,
+      "| hasPendingReETA:",
+      order.hasPendingReETA,
+      "| attention:",
+      order.attention,
+      "| normalizeAttention:",
+      normalizeAttention(order.attention),
+    );
     setOrderToUpdate(order);
     const isDelay = normalizeAttention(order.attention) === 2;
     setUpdateScheduleStatus(isDelay ? "no" : "");
@@ -1850,12 +1904,16 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         IdPoItem: idPoItem,
         ProposedETADays: proposedEtaDays,
         Reason: rescheduleReason.trim(),
-        DelayReasonId: selectedDelayReasonId ? parseInt(selectedDelayReasonId, 10) : null,
+        DelayReasonId: selectedDelayReasonId
+          ? parseInt(selectedDelayReasonId, 10)
+          : null,
       });
 
       toast.success("Reschedule request submitted successfully.");
 
       setRescheduleDialogOpen(false);
+      setIsUpdateDialogOpen(false);
+      setOrderToUpdate(null);
       setNewEtd(todayStart());
       setNewLeadtimeDays("");
       setRescheduleReason("");
@@ -1870,6 +1928,11 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         searchQuery,
       );
       await fetchMasterFilters();
+      await fetchNeedingUpdate(
+        needingUpdatePage,
+        needingUpdatePageSize,
+        searchQuery,
+      );
     } catch (error: any) {
       if (error?.message !== "Session expired") {
         toast.error(error?.message || "Failed to submit reschedule request.");
@@ -1884,14 +1947,18 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     currentPage,
     fetchCardSummary,
     fetchMasterFilters,
+    fetchNeedingUpdate,
     fetchPurchaseOrders,
     getIdPoItem,
     itemsPerPage,
+    needingUpdatePage,
+    needingUpdatePageSize,
     newEtd,
     newEtaDateForReschedule,
     newLeadtimeDays,
     rescheduleReason,
     rescheduleTargetOrder,
+    searchQuery,
     submitReEtaCreate,
   ]);
 
@@ -1992,7 +2059,13 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     } else if (pendingSubmitAction === "reschedule") {
       void handleSubmitReschedule();
     }
-  }, [confirmationChecked, pendingSubmitAction, closeConfirmationModal, handleSubmitUpdate, handleSubmitReschedule]);
+  }, [
+    confirmationChecked,
+    pendingSubmitAction,
+    closeConfirmationModal,
+    handleSubmitUpdate,
+    handleSubmitReschedule,
+  ]);
 
   const clearFilters = useCallback(() => {
     setDraftFilters({
@@ -2323,7 +2396,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
       const json = await res.json();
       const unwrapped = unwrapPOPayload(json);
-      const exportOrders = Array.isArray(unwrapped.items) ? unwrapped.items : [];
+      const exportOrders = Array.isArray(unwrapped.items)
+        ? unwrapped.items
+        : [];
 
       const orderedKeys: ColumnKey[] = [
         "purchaseRequisition",
@@ -2951,7 +3026,8 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                     Showing{" "}
                     {needingUpdateItems.length === 0
                       ? 0
-                      : (needingUpdatePage - 1) * needingUpdatePageSize + 1}{" "}
+                      : (needingUpdatePage - 1) * needingUpdatePageSize +
+                        1}{" "}
                     to{" "}
                     {Math.min(
                       needingUpdatePage * needingUpdatePageSize,
@@ -3102,10 +3178,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           <Separator className="my-3" />
 
                           {(Object.keys(visibleColumns) as ColumnKey[])
-                            .filter(
-                              (k) =>
-                                !["purchasingDocument", "item"].includes(k),
-                            )
+                            .filter((k) => !["purchasingDocument"].includes(k))
                             .map((k) => (
                               <div
                                 key={k}
@@ -3421,7 +3494,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                               ETA Date
                             </p>
                             <p className="text-sm">
-                              {orderToUpdate.etaDate?.trim() || orderToUpdate.deliveryDate?.trim() || "N/A"}
+                              {orderToUpdate.etaDate?.trim() ||
+                                orderToUpdate.deliveryDate?.trim() ||
+                                "N/A"}
                             </p>
                           </div>
 
@@ -3491,13 +3566,20 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                                 value="yes"
                                 checked={updateScheduleStatus === "yes"}
                                 onChange={() => setUpdateScheduleStatus("yes")}
-                                disabled={orderToUpdate.isApproveReETA === false}
+                                disabled={
+                                  orderToUpdate.isApproveReETA === false
+                                }
                                 className="mt-1"
                               />
                               <div>
                                 <div
                                   className="font-medium text-sm"
-                                  style={{ color: orderToUpdate.isApproveReETA === false ? "#9CA3AF" : "#014357" }}
+                                  style={{
+                                    color:
+                                      orderToUpdate.isApproveReETA === false
+                                        ? "#9CA3AF"
+                                        : "#014357",
+                                  }}
                                 >
                                   Ya, masih sesuai ETA
                                 </div>
@@ -3520,13 +3602,20 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                                 value="no"
                                 checked={updateScheduleStatus === "no"}
                                 onChange={() => setUpdateScheduleStatus("no")}
-                                disabled={orderToUpdate.isApproveReETA === false}
+                                disabled={
+                                  orderToUpdate.isApproveReETA === false
+                                }
                                 className="mt-1"
                               />
                               <div>
                                 <div
                                   className="font-medium text-sm"
-                                  style={{ color: orderToUpdate.isApproveReETA === false ? "#9CA3AF" : "#014357" }}
+                                  style={{
+                                    color:
+                                      orderToUpdate.isApproveReETA === false
+                                        ? "#9CA3AF"
+                                        : "#014357",
+                                  }}
                                 >
                                   Tidak, lakukan Re-ETA
                                 </div>
@@ -3534,33 +3623,34 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                             </label>
                           </div>
 
-                          {updateScheduleStatus === "no" && orderToUpdate.hasPendingReETA !== true && (
-                            <Alert
-                              style={{
-                                borderColor: "#DC2626",
-                                backgroundColor: "rgba(220, 38, 38, 0.06)",
-                              }}
-                            >
-                              <AlertCircle
-                                className="h-4 w-4"
-                                style={{ color: "#DC2626" }}
-                              />
-                              <AlertDescription className="text-sm text-gray-700">
-                                ETA exceeds the delivery date. Please{" "}
-                                <button
-                                  type="button"
-                                  className="btn-underlined-text inline border-none bg-transparent p-0 underline cursor-pointer"
-                                  style={{ color: "#014357" }}
-                                  onClick={() =>
-                                    handleOpenRescheduleDialog(orderToUpdate)
-                                  }
-                                >
-                                  submit a Reschedule ETA Request again
-                                </button>{" "}
-                                before proceeding.
-                              </AlertDescription>
-                            </Alert>
-                          )}
+                          {updateScheduleStatus === "no" &&
+                            orderToUpdate.hasPendingReETA !== true && (
+                              <Alert
+                                style={{
+                                  borderColor: "#DC2626",
+                                  backgroundColor: "rgba(220, 38, 38, 0.06)",
+                                }}
+                              >
+                                <AlertCircle
+                                  className="h-4 w-4"
+                                  style={{ color: "#DC2626" }}
+                                />
+                                <AlertDescription className="text-sm text-gray-700">
+                                  ETA exceeds the delivery date. Please{" "}
+                                  <button
+                                    type="button"
+                                    className="btn-underlined-text inline border-none bg-transparent p-0 underline cursor-pointer"
+                                    style={{ color: "#014357" }}
+                                    onClick={() =>
+                                      handleOpenRescheduleDialog(orderToUpdate)
+                                    }
+                                  >
+                                    submit a Reschedule ETA Request again
+                                  </button>{" "}
+                                  before proceeding.
+                                </AlertDescription>
+                              </Alert>
+                            )}
 
                           {orderToUpdate.hasPendingReETA === true && (
                             <Alert
@@ -3638,7 +3728,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   </Label>
                   <Select
                     value={selectedDelayReasonId ?? ""}
-                    onValueChange={(value) => setSelectedDelayReasonId(value || null)}
+                    onValueChange={(value) =>
+                      setSelectedDelayReasonId(value || null)
+                    }
                   >
                     <SelectTrigger className="mt-1">
                       <SelectValue placeholder="Select category" />
@@ -3882,31 +3974,56 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   Kontrak/PO/SOW yang berlaku.
                 </p>
                 <p className="mb-4 text-sm text-gray-700">
-                  Apabila Vendor tidak memenuhi waktu supply sebagaimana tercantum
-                  dalam kontrak, maka hal tersebut akan dikategorikan sebagai
-                  pelanggaran kontraktual dan Procurement berhak untuk menjatuhkan
-                  sanksi sesuai dengan ketentuan yang telah disepakati, termasuk
-                  namun tidak terbatas pada:
+                  Apabila Vendor tidak memenuhi waktu supply sebagaimana
+                  tercantum dalam kontrak, maka hal tersebut akan dikategorikan
+                  sebagai pelanggaran kontraktual dan Procurement berhak untuk
+                  menjatuhkan sanksi sesuai dengan ketentuan yang telah
+                  disepakati, termasuk namun tidak terbatas pada:
                 </p>
                 <ol className="mb-4 list-inside list-decimal space-y-1 text-sm text-gray-700">
-                  <li>Pengenaan denda keterlambatan berdasarkan perhitungan dan persentase yang ditetapkan dalam kontrak;</li>
-                  <li>Pemotongan nilai pembayaran atas barang dan/atau jasa yang disuplai;</li>
-                  <li>Penerbitan surat peringatan tertulis (SP) kepada Vendor;</li>
-                  <li>Pembekuan sementara aktivitas supply hingga kewajiban dipenuhi;</li>
-                  <li>Pemutusan kontrak secara sepihak apabila keterlambatan terjadi secara berulang atau berdampak signifikan terhadap operasional perusahaan;</li>
-                  <li>Evaluasi kinerja Vendor yang dapat memengaruhi keikutsertaan Vendor pada proses pengadaan di masa mendatang.</li>
+                  <li>
+                    Pengenaan denda keterlambatan berdasarkan perhitungan dan
+                    persentase yang ditetapkan dalam kontrak;
+                  </li>
+                  <li>
+                    Pemotongan nilai pembayaran atas barang dan/atau jasa yang
+                    disuplai;
+                  </li>
+                  <li>
+                    Penerbitan surat peringatan tertulis (SP) kepada Vendor;
+                  </li>
+                  <li>
+                    Pembekuan sementara aktivitas supply hingga kewajiban
+                    dipenuhi;
+                  </li>
+                  <li>
+                    Pemutusan kontrak secara sepihak apabila keterlambatan
+                    terjadi secara berulang atau berdampak signifikan terhadap
+                    operasional perusahaan;
+                  </li>
+                  <li>
+                    Evaluasi kinerja Vendor yang dapat memengaruhi keikutsertaan
+                    Vendor pada proses pengadaan di masa mendatang.
+                  </li>
                 </ol>
                 <p className="mb-4 text-sm text-gray-700">
-                  Procurement berhak untuk menerapkan satu atau lebih sanksi tersebut sesuai dengan tingkat dan dampak pelanggaran, tanpa mengurangi hak-hak lain sebagaimana diatur dalam kontrak dan peraturan yang berlaku.
+                  Procurement berhak untuk menerapkan satu atau lebih sanksi
+                  tersebut sesuai dengan tingkat dan dampak pelanggaran, tanpa
+                  mengurangi hak-hak lain sebagaimana diatur dalam kontrak dan
+                  peraturan yang berlaku.
                 </p>
                 <p className="mb-4 text-sm text-gray-700">
-                  Dengan dilanjutkannya proses pekerjaan dan/atau supply, Vendor dianggap telah mengetahui, menyetujui, dan bersedia mematuhi seluruh ketentuan serta sanksi yang tercantum dalam kontrak dan pernyataan ini.
+                  Dengan dilanjutkannya proses pekerjaan dan/atau supply, Vendor
+                  dianggap telah mengetahui, menyetujui, dan bersedia mematuhi
+                  seluruh ketentuan serta sanksi yang tercantum dalam kontrak
+                  dan pernyataan ini.
                 </p>
                 <p className="mb-4 font-medium" style={{ color: "#014357" }}>
                   Pernyataan Konfirmasi Vendor
                 </p>
                 <p className="mb-4 text-sm text-gray-700">
-                  Sebagai bentuk konfirmasi, mohon Vendor menyatakan persetujuan atas pertanyaan berikut sebelum melanjutkan progres pekerjaan:
+                  Sebagai bentuk konfirmasi, mohon Vendor menyatakan persetujuan
+                  atas pertanyaan berikut sebelum melanjutkan progres pekerjaan:
                 </p>
                 <label className="flex cursor-pointer items-start gap-3 rounded-lg bg-white p-3 shadow-sm">
                   <input
@@ -3916,7 +4033,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                     className="mt-1 h-4 w-4 rounded border-gray-300"
                   />
                   <span className="text-sm text-gray-700">
-                    Saya telah membaca, memahami, dan menyetujui seluruh ketentuan serta sanksi terkait keterlambatan supply sebagaimana tercantum dalam kontrak dan pernyataan ini.
+                    Saya telah membaca, memahami, dan menyetujui seluruh
+                    ketentuan serta sanksi terkait keterlambatan supply
+                    sebagaimana tercantum dalam kontrak dan pernyataan ini.
                   </span>
                 </label>
               </div>
@@ -3929,7 +4048,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   onClick={handleConfirmedSubmit}
                   disabled={!confirmationChecked}
                   style={{
-                    backgroundColor: confirmationChecked ? "#014357" : "#94A3B8",
+                    backgroundColor: confirmationChecked
+                      ? "#014357"
+                      : "#94A3B8",
                   }}
                   className="text-white hover:opacity-90"
                 >

@@ -313,12 +313,10 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
   const [scorecardCurrentPage, setScorecardCurrentPage] = useState(1);
   const [scorecardItemsPerPage, setScorecardItemsPerPage] = useState(10);
 
-  const [evaluationItems, setEvaluationItems] = useState<
-    EvaluationItem[]
-  >([]);
-  const [vendorAggregates, setVendorAggregates] = useState<
-    VendorAggregate[]
-  >([]);
+  const [evaluationItems, setEvaluationItems] = useState<EvaluationItem[]>([]);
+  const [vendorAggregates, setVendorAggregates] = useState<VendorAggregate[]>(
+    [],
+  );
   const [expandedVendors, setExpandedVendors] = useState<string[]>([]);
   const [vendorScorecardLoading, setVendorScorecardLoading] = useState(false);
   const [vendorScorecardError, setVendorScorecardError] = useState<
@@ -348,9 +346,10 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
     [vendorOptions, vendor],
   );
 
-  const cleanVendorCompany = user.role === "vendor" && user.company
-    ? user.company.replace(/\?/g, "").trim()
-    : undefined;
+  const cleanVendorCompany =
+    user.role === "vendor" && user.company
+      ? user.company.replace(/\?/g, "").trim()
+      : undefined;
 
   const isVendorRole = user.role === "vendor";
 
@@ -575,7 +574,8 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
 
       const isVendor = user.role === "vendor";
       const role = isVendor ? "VENDOR" : "USER";
-      const vendorNameParam = isVendor && cleanVendorCompany ? cleanVendorCompany : undefined;
+      const vendorNameParam =
+        isVendor && cleanVendorCompany ? cleanVendorCompany : undefined;
 
       const url = API.DASHBOARD_VENDOR_EVALUATION(role, vendorNameParam);
       const res = await fetchWithAuth(url, { headers: buildAuthHeaders() });
@@ -679,13 +679,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
 
     if (isVendorRole) {
       const rows: (string | number)[][] = [
-        [
-          "PO",
-          "Item",
-          "OTD Percentage",
-          "OTD Delay",
-          "Response Time",
-        ],
+        ["PO", "Item", "OTD Percentage", "OTD Delay", "Response Time"],
         ...evaluationItems.map((record) => [
           record.poNumber,
           record.item,
@@ -700,14 +694,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
     }
 
     const rows: (string | number)[][] = [
-      [
-        "Vendor",
-        "PO",
-        "Item",
-        "OTD Percentage",
-        "OTD Delay",
-        "Response Time",
-      ],
+      ["Vendor", "PO", "Item", "OTD Percentage", "OTD Delay", "Response Time"],
       ...vendorAggregates.flatMap((vendor) => {
         const vendorItems = evaluationItems.filter(
           (item) => item.vendorName === vendor.vendorName,
@@ -721,7 +708,16 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
               item.otdDelay,
               item.responseTime,
             ])
-          : [[vendor.vendorName, "", "", vendor.otdPercentage, vendor.otdDelay, vendor.responseTime]];
+          : [
+              [
+                vendor.vendorName,
+                "",
+                "",
+                vendor.otdPercentage,
+                vendor.otdDelay,
+                vendor.responseTime,
+              ],
+            ];
       }),
     ];
 
@@ -1096,10 +1092,10 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                 <h3 className="text-sm font-medium text-gray-700">
                   Vendor Performance
                 </h3>
-                <div className="flex items-center gap-1 text-green-600 text-xs">
+                {/*<div className="flex items-center gap-1 text-green-600 text-xs">
                   <TrendingUp className="h-3.5 w-3.5" />
                   2%
-                </div>
+                </div>*/}
               </div>
 
               <div className="flex flex-row gap-3">
@@ -1111,11 +1107,18 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                   }}
                 >
                   <div className="text-[10px] text-gray-500 mb-1">OTD %</div>
-                  <div className="text-xl font-semibold" style={{ color: "#008383" }}>
-                    {vendorPerformance?.OTD_Percentage ?? 0}<span className="text-xs font-normal">%</span>
+                  <div
+                    className="text-xl font-semibold"
+                    style={{ color: "#008383" }}
+                  >
+                    {vendorPerformance?.OTD_Percentage ?? 0}
+                    <span className="text-xs font-normal">%</span>
                   </div>
                   <div className="mt-2">
-                    <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: "rgba(0, 131, 131, 0.1)" }}>
+                    <div
+                      className="w-full h-1.5 rounded-full overflow-hidden"
+                      style={{ backgroundColor: "rgba(0, 131, 131, 0.1)" }}
+                    >
                       <div
                         className="h-full rounded-full transition-all duration-500"
                         style={{
@@ -1134,15 +1137,27 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                     border: "1px solid rgba(237, 131, 45, 0.15)",
                   }}
                 >
-                  <div className="text-[10px] text-gray-500 mb-1">Delay Leadtime</div>
-                  <div className="text-xl font-semibold" style={{ color: "#ED832D" }}>
-                    {vendorPerformance?.Delay_Leadtime ?? 0}<span className="text-xs font-normal"> days</span>
+                  <div className="text-[10px] text-gray-500 mb-1">
+                    Delay Leadtime
+                  </div>
+                  <div
+                    className="text-xl font-semibold"
+                    style={{ color: "#ED832D" }}
+                  >
+                    {vendorPerformance?.Delay_Leadtime ?? 0}
+                    <span className="text-xs font-normal"> days</span>
                   </div>
                   <div className="mt-2">
-                    <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: "rgba(237, 131, 45, 0.1)" }}>
+                    <div
+                      className="w-full h-1.5 rounded-full overflow-hidden"
+                      style={{ backgroundColor: "rgba(237, 131, 45, 0.1)" }}
+                    >
                       <div
                         className="h-full rounded-full transition-all duration-500"
-                        style={{ width: `${Math.min((vendorPerformance?.Delay_Leadtime ?? 0) / 10 * 100, 100)}%`, backgroundColor: "#ED832D" }}
+                        style={{
+                          width: `${Math.min(((vendorPerformance?.Delay_Leadtime ?? 0) / 10) * 100, 100)}%`,
+                          backgroundColor: "#ED832D",
+                        }}
                       />
                     </div>
                   </div>
@@ -1155,12 +1170,21 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                     border: "1px solid rgba(92, 140, 182, 0.15)",
                   }}
                 >
-                  <div className="text-[10px] text-gray-500 mb-1">Response Time</div>
-                  <div className="text-xl font-semibold" style={{ color: "#5C8CB6" }}>
-                    {vendorPerformance?.Response_Time ?? 0}<span className="text-xs font-normal">/100</span>
+                  <div className="text-[10px] text-gray-500 mb-1">
+                    Response Time
+                  </div>
+                  <div
+                    className="text-xl font-semibold"
+                    style={{ color: "#5C8CB6" }}
+                  >
+                    {vendorPerformance?.Response_Time ?? 0}
+                    <span className="text-xs font-normal">/100</span>
                   </div>
                   <div className="mt-2">
-                    <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: "rgba(92, 140, 182, 0.1)" }}>
+                    <div
+                      className="w-full h-1.5 rounded-full overflow-hidden"
+                      style={{ backgroundColor: "rgba(92, 140, 182, 0.1)" }}
+                    >
                       <div
                         className="h-full rounded-full transition-all duration-500"
                         style={{
@@ -1627,11 +1651,11 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                   </TableRow>
                 ) : isVendorRole ? (
                   paginatedEvaluationItems.map((record, index) => (
-                    <TableRow key={`${record.poNumber}-${record.item}-${index}`}>
+                    <TableRow
+                      key={`${record.poNumber}-${record.item}-${index}`}
+                    >
                       <TableCell className="text-gray-900">
-                        <span className="font-semibold">
-                          {record.poNumber}
-                        </span>
+                        <span className="font-semibold">{record.poNumber}</span>
                       </TableCell>
                       <TableCell className="text-gray-900">
                         {record.item}
