@@ -1206,7 +1206,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
               iconColor: "#014357",
               title: "Total Purchase Orders",
               value: totalPO,
-              subtitle: "+18 from last month",
+              subtitle: "",
               cardClassName: "lg:col-span-1",
             })}
 
@@ -1304,7 +1304,7 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
               iconColor: "#014357",
               title: "Total Purchase Order Items",
               value: totalPO,
-              subtitle: "+18 from last month",
+              subtitle: "",
             })}
 
             {renderMetricCard({

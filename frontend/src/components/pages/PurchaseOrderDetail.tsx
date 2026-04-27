@@ -1615,6 +1615,11 @@ export function PurchaseOrderDetail({
     [rescheduleRequests],
   );
 
+  const hasRejectedReEta = useMemo(
+    () => rescheduleRequests.some((request) => request.status === "Rejected"),
+    [rescheduleRequests],
+  );
+
   const shouldShowExpiredDeliveryAlert = useMemo(() => {
     return isRequiredDeliveryDatePassed && !hasPendingReEtaApproval;
   }, [isRequiredDeliveryDatePassed, hasPendingReEtaApproval]);
@@ -1745,11 +1750,13 @@ export function PurchaseOrderDetail({
   const handleOpenRescheduleDialog = useCallback(async () => {
     setRescheduleDialogOpen(true);
     setNewEtd(etd ?? todayStart());
-    setNewLeadtimeDays(etaDays || "");
+    setNewLeadtimeDays(
+      status === "Work in Progress" ? leadtimeDelivery || "" : etaDays || "",
+    );
     setRescheduleReason("");
     setSelectedDelayReasonId(null);
     await fetchDelayReasons();
-  }, [etd, etaDays, fetchDelayReasons]);
+  }, [etd, etaDays, leadtimeDelivery, status, fetchDelayReasons]);
 
   const handleCloseRescheduleDialog = useCallback(() => {
     setRescheduleDialogOpen(false);
@@ -2331,9 +2338,14 @@ export function PurchaseOrderDetail({
 
           <Badge
             className="px-4 py-2 text-base"
-            style={{ backgroundColor: getStatusColor(status), color: "white" }}
+            style={{
+              backgroundColor: hasRejectedReEta
+                ? "#DC2626"
+                : getStatusColor(status),
+              color: "white",
+            }}
           >
-            {status}
+            {hasRejectedReEta ? "Cancel" : status}
           </Badge>
         </div>
       </div>
@@ -2380,6 +2392,7 @@ export function PurchaseOrderDetail({
         {user.role === "vendor" && (
           <>
             {status === "PO Submitted" &&
+              !hasRejectedReEta &&
               (() => {
                 const etaExceededDays =
                   calculatedEtaDate && deliveryDate

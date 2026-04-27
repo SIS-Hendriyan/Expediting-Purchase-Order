@@ -239,7 +239,7 @@ namespace EXPOAPI.Services
        List<Dictionary<string, object?>> StatusFlow,
        List<Dictionary<string, object?>> ReEtaRequests,
        Dictionary<string, object?>? PoDetail
-   )> GetPurchaseOrderDetailAsync(string poid, CancellationToken ct = default)
+   )> GetPurchaseOrderDetailAsync(string poid, string? type = null, CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(poid))
             {
@@ -253,25 +253,61 @@ namespace EXPOAPI.Services
 
             using var cn = _db.CreateMain();
 
+            var dp = new DynamicParameters();
+            dp.Add("POID", poid.Trim());
+
+            // @Type controls conditional resultsets in the SP:
+            // - null  => returns StatusFlow, ReEtaRequests, PoDetail
+            // - "Detail" => returns only PoDetail
+            if (!string.IsNullOrWhiteSpace(type))
+                dp.Add("Type", type.Trim());
+
             try
             {
                 using var grid = await cn.QueryMultipleAsync(new CommandDefinition(
                     SP_PO_DETAIL,
-                    new { POID = poid.Trim() },
+                    dp,
                     commandType: CommandType.StoredProcedure,
                     cancellationToken: ct
                 ));
 
-                var statusFlow = (await grid.ReadAsync<dynamic>())
-                    .Select(ToDict)
-                    .ToList();
+                var statusFlow = new List<Dictionary<string, object?>>();
+                var reEtaRequests = new List<Dictionary<string, object?>>();
+                Dictionary<string, object?>? poDetail = null;
 
-                var reEtaRequests = (await grid.ReadAsync<dynamic>())
-                    .Select(ToDict)
-                    .ToList();
+                // When @Type = 'Detail', the SP skips the first two resultsets
+                // and returns only PoDetail. We read greedily and infer by content.
+                while (!grid.IsConsumed)
+                {
+                    var rows = (await grid.ReadAsync<dynamic>()).ToList();
+                    if (rows.Count == 0) continue;
 
-                var poDetailRaw = await grid.ReadFirstOrDefaultAsync<dynamic>();
-                var poDetail = poDetailRaw is null ? null : ToDict(poDetailRaw);
+                    var first = ToDict(rows[0]);
+
+                    // PoDetail is recognized by POID column
+                    if (HasKey(first, "POID") || HasKey(first, "poid"))
+                    {
+                        poDetail = first;
+                    }
+                    // StatusFlow is recognized by Status / StepNo columns
+                    else if (HasKey(first, "Status") || HasKey(first, "StepNo"))
+                    {
+                        statusFlow = rows.Select(ToDict).ToList();
+                    }
+                    // ReEtaRequests is recognized by ReETARequestID / POREETANUMBER columns
+                    else if (HasKey(first, "ReETARequestID") || HasKey(first, "POREETANUMBER"))
+                    {
+                        reEtaRequests = rows.Select(ToDict).ToList();
+                    }
+                    else
+                    {
+                        // Fallback: if we already have statusFlow, assume this is reEtaRequests
+                        if (statusFlow.Count > 0 && reEtaRequests.Count == 0)
+                            reEtaRequests = rows.Select(ToDict).ToList();
+                        else
+                            statusFlow = rows.Select(ToDict).ToList();
+                    }
+                }
 
                 return (statusFlow, reEtaRequests, poDetail);
             }

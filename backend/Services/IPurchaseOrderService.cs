@@ -76,7 +76,7 @@ namespace EXPOAPI.Services
         Task<Dictionary<string, object?>> GetPoDashboardMasterfiltersAsync(CancellationToken ct = default);
 
         Task<(List<Dictionary<string, object?>> StatusFlow, List<Dictionary<string, object?>> ReEtaRequests, Dictionary<string, object?>? PoDetail)>
-            GetPurchaseOrderDetailAsync(string poid, CancellationToken ct = default);
+            GetPurchaseOrderDetailAsync(string poid, string? type = null, CancellationToken ct = default);
 
         Task<Dictionary<string, object?>> GetPurchaseOrdersNeedingUpdateAsync(
             string? vendorName = null,

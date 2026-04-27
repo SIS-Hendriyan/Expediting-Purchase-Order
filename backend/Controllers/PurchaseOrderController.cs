@@ -197,14 +197,17 @@ namespace EXPOAPI.Controllers
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> Detail([FromRoute] string poid, CancellationToken ct)
+        public async Task<IActionResult> Detail(
+            [FromRoute] string poid,
+            [FromQuery] string? type,
+            CancellationToken ct)
         {
             if (string.IsNullOrWhiteSpace(poid))
                 return BadRequestResponse("POID is required");
 
             try
             {
-                var (statusFlow, reEtaRequests, poDetail) = await _po.GetPurchaseOrderDetailAsync(poid, ct);
+                var (statusFlow, reEtaRequests, poDetail) = await _po.GetPurchaseOrderDetailAsync(poid, type, ct);
 
                 return OkResponse("purchase order detail retrieved", new
                 {
