@@ -3722,35 +3722,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   )}
                 />
 
-                <div>
-                  <Label>
-                    Category Reason <span className="text-red-500">*</span>
-                  </Label>
-                  <Select
-                    value={selectedDelayReasonId ?? ""}
-                    onValueChange={(value) =>
-                      setSelectedDelayReasonId(value || null)
-                    }
-                  >
-                    <SelectTrigger className="mt-1">
-                      <SelectValue placeholder="Select category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {delayReasons.length > 0 ? (
-                        delayReasons.map((reason) => (
-                          <SelectItem key={reason.id} value={String(reason.id)}>
-                            {reason.title}
-                          </SelectItem>
-                        ))
-                      ) : (
-                        <SelectItem value="" disabled>
-                          No categories available
-                        </SelectItem>
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div>
                     <Label>
@@ -3807,6 +3778,35 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       ? format(newEtaDateForReschedule, "MMM dd, yyyy")
                       : "Not set"}
                   </p>
+                </div>
+
+                <div>
+                  <Label>
+                    Category Reason <span className="text-red-500">*</span>
+                  </Label>
+                  <Select
+                    value={selectedDelayReasonId ?? ""}
+                    onValueChange={(value) =>
+                      setSelectedDelayReasonId(value || null)
+                    }
+                  >
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {delayReasons.length > 0 ? (
+                        delayReasons.map((reason) => (
+                          <SelectItem key={reason.id} value={String(reason.id)}>
+                            {reason.title}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <SelectItem value="" disabled>
+                          No categories available
+                        </SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div>
