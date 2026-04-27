@@ -24,8 +24,10 @@ export const API = {
   MASTERPO: () => `${CONFIG.apiBaseUrl}/api/purchase-order/master`,
   // Re-ETA
   REETA_LIST: () => `${CONFIG.apiBaseUrl}/api/re-eta/requests`,
-  REETA_DETAIL: (id: number | string) =>
-    `${CONFIG.apiBaseUrl}/api/re-eta/requests/${id}`,
+  REETA_DETAIL: (id: number | string, item?: string | null) =>
+    item
+      ? `${CONFIG.apiBaseUrl}/api/re-eta/requests/${id}?purchaseDocument=${encodeURIComponent(String(id))}&item=${encodeURIComponent(item)}`
+      : `${CONFIG.apiBaseUrl}/api/re-eta/requests/${id}`,
   REETA_CREATE: () => `${CONFIG.apiBaseUrl}/api/re-eta/requests`,
   REETA_APPROVE: (id: number | string) =>
     `${CONFIG.apiBaseUrl}/api/re-eta/requests/${id}/approve`,

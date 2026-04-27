@@ -21,6 +21,7 @@ namespace EXPOAPI.Services
         Task<Dictionary<string, object?>> GetDetailAsync(
             string? id = null,
             string? purchaseDocument = null,
+            string? item = null,
             CancellationToken ct = default);
 
         Task<Dictionary<string, object?>> CreateAsync(

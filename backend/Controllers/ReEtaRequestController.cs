@@ -64,6 +64,7 @@ namespace EXPOAPI.Controllers
         public async Task<IActionResult> GetDetail(
             [FromRoute] string? id = null,
             [FromQuery] string? purchaseDocument = null,
+            [FromQuery] string? item = null,
             CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(id) && string.IsNullOrWhiteSpace(purchaseDocument))
@@ -71,7 +72,7 @@ namespace EXPOAPI.Controllers
 
             try
             {
-                var data = await _reEta.GetDetailAsync(id, purchaseDocument, ct);
+                var data = await _reEta.GetDetailAsync(id, purchaseDocument, item, ct);
                 return Ok(ApiResponse.Ok("re-eta request detail retrieved", data, 200));
             }
             catch (Exception ex)
