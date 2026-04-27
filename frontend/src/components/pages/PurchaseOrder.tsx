@@ -3161,6 +3161,20 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                             </label>
                           </div>
 
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id="col-item"
+                              checked={visibleColumns.item}
+                              disabled
+                            />
+                            <label
+                              htmlFor="col-item"
+                              className="text-sm cursor-not-allowed text-gray-700"
+                            >
+                              Item
+                            </label>
+                          </div>
+
                           <Separator className="my-3" />
 
                           {(Object.keys(visibleColumns) as ColumnKey[])
