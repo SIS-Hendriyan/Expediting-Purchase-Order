@@ -1942,6 +1942,39 @@ export function PurchaseOrderDetail({
     fetchDetail,
   ]);
 
+  const handleAwbFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0] ?? null;
+
+      if (!file) {
+        setAwbFile(null);
+        return;
+      }
+
+      const allowedTypes = [
+        "application/pdf",
+        "image/png",
+        "image/jpg",
+        "image/jpeg",
+      ];
+
+      if (!allowedTypes.includes(file.type)) {
+        toast.error("Only PDF, PNG, JPG, and JPEG files are allowed.");
+        e.target.value = "";
+        return;
+      }
+
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error("File size must be less than 5MB.");
+        e.target.value = "";
+        return;
+      }
+
+      setAwbFile(file);
+    },
+    [],
+  );
+
   const openConfirmationModal = useCallback((action: PendingSubmitAction) => {
     setPendingSubmitAction(action);
     setConfirmationChecked(false);
