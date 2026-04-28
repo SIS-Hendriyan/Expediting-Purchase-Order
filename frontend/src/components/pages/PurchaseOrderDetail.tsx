@@ -2429,14 +2429,16 @@ export function PurchaseOrderDetail({
       <div className="space-y-6">
         <StatusFlowHistory status={status} statusHistory={statusHistory} />
 
-        <StatusRelatedInformation
-          status={status}
-          poDetail={poDetail}
-          latestApprovedReEtaDate={latestApprovedReEtaDate}
-          onDownloadAwbFile={handleDownloadAwbBase64File}
-          currentEtaForReschedule={currentEtaForReschedule}
-          etaDays={etaDays}
-        />
+        {status !== "PO Submitted" && (
+          <StatusRelatedInformation
+            status={status}
+            poDetail={poDetail}
+            latestApprovedReEtaDate={latestApprovedReEtaDate}
+            onDownloadAwbFile={handleDownloadAwbBase64File}
+            currentEtaForReschedule={currentEtaForReschedule}
+            etaDays={etaDays}
+          />
+        )}
 
         {user.role === "vendor" && !hasRejectedReEta && (
           <>

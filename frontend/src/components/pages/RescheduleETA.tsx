@@ -1028,6 +1028,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
 
         const json = await res.json();
         const data = json?.Data ?? json?.data;
+        console.log(data);
         setPoItemDetail(data?.PoDetail ?? data ?? null);
       } catch (e: any) {
         console.error("[RescheduleETA] fetch PO detail failed:", e);
@@ -1941,9 +1942,9 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                     Current ETA
                   </Label>
                   <p className="text-lg" style={{ color: "#014357" }}>
-                    {poItemDetail?.RawCurrentETA
+                    {poItemDetail?.CurrentEta
                       ? (() => {
-                          const etaDate = new Date(poItemDetail.RawCurrentETA);
+                          const etaDate = new Date(poItemDetail.CurrentEta);
                           const days = poItemDetail?.CurrentETADays;
                           if (days && !Number.isNaN(Number(days))) {
                             const calculated = addDaysDateOnly(
