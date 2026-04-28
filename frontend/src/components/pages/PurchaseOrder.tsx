@@ -592,7 +592,7 @@ const vendorColumns: ColumnVis = {
   purchaseRequisition: false,
   itemOfRequisition: true,
   purchasingDocument: true,
-  item: false,
+  item: true,
   documentDate: false,
   deliveryDate: true,
   etaDate: true,
@@ -1900,7 +1900,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       setSubmittingReschedule(true);
 
       await submitReEtaCreate({
-        CurrentEta: currentEtaForReschedule,
+        CurrentEta: format(newEtd, "yyyy-MM-dd"),
         IdPoItem: idPoItem,
         ProposedETADays: proposedEtaDays,
         Reason: rescheduleReason.trim(),

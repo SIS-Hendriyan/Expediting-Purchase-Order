@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Card } from "../ui/card";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -38,6 +44,9 @@ import {
   Loader2,
   Check,
   ChevronsUpDown,
+  Calendar,
+  Info,
+  CalendarDays,
 } from "lucide-react";
 import { toast } from "sonner@2.0.3";
 import { ScrollArea } from "../ui/scroll-area";
@@ -51,6 +60,9 @@ import {
   PaginationEllipsis,
 } from "../ui/pagination";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { Calendar as CalendarComponent } from "../ui/calendar";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
+import { format } from "date-fns";
 import {
   Command,
   CommandEmpty,
@@ -346,10 +358,123 @@ function parseDateOnly(input?: string | null): Date | null {
   return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
 }
 
+function startOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function todayStart(): Date {
+  return startOfDay(new Date());
+}
+
 function addDaysDateOnly(date: Date, days: number): Date {
   const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   d.setDate(d.getDate() + days);
   return d;
+}
+
+function diffDaysDateOnly(later: Date, earlier: Date): number {
+  const laterOnly = startOfDay(later);
+  const earlierOnly = startOfDay(earlier);
+  return Math.ceil(
+    (laterOnly.getTime() - earlierOnly.getTime()) / (1000 * 60 * 60 * 24),
+  );
+}
+
+function getDaysUntilDelivery(value?: string | null): number | null {
+  if (!value) return null;
+  const target = new Date(value);
+  if (Number.isNaN(target.getTime())) return null;
+
+  const startToday = todayStart();
+  const startTarget = new Date(
+    target.getFullYear(),
+    target.getMonth(),
+    target.getDate(),
+  );
+
+  const diffMs = startTarget.getTime() - startToday.getTime();
+  return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+}
+
+function RequiredDeliveryDateCard({
+  deliveryDateValue,
+}: {
+  deliveryDateValue?: string | null;
+}) {
+  const deliveryDate = deliveryDateValue ? new Date(deliveryDateValue) : null;
+  const daysLeft = getDaysUntilDelivery(deliveryDateValue);
+
+  const isOverdue = typeof daysLeft === "number" && daysLeft < 0;
+  const isUrgent =
+    typeof daysLeft === "number" && daysLeft >= 0 && daysLeft <= 7;
+
+  return (
+    <div
+      className="mb-4 flex items-start gap-3 rounded-lg p-4"
+      style={{
+        backgroundColor: "rgba(1, 67, 87, 0.05)",
+        border: "1px solid rgba(1, 67, 87, 0.12)",
+      }}
+    >
+      <div
+        className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+        style={{ backgroundColor: "#014357" }}
+      >
+        <CalendarDays className="h-5 w-5 text-white" />
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex items-center gap-2">
+          <Label className="text-sm" style={{ color: "#014357" }}>
+            Required Delivery Dates
+          </Label>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" className="inline-flex">
+                <Info className="h-3.5 w-3.5 text-gray-400" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="max-w-[220px] text-xs">
+                This is the buyer&apos;s requested delivery date. Please plan
+                your ETD and ETA accordingly.
+              </p>
+            </TooltipContent>
+          </Tooltip>
+        </div>
+
+        <p className="text-lg font-medium" style={{ color: "#014357" }}>
+          {deliveryDate && !Number.isNaN(deliveryDate.getTime())
+            ? format(deliveryDate, "EEEE, MMMM dd, yyyy")
+            : "-"}
+        </p>
+
+        {typeof daysLeft === "number" && (
+          <div className="mt-1 flex items-center gap-1.5">
+            <Clock
+              className="h-3.5 w-3.5"
+              style={{
+                color: isOverdue ? "#DC2626" : isUrgent ? "#ED832D" : "#6AA75D",
+              }}
+            />
+            <span
+              className="text-sm"
+              style={{
+                color: isOverdue ? "#DC2626" : isUrgent ? "#ED832D" : "#6AA75D",
+              }}
+            >
+              {isOverdue
+                ? `${Math.abs(daysLeft)} days overdue`
+                : daysLeft === 0
+                  ? "Delivery due today"
+                  : `${daysLeft} days remaining`}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function formatYMD(date: Date): string {
@@ -413,7 +538,6 @@ function isAwaitingVendorDoc(row: ReEtaRow) {
 }
 
 function getRequestedEtaDate(row?: ReEtaRow | null): string | null {
-  console.log(row?.ResultETA);
   return row?.ResultETA || row?.RequestETADate || null;
 }
 
@@ -657,6 +781,8 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
   const [selectedPO, setSelectedPO] = useState("");
   const [selectedItem, setSelectedItem] = useState("");
   const [newETADays, setNewETADays] = useState("");
+  const [newEtd, setNewEtd] = useState<Date | undefined>(todayStart());
+  const [newLeadtimeDays, setNewLeadtimeDays] = useState("");
   const [rescheduleReason, setRescheduleReason] = useState("");
   const [selectedDelayReasonId, setSelectedDelayReasonId] = useState("");
   const [delayReasons, setDelayReasons] = useState<
@@ -664,7 +790,17 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
   >([]);
   const [loadingDelayReasons, setLoadingDelayReasons] = useState(false);
   const [loadingPoItems, setLoadingPoItems] = useState(false);
-  const [pendingReEtaAlert, setPendingReEtaAlert] = useState<string | null>(null);
+  const [pendingReEtaAlert, setPendingReEtaAlert] = useState<string | null>(
+    null,
+  );
+
+  const [poItemDetail, setPoItemDetail] = useState<Record<string, any> | null>(
+    null,
+  );
+  const [loadingPoDetail, setLoadingPoDetail] = useState(false);
+
+  const [confirmationModalOpen, setConfirmationModalOpen] = useState(false);
+  const [confirmationChecked, setConfirmationChecked] = useState(false);
 
   // =====================
   // Load list
@@ -765,9 +901,13 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
     setSelectedPO("");
     setSelectedItem("");
     setNewETADays("");
+    setNewEtd(todayStart());
+    setNewLeadtimeDays("");
     setRescheduleReason("");
     setSelectedDelayReasonId("");
     setPendingReEtaAlert(null);
+    setPoItemDetail(null);
+    setConfirmationChecked(false);
   };
 
   const fetchDelayReasons = async () => {
@@ -816,10 +956,11 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
       const raw = await apiFetch<any>(url, { method: "GET" });
       const payload = unwrap(raw);
 
-      const status = payload?.["Reschedule Status"] ?? payload?.rescheduleStatus ?? "";
+      const status =
+        payload?.["Reschedule Status"] ?? payload?.rescheduleStatus ?? "";
       if (String(status).toUpperCase() === "PENDING") {
         setPendingReEtaAlert(
-          "Waiting for Re-ETA approval. Please wait until the request is reviewed before proceeding."
+          "Waiting for Re-ETA approval. Please wait until the request is reviewed before proceeding.",
         );
       } else {
         setPendingReEtaAlert(null);
@@ -853,6 +994,51 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
     );
   }, [poItems, selectedPO, selectedItem]);
 
+  const currentEtaDisplay = useMemo(() => {
+    if (!selectedPoItem) return null;
+    return (
+      poItemDetail?.["Delivery date"] ??
+      poItemDetail?.DeliveryDate ??
+      selectedPoItem.ReEtaDate ??
+      selectedPoItem.ETD ??
+      null
+    );
+  }, [selectedPoItem, poItemDetail]);
+
+  useEffect(() => {
+    if (!selectedPoItem) {
+      setPoItemDetail(null);
+      return;
+    }
+
+    const fetchPoDetail = async () => {
+      setLoadingPoDetail(true);
+      try {
+        const res = await fetchWithAuth(
+          API.DETAILPO(selectedPoItem.ID, "detail"),
+          {
+            method: "GET",
+            headers: buildAuthHeaders(),
+          },
+        );
+
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+
+        const json = await res.json();
+        const data = json?.Data ?? json?.data;
+        setPoItemDetail(data?.PoDetail ?? data ?? null);
+      } catch (e: any) {
+        console.error("[RescheduleETA] fetch PO detail failed:", e);
+      } finally {
+        setLoadingPoDetail(false);
+      }
+    };
+
+    void fetchPoDetail();
+  }, [selectedPoItem]);
+
   const calculateETADate = (etd: string, days: number): string => {
     const base = parseDateOnly(etd);
     if (!base) return "-";
@@ -879,9 +1065,17 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
       return toast.error("Please select an Item of Requisition");
     }
 
-    const days = parseInt(newETADays, 10);
-    if (!Number.isFinite(days) || days <= 0) {
-      return toast.error("Please enter a valid new ETA in days");
+    if (!selectedPoItem) {
+      return toast.error("PO item not found");
+    }
+
+    if (!newEtd) {
+      return toast.error("Please select a valid new ETD");
+    }
+
+    const newLeadtime = parseInt(newLeadtimeDays, 10);
+    if (!newLeadtimeDays || Number.isNaN(newLeadtime) || newLeadtime <= 0) {
+      return toast.error("Please enter a valid new lead time");
     }
 
     if (!rescheduleReason.trim()) {
@@ -892,23 +1086,18 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
       return toast.error("Please select a category reason");
     }
 
-    if (!selectedPoItem) {
-      return toast.error("PO item not found");
-    }
+    const proposedEtaDays = newLeadtime;
 
-    const currentDays = safeNumber(selectedPoItem["ETA Days"], 0);
-    if (currentDays > 0 && days <= currentDays) {
-      return toast.error("New ETA days must be greater than current ETA days");
-    }
+    const currentEtaForReschedule = formatYMD(newEtd);
 
     const payload = {
       idPoItem: selectedPoItem.ID,
       poNumber: selectedPoItem["Purchasing Document"],
       poItemNo: selectedPoItem.Item,
       vendorName: selectedPoItem["Name of Supplier"],
-      currentEta: selectedPoItem.ReEtaDate || null,
-      proposedEtaDays: days,
-      reason: rescheduleReason,
+      currentEta: currentEtaForReschedule || null,
+      proposedEtaDays,
+      reason: rescheduleReason.trim(),
       delayReasonId: selectedDelayReasonId
         ? parseInt(selectedDelayReasonId, 10)
         : null,
@@ -927,6 +1116,8 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
       });
 
       toast.success("Reschedule request submitted successfully");
+      setConfirmationModalOpen(false);
+      setConfirmationChecked(false);
       handleCloseCreateDialog();
       setCurrentPage(1);
       await fetchList();
@@ -937,6 +1128,61 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleClickSubmitRequest = () => {
+    if (loading) return;
+
+    if (!selectedPO) {
+      return toast.error("Please select a Purchase Order");
+    }
+
+    if (!selectedItem) {
+      return toast.error("Please select an Item of Requisition");
+    }
+
+    if (!selectedPoItem) {
+      return toast.error("PO item not found");
+    }
+
+    if (!newEtd) {
+      return toast.error("Please select a valid new ETD");
+    }
+
+    const newLeadtime = parseInt(newLeadtimeDays, 10);
+    if (!newLeadtimeDays || Number.isNaN(newLeadtime) || newLeadtime <= 0) {
+      return toast.error("Please enter a valid new lead time");
+    }
+
+    if (!rescheduleReason.trim()) {
+      return toast.error("Please provide a reason for rescheduling");
+    }
+
+    if (!selectedDelayReasonId) {
+      return toast.error("Please select a category reason");
+    }
+
+    if (pendingReEtaAlert) {
+      return toast.error(pendingReEtaAlert);
+    }
+
+    setConfirmationModalOpen(true);
+    setConfirmationChecked(false);
+  };
+
+  const openConfirmationModal = () => {
+    setConfirmationModalOpen(true);
+    setConfirmationChecked(false);
+  };
+
+  const closeConfirmationModal = () => {
+    setConfirmationModalOpen(false);
+    setConfirmationChecked(false);
+  };
+
+  const handleConfirmedSubmit = () => {
+    if (!confirmationChecked) return;
+    void handleSubmitRequest();
   };
 
   // =====================
@@ -1053,16 +1299,15 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
       });
 
       const payload = unwrap(raw);
-
       // Pastikan Current ETA di modal sama persis dengan nilai di kolom tabel
       if (
         payload &&
         typeof payload === "object" &&
         request["Current ETA"] !== undefined
       ) {
-        payload["Current ETA"] = request["Current ETA"];
+        // payload["Current ETA"] = request["Current ETA"];
       }
-
+      console.log("payload re eta detail", payload);
       setDetailsDialog({
         open: true,
         request: payload || request,
@@ -1677,7 +1922,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
 
               <div className="space-y-2">
                 <Label>
-                  Item of Requisition <span className="text-red-500">*</span>
+                  Item <span className="text-red-500">*</span>
                 </Label>
 
                 <SearchableSelect
@@ -1691,93 +1936,95 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
               </div>
 
               {selectedPoItem && (
-                <div className="space-y-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
-                  <div>
-                    <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
-                      Item Description
-                    </p>
-                    <p className="text-sm">
-                      {selectedPoItem["Short Text"] || "-"}
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
-                        ETD
-                      </p>
-                      <p className="text-sm">
-                        {formatDate(selectedPoItem.ETD)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
-                        Current ETA
-                      </p>
-                      <div className="space-y-1">
-                        <p className="text-sm">
-                          {formatDate(selectedPoItem.ReEtaDate)}
-                        </p>
-                        <p
-                          className="inline-block rounded px-2 py-0.5 text-xs"
-                          style={{
-                            backgroundColor: "rgba(1, 67, 87, 0.1)",
-                            color: "#014357",
-                          }}
-                        >
-                          ({safeNumber(selectedPoItem["ETA Days"], 0)} days
-                          after ETD)
-                        </p>
-                      </div>
-                    </div>
-                  </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <Label className="mb-2 block text-sm text-gray-600">
+                    Current ETA
+                  </Label>
+                  <p className="text-lg" style={{ color: "#014357" }}>
+                    {poItemDetail?.RawCurrentETA
+                      ? (() => {
+                          const etaDate = new Date(poItemDetail.RawCurrentETA);
+                          const days = poItemDetail?.CurrentETADays;
+                          if (days && !Number.isNaN(Number(days))) {
+                            const calculated = addDaysDateOnly(
+                              etaDate,
+                              Number(days),
+                            );
+                            return formatDate(formatYMD(calculated));
+                          }
+                          return formatDate(poItemDetail.CurrentEta);
+                        })()
+                      : currentEtaDisplay
+                        ? formatDate(currentEtaDisplay)
+                        : "Not set"}
+                  </p>
                 </div>
               )}
 
-              <div className="space-y-2">
-                <Label>
-                  New ETA (in days after ETD){" "}
-                  <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  type="number"
-                  min="1"
-                  placeholder="Enter number of days"
-                  value={newETADays}
-                  onChange={(e) => setNewETADays(e.target.value)}
-                  disabled={!selectedPoItem || loading}
-                />
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <Label>
+                    New ETD <span className="text-red-500">*</span>
+                  </Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className="mt-1 w-full justify-start text-left"
+                        type="button"
+                        disabled={!selectedPoItem || loading}
+                      >
+                        <Calendar className="mr-2 h-4 w-4" />
+                        {newEtd ? (
+                          format(newEtd, "PPP")
+                        ) : (
+                          <span>Select new ETD</span>
+                        )}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0">
+                      <CalendarComponent
+                        mode="single"
+                        selected={newEtd}
+                        onSelect={setNewEtd}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
 
-                {selectedPoItem &&
-                  newETADays &&
-                  parseInt(newETADays, 10) > 0 && (
-                    <div
-                      className="mt-2 rounded-lg border p-4"
-                      style={{
-                        backgroundColor: "#FFF4E6",
-                        borderColor: "#ED832D",
-                      }}
-                    >
-                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
-                        New ETA Date
-                      </p>
-                      <p className="mb-1 text-lg" style={{ color: "#ED832D" }}>
-                        {calculateNewETADate()
-                          ? formatDate(calculateNewETADate()!)
-                          : "-"}
-                      </p>
-                      <p className="text-sm text-gray-600">
-                        Extension: +
-                        {Math.max(
-                          0,
-                          parseInt(newETADays, 10) -
-                            safeNumber(selectedPoItem["ETA Days"], 0),
-                        )}{" "}
-                        days
-                      </p>
-                    </div>
-                  )}
+                <div>
+                  <Label htmlFor="newLeadtimeDays">
+                    New Lead Time <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="newLeadtimeDays"
+                    type="number"
+                    min={1}
+                    value={newLeadtimeDays}
+                    onChange={(e) => setNewLeadtimeDays(e.target.value)}
+                    placeholder="Enter new lead time"
+                    className="mt-1"
+                    disabled={!selectedPoItem || loading}
+                  />
+                </div>
               </div>
+
+              {selectedPoItem && newEtd && newLeadtimeDays && (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <Label className="mb-2 block text-sm text-gray-600">
+                    New ETA (New ETD + New Lead Time)
+                  </Label>
+                  <p className="text-lg" style={{ color: "#014357" }}>
+                    {(() => {
+                      const days = parseInt(newLeadtimeDays, 10);
+                      if (!Number.isFinite(days) || days <= 0) return "Not set";
+                      const newEtaDate = addDaysDateOnly(newEtd, days);
+                      return `${formatDate(formatYMD(newEtaDate))}`;
+                    })()}
+                  </p>
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label>
@@ -1816,8 +2063,8 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                   <span className="text-red-500">*</span>
                 </Label>
                 <Textarea
-                  placeholder="Provide detailed reason for the ETA reschedule request..."
-                  rows={5}
+                  placeholder="Provide a detailed reason for the reschedule request..."
+                  rows={4}
                   value={rescheduleReason}
                   onChange={(e) => setRescheduleReason(e.target.value)}
                   className="resize-none"
@@ -1856,13 +2103,131 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                 backgroundColor: pendingReEtaAlert ? "#9CA3AF" : "#014357",
               }}
               className="text-white hover:opacity-90"
-              onClick={handleSubmitRequest}
+              onClick={handleClickSubmitRequest}
               disabled={loading || !!pendingReEtaAlert}
             >
               {loading ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : null}
               Submit Request
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirmation Modal */}
+      <Dialog
+        open={confirmationModalOpen}
+        onOpenChange={(open) => !open && closeConfirmationModal()}
+      >
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle style={{ color: "#014357" }}>
+              Pernyataan Syarat dan Ketentuan
+            </DialogTitle>
+            <DialogDescription className="text-sm text-gray-600">
+              Mohon baca seluruh ketentuan di bawah ini sebelum melanjutkan.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div
+            className="flex-1 overflow-y-auto rounded-md border border-gray-200 bg-gray-50 p-4"
+            style={{ maxHeight: "400px" }}
+          >
+            <p className="mb-4 font-medium" style={{ color: "#014357" }}>
+              Pernyataan Syarat dan Ketentuan Terkait Keterlambatan Supply
+            </p>
+            <p className="mb-4 text-sm text-gray-700">
+              Dengan ini kami sampaikan bahwa Vendor wajib memenuhi seluruh
+              komitmen pengadaan barang dan/atau jasa sesuai dengan jadwal,
+              spesifikasi, dan ketentuan yang telah disepakati dalam
+              Kontrak/PO/SOW yang berlaku.
+            </p>
+            <p className="mb-4 text-sm text-gray-700">
+              Apabila Vendor tidak memenuhi waktu supply sebagaimana tercantum
+              dalam kontrak, maka hal tersebut akan dikategorikan sebagai
+              pelanggaran kontraktual dan Procurement berhak untuk menjatuhkan
+              sanksi sesuai dengan ketentuan yang telah disepakati, termasuk
+              namun tidak terbatas pada:
+            </p>
+            <ol className="mb-4 list-inside list-decimal space-y-1 text-sm text-gray-700">
+              <li>
+                Pengenaan denda keterlambatan berdasarkan perhitungan dan
+                persentase yang ditetapkan dalam kontrak;
+              </li>
+              <li>
+                Pemotongan nilai pembayaran atas barang dan/atau jasa yang
+                disuplai;
+              </li>
+              <li>Penerbitan surat peringatan tertulis (SP) kepada Vendor;</li>
+              <li>
+                Pembekuan sementara aktivitas supply hingga kewajiban dipenuhi;
+              </li>
+              <li>
+                Pemutusan kontrak secara sepihak apabila keterlambatan terjadi
+                secara berulang atau berdampak signifikan terhadap operasional
+                perusahaan;
+              </li>
+              <li>
+                Evaluasi kinerja Vendor yang dapat memengaruhi keikutsertaan
+                Vendor pada proses pengadaan di masa mendatang.
+              </li>
+            </ol>
+            <p className="mb-4 text-sm text-gray-700">
+              Procurement berhak untuk menerapkan satu atau lebih sanksi
+              tersebut sesuai dengan tingkat dan dampak pelanggaran, tanpa
+              mengurangi hak-hak lain sebagaimana diatur dalam kontrak dan
+              peraturan yang berlaku.
+            </p>
+            <p className="mb-4 text-sm text-gray-700">
+              Dengan dilanjutkannya proses pekerjaan dan/atau supply, Vendor
+              dianggap telah mengetahui, menyetujui, dan bersedia mematuhi
+              seluruh ketentuan serta sanksi yang tercantum dalam kontrak dan
+              pernyataan ini.
+            </p>
+            <p className="mb-4 font-medium" style={{ color: "#014357" }}>
+              Pernyataan Konfirmasi Vendor
+            </p>
+            <p className="mb-4 text-sm text-gray-700">
+              Sebagai bentuk konfirmasi, mohon Vendor menyatakan persetujuan
+              atas pertanyaan berikut sebelum melanjutkan progres pekerjaan:
+            </p>
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg bg-white p-3 shadow-sm">
+              <input
+                type="checkbox"
+                checked={confirmationChecked}
+                onChange={(e) => setConfirmationChecked(e.target.checked)}
+                className="mt-1 h-4 w-4 rounded border-gray-300"
+              />
+              <span className="text-sm text-gray-700">
+                Saya telah membaca, memahami, dan menyetujui seluruh ketentuan
+                serta sanksi terkait keterlambatan supply sebagaimana tercantum
+                dalam kontrak dan pernyataan ini.
+              </span>
+            </label>
+          </div>
+
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={closeConfirmationModal}>
+              Batal
+            </Button>
+            <Button
+              onClick={handleConfirmedSubmit}
+              disabled={loading || !confirmationChecked}
+              style={{
+                backgroundColor:
+                  confirmationChecked && !loading ? "#014357" : "#94A3B8",
+              }}
+              className="text-white hover:opacity-90"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                "Saya Setuju & Lanjutkan"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1985,10 +2350,8 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                               <div
                                 className="mb-4 flex items-center gap-3 rounded-lg p-3"
                                 style={{
-                                  backgroundColor:
-                                    "rgba(237, 131, 45, 0.06)",
-                                  border:
-                                    "1px solid rgba(237, 131, 45, 0.15)",
+                                  backgroundColor: "rgba(237, 131, 45, 0.06)",
+                                  border: "1px solid rgba(237, 131, 45, 0.15)",
                                 }}
                               >
                                 <AlertTriangle
@@ -2012,7 +2375,8 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                                 CURRENT ETD
                               </p>
                               <p className="text-sm font-medium">
-                                {formatDate(actionDialog.request.CurrentETD) || "-"}
+                                {formatDate(actionDialog.request.CurrentETD) ||
+                                  "-"}
                               </p>
                             </div>
                             <div>
@@ -2051,7 +2415,9 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                                 className="text-sm font-medium"
                                 style={{ color: "#ED832D" }}
                               >
-                                {formatDate(actionDialog.request.CurrentNewETA) || "-"}
+                                {formatDate(
+                                  actionDialog.request.CurrentNewETA,
+                                ) || "-"}
                               </p>
                             </div>
                             <div>
@@ -2068,9 +2434,11 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                               </p>
                             </div>
                             <div>
-                              <p className="text-xs" style={{ color: "#ED832D" }}>
-                                +
-                                {getRequestedEtaDesc(actionDialog.request)}
+                              <p
+                                className="text-xs"
+                                style={{ color: "#ED832D" }}
+                              >
+                                +{getRequestedEtaDesc(actionDialog.request)}
                               </p>
                             </div>
                           </div>
@@ -2493,17 +2861,13 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                           CURRENT ETA
                         </p>
                         <p className="text-sm font-medium">
-                          {formatDate(
-                            detailsDialog.request["Current ETA"],
-                          ) || "-"}
+                          {formatDate(detailsDialog.request["Current ETA"]) ||
+                            "-"}
                         </p>
                       </div>
                       <div>
                         <p className="text-xs text-gray-600">
-                          {safeNumber(
-                            detailsDialog.request["ETA Days"],
-                            0,
-                          )}{" "}
+                          {safeNumber(detailsDialog.request["ETA Days"], 0)}{" "}
                           days after ETD
                         </p>
                       </div>
@@ -2524,7 +2888,8 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                           className="text-sm font-medium"
                           style={{ color: "#ED832D" }}
                         >
-                          {formatDate(detailsDialog.request.CurrentNewETA) || "-"}
+                          {formatDate(detailsDialog.request.CurrentNewETA) ||
+                            "-"}
                         </p>
                       </div>
                       <div>
@@ -2855,380 +3220,391 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
             {vendorResponseDialog.request && (
               <ScrollArea className="max-h-[calc(90vh-200px)] pr-4">
                 <div className="space-y-6">
-                <div>
-                  <div
-                    className="mb-4 flex items-center gap-3 border-b-2 pb-3"
-                    style={{ borderColor: "#014357" }}
-                  >
+                  <div>
                     <div
-                      className="h-1.5 w-1.5 rounded-full"
-                      style={{ backgroundColor: "#014357" }}
-                    />
-                    <h3
-                      className="text-lg tracking-wide"
-                      style={{ color: "#014357" }}
+                      className="mb-4 flex items-center gap-3 border-b-2 pb-3"
+                      style={{ borderColor: "#014357" }}
                     >
-                      Basic Information
-                    </h3>
+                      <div
+                        className="h-1.5 w-1.5 rounded-full"
+                        style={{ backgroundColor: "#014357" }}
+                      />
+                      <h3
+                        className="text-lg tracking-wide"
+                        style={{ color: "#014357" }}
+                      >
+                        Basic Information
+                      </h3>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                          Request No
+                        </p>
+                        <p className="text-sm">
+                          {vendorResponseDialog.request.POREETANUMBER}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                          Vendor
+                        </p>
+                        <p className="text-sm">
+                          {vendorResponseDialog.request["Vendor Name"] || "-"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                          PO
+                        </p>
+                        <p className="text-sm">
+                          {vendorResponseDialog.request["PO Number"] || "-"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                          Item
+                        </p>
+                        <p className="text-sm">
+                          {vendorResponseDialog.request["PO Item No"] || "-"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                          Item Description
+                        </p>
+                        <p className="text-sm">
+                          {vendorResponseDialog.request.ShortText || "-"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
+                          Request Date
+                        </p>
+                        <p className="text-sm">
+                          {formatDate(vendorResponseDialog.request.CREATED_AT)}
+                        </p>
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
-                        Request No
-                      </p>
-                      <p className="text-sm">
-                        {vendorResponseDialog.request.POREETANUMBER}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
-                        Vendor
-                      </p>
-                      <p className="text-sm">
-                        {vendorResponseDialog.request["Vendor Name"] || "-"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
-                        PO
-                      </p>
-                      <p className="text-sm">
-                        {vendorResponseDialog.request["PO Number"] || "-"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
-                        Item
-                      </p>
-                      <p className="text-sm">
-                        {vendorResponseDialog.request["PO Item No"] || "-"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
-                        Item Description
-                      </p>
-                      <p className="text-sm">
-                        {vendorResponseDialog.request.ShortText || "-"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
-                        Request Date
-                      </p>
-                      <p className="text-sm">
-                        {formatDate(vendorResponseDialog.request.CREATED_AT)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <div
-                    className="mb-4 flex items-center gap-3 border-b-2 pb-3"
-                    style={{ borderColor: "#014357" }}
-                  >
+                  <div>
                     <div
-                      className="h-1.5 w-1.5 rounded-full"
-                      style={{ backgroundColor: "#014357" }}
-                    />
-                    <h3
-                      className="text-lg tracking-wide"
-                      style={{ color: "#014357" }}
+                      className="mb-4 flex items-center gap-3 border-b-2 pb-3"
+                      style={{ borderColor: "#014357" }}
                     >
-                      ETA Details
-                    </h3>
-                  </div>
+                      <div
+                        className="h-1.5 w-1.5 rounded-full"
+                        style={{ backgroundColor: "#014357" }}
+                      />
+                      <h3
+                        className="text-lg tracking-wide"
+                        style={{ color: "#014357" }}
+                      >
+                        ETA Details
+                      </h3>
+                    </div>
 
-                  {(() => {
-                    const diff = getEtaDayDifference(
-                      vendorResponseDialog.request,
-                    );
-                    if (diff > 0) {
-                      return (
-                        <div
-                          className="mb-4 flex items-center gap-3 rounded-lg p-3"
-                          style={{
-                            backgroundColor:
-                              "rgba(237, 131, 45, 0.06)",
-                            border:
-                              "1px solid rgba(237, 131, 45, 0.15)",
-                          }}
-                        >
-                          <AlertTriangle
-                            className="h-4 w-4 shrink-0"
-                            style={{ color: "#ED832D" }}
-                          />
-                          <p className="text-sm text-gray-700">
-                            New ETA is {diff} day{diff > 1 ? "s" : ""}{" "}
-                            later than current ETA
-                          </p>
-                        </div>
+                    {(() => {
+                      const diff = getEtaDayDifference(
+                        vendorResponseDialog.request,
                       );
-                    }
-                    return null;
-                  })()}
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
-                      <div>
-                        <p className="mb-1 text-xs uppercase tracking-wide text-gray-500">
-                          CURRENT ETD
-                        </p>
-                        <p className="text-sm font-medium">
-                          {formatDate(vendorResponseDialog.request.CurrentETD) || "-"}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="mb-1 text-xs uppercase tracking-wide text-gray-500">
-                          CURRENT ETA
-                        </p>
-                        <p className="text-sm font-medium">
-                          {formatDate(
-                            vendorResponseDialog.request["Current ETA"],
-                          ) || "-"}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-600">
-                          {safeNumber(
-                            vendorResponseDialog.request["ETA Days"],
-                            vendorResponseDialog.request["Proposed ETA"],
-                          )}{" "}
-                          days after ETD
-                        </p>
-                      </div>
-                    </div>
-
-                    <div
-                      className="rounded-lg border p-4 space-y-3"
-                      style={{
-                        backgroundColor: "#FFF4E6",
-                        borderColor: "#ED832D",
-                      }}
-                    >
-                      <div>
-                        <p className="mb-1 text-xs uppercase tracking-wide text-gray-500">
-                          NEW ETD
-                        </p>
-                        <p
-                          className="text-sm font-medium"
-                          style={{ color: "#ED832D" }}
-                        >
-                          {formatDate(vendorResponseDialog.request.CurrentNewETA) || "-"}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="mb-1 text-xs uppercase tracking-wide text-gray-500">
-                          NEW ETA
-                        </p>
-                        <p
-                          className="text-sm font-medium"
-                          style={{ color: "#ED832D" }}
-                        >
-                          {formatDate(
-                            getRequestedEtaDate(vendorResponseDialog.request),
-                          ) || "-"}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs" style={{ color: "#ED832D" }}>
-                          +{getRequestedEtaDesc(vendorResponseDialog.request)}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <div
-                    className="mb-4 flex items-center gap-3 border-b-2 pb-3"
-                    style={{ borderColor: "#014357" }}
-                  >
-                    <div
-                      className="h-1.5 w-1.5 rounded-full"
-                      style={{ backgroundColor: "#014357" }}
-                    />
-                    <h3
-                      className="text-lg tracking-wide"
-                      style={{ color: "#014357" }}
-                    >
-                      Vendor&apos;s Reason
-                    </h3>
-                  </div>
-
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
-                    {vendorResponseDialog.request.DelayReasonTitle && (
-                      <div className="flex flex-col gap-1">
-                        <p className="text-xs uppercase tracking-wide text-gray-500">
-                          Category
-                        </p>
-                        <div className="flex items-start gap-2">
-                          <span
-                            className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium"
+                      if (diff > 0) {
+                        return (
+                          <div
+                            className="mb-4 flex items-center gap-3 rounded-lg p-3"
                             style={{
-                              backgroundColor: "rgba(1, 67, 87, 0.1)",
-                              color: "#014357",
+                              backgroundColor: "rgba(237, 131, 45, 0.06)",
+                              border: "1px solid rgba(237, 131, 45, 0.15)",
                             }}
                           >
-                            {vendorResponseDialog.request.DelayReasonTitle}
-                          </span>
-                        </div>
-                        {vendorResponseDialog.request.DelayReasonDescription && (
-                          <p className="text-xs text-gray-500 leading-relaxed">
-                            {vendorResponseDialog.request.DelayReasonDescription}
+                            <AlertTriangle
+                              className="h-4 w-4 shrink-0"
+                              style={{ color: "#ED832D" }}
+                            />
+                            <p className="text-sm text-gray-700">
+                              New ETA is {diff} day{diff > 1 ? "s" : ""} later
+                              than current ETA
+                            </p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
+                        <div>
+                          <p className="mb-1 text-xs uppercase tracking-wide text-gray-500">
+                            CURRENT ETD
                           </p>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="flex flex-col gap-1">
-                      <p className="text-xs uppercase tracking-wide text-gray-500">
-                        Remark
-                      </p>
-                      <p className="text-sm leading-relaxed">
-                        {vendorResponseDialog.request["Reschedule Reason"] || "-"}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {vendorResponseDialog.request["Feedback Doc ID"] && (
-                  <div>
-                    <Label className="mb-2 block">
-                      Admin&apos;s Record of Event
-                    </Label>
-                    <div
-                      className="flex items-center justify-between rounded-lg border-2 p-4"
-                      style={{
-                        backgroundColor: "#FFE6EB",
-                        borderColor: "#d4183d",
-                      }}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="rounded p-2"
-                          style={{ backgroundColor: "#d4183d" }}
-                        >
-                          <FileText className="h-6 w-6 text-white" />
+                          <p className="text-sm font-medium">
+                            {formatDate(
+                              vendorResponseDialog.request.CurrentETD,
+                            ) || "-"}
+                          </p>
                         </div>
                         <div>
-                          <p className="text-sm" style={{ color: "#014357" }}>
-                            Doc #{" "}
-                            {vendorResponseDialog.request.FeedbackFileName ||
-                              vendorResponseDialog.request["Feedback Doc ID"]}
+                          <p className="mb-1 text-xs uppercase tracking-wide text-gray-500">
+                            CURRENT ETA
                           </p>
-                          <p className="text-xs text-gray-600">PDF Document</p>
-                        </div>
-                      </div>
-
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          handleDownloadDoc(
-                            vendorResponseDialog.request?.["Feedback Doc ID"],
-                            "record_of_event.pdf",
-                          )
-                        }
-                        style={{ borderColor: "#d4183d", color: "#d4183d" }}
-                        className="hover:bg-red-50"
-                        disabled={loading}
-                      >
-                        <Download className="mr-2 h-4 w-4" />
-                        Download
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                <div>
-                  <Label className="mb-2 block">
-                    Your Supporting Document (PDF){" "}
-                    <span className="text-red-500">*</span>
-                  </Label>
-                  <p className="mb-3 text-xs text-gray-500">
-                    Upload your response document in PDF format (max 100MB)
-                  </p>
-
-                  {!vendorResponseFile ? (
-                    <label
-                      className="flex h-32 w-full cursor-pointer items-center justify-center rounded-lg border-2 border-dashed transition-all hover:border-gray-400 hover:bg-gray-50"
-                      style={{ borderColor: "#FFA500" }}
-                    >
-                      <div className="text-center">
-                        <div
-                          className="mx-auto mb-3 rounded-full p-3"
-                          style={{
-                            backgroundColor: "rgba(255, 165, 0, 0.1)",
-                            width: "fit-content",
-                          }}
-                        >
-                          <Upload
-                            className="h-6 w-6"
-                            style={{ color: "#FFA500" }}
-                          />
-                        </div>
-                        <p
-                          className="mb-1 text-sm"
-                          style={{ color: "#014357" }}
-                        >
-                          Click to upload PDF document
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          Maximum file size: 100MB
-                        </p>
-                      </div>
-
-                      <input
-                        type="file"
-                        accept="application/pdf"
-                        className="hidden"
-                        onChange={handleVendorResponseFileUpload}
-                        disabled={loading}
-                      />
-                    </label>
-                  ) : (
-                    <div
-                      className="flex items-center justify-between rounded-lg border-2 p-4"
-                      style={{
-                        backgroundColor: "rgba(255, 165, 0, 0.1)",
-                        borderColor: "#FFA500",
-                      }}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="rounded p-2"
-                          style={{ backgroundColor: "#FFA500" }}
-                        >
-                          <FileText className="h-6 w-6 text-white" />
+                          <p className="text-sm font-medium">
+                            {formatDate(
+                              vendorResponseDialog.request["Current ETA"],
+                            ) || "-"}
+                          </p>
                         </div>
                         <div>
-                          <p className="text-sm" style={{ color: "#014357" }}>
-                            {vendorResponseFile.name}
-                          </p>
                           <p className="text-xs text-gray-600">
-                            {(vendorResponseFile.size / 1024 / 1024).toFixed(2)}{" "}
-                            MB
+                            {safeNumber(
+                              vendorResponseDialog.request["ETA Days"],
+                              vendorResponseDialog.request["Proposed ETA"],
+                            )}{" "}
+                            days after ETD
                           </p>
                         </div>
                       </div>
 
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setVendorResponseFile(null)}
-                        className="hover:bg-white/50"
-                        disabled={loading}
+                      <div
+                        className="rounded-lg border p-4 space-y-3"
+                        style={{
+                          backgroundColor: "#FFF4E6",
+                          borderColor: "#ED832D",
+                        }}
                       >
-                        <X className="h-4 w-4" style={{ color: "#FFA500" }} />
-                      </Button>
+                        <div>
+                          <p className="mb-1 text-xs uppercase tracking-wide text-gray-500">
+                            NEW ETD
+                          </p>
+                          <p
+                            className="text-sm font-medium"
+                            style={{ color: "#ED832D" }}
+                          >
+                            {formatDate(
+                              vendorResponseDialog.request.CurrentNewETA,
+                            ) || "-"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="mb-1 text-xs uppercase tracking-wide text-gray-500">
+                            NEW ETA
+                          </p>
+                          <p
+                            className="text-sm font-medium"
+                            style={{ color: "#ED832D" }}
+                          >
+                            {formatDate(
+                              getRequestedEtaDate(vendorResponseDialog.request),
+                            ) || "-"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs" style={{ color: "#ED832D" }}>
+                            +{getRequestedEtaDesc(vendorResponseDialog.request)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div
+                      className="mb-4 flex items-center gap-3 border-b-2 pb-3"
+                      style={{ borderColor: "#014357" }}
+                    >
+                      <div
+                        className="h-1.5 w-1.5 rounded-full"
+                        style={{ backgroundColor: "#014357" }}
+                      />
+                      <h3
+                        className="text-lg tracking-wide"
+                        style={{ color: "#014357" }}
+                      >
+                        Vendor&apos;s Reason
+                      </h3>
+                    </div>
+
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
+                      {vendorResponseDialog.request.DelayReasonTitle && (
+                        <div className="flex flex-col gap-1">
+                          <p className="text-xs uppercase tracking-wide text-gray-500">
+                            Category
+                          </p>
+                          <div className="flex items-start gap-2">
+                            <span
+                              className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium"
+                              style={{
+                                backgroundColor: "rgba(1, 67, 87, 0.1)",
+                                color: "#014357",
+                              }}
+                            >
+                              {vendorResponseDialog.request.DelayReasonTitle}
+                            </span>
+                          </div>
+                          {vendorResponseDialog.request
+                            .DelayReasonDescription && (
+                            <p className="text-xs text-gray-500 leading-relaxed">
+                              {
+                                vendorResponseDialog.request
+                                  .DelayReasonDescription
+                              }
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="flex flex-col gap-1">
+                        <p className="text-xs uppercase tracking-wide text-gray-500">
+                          Remark
+                        </p>
+                        <p className="text-sm leading-relaxed">
+                          {vendorResponseDialog.request["Reschedule Reason"] ||
+                            "-"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {vendorResponseDialog.request["Feedback Doc ID"] && (
+                    <div>
+                      <Label className="mb-2 block">
+                        Admin&apos;s Record of Event
+                      </Label>
+                      <div
+                        className="flex items-center justify-between rounded-lg border-2 p-4"
+                        style={{
+                          backgroundColor: "#FFE6EB",
+                          borderColor: "#d4183d",
+                        }}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="rounded p-2"
+                            style={{ backgroundColor: "#d4183d" }}
+                          >
+                            <FileText className="h-6 w-6 text-white" />
+                          </div>
+                          <div>
+                            <p className="text-sm" style={{ color: "#014357" }}>
+                              Doc #{" "}
+                              {vendorResponseDialog.request.FeedbackFileName ||
+                                vendorResponseDialog.request["Feedback Doc ID"]}
+                            </p>
+                            <p className="text-xs text-gray-600">
+                              PDF Document
+                            </p>
+                          </div>
+                        </div>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            handleDownloadDoc(
+                              vendorResponseDialog.request?.["Feedback Doc ID"],
+                              "record_of_event.pdf",
+                            )
+                          }
+                          style={{ borderColor: "#d4183d", color: "#d4183d" }}
+                          className="hover:bg-red-50"
+                          disabled={loading}
+                        >
+                          <Download className="mr-2 h-4 w-4" />
+                          Download
+                        </Button>
+                      </div>
                     </div>
                   )}
+
+                  <div>
+                    <Label className="mb-2 block">
+                      Your Supporting Document (PDF){" "}
+                      <span className="text-red-500">*</span>
+                    </Label>
+                    <p className="mb-3 text-xs text-gray-500">
+                      Upload your response document in PDF format (max 100MB)
+                    </p>
+
+                    {!vendorResponseFile ? (
+                      <label
+                        className="flex h-32 w-full cursor-pointer items-center justify-center rounded-lg border-2 border-dashed transition-all hover:border-gray-400 hover:bg-gray-50"
+                        style={{ borderColor: "#FFA500" }}
+                      >
+                        <div className="text-center">
+                          <div
+                            className="mx-auto mb-3 rounded-full p-3"
+                            style={{
+                              backgroundColor: "rgba(255, 165, 0, 0.1)",
+                              width: "fit-content",
+                            }}
+                          >
+                            <Upload
+                              className="h-6 w-6"
+                              style={{ color: "#FFA500" }}
+                            />
+                          </div>
+                          <p
+                            className="mb-1 text-sm"
+                            style={{ color: "#014357" }}
+                          >
+                            Click to upload PDF document
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            Maximum file size: 100MB
+                          </p>
+                        </div>
+
+                        <input
+                          type="file"
+                          accept="application/pdf"
+                          className="hidden"
+                          onChange={handleVendorResponseFileUpload}
+                          disabled={loading}
+                        />
+                      </label>
+                    ) : (
+                      <div
+                        className="flex items-center justify-between rounded-lg border-2 p-4"
+                        style={{
+                          backgroundColor: "rgba(255, 165, 0, 0.1)",
+                          borderColor: "#FFA500",
+                        }}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="rounded p-2"
+                            style={{ backgroundColor: "#FFA500" }}
+                          >
+                            <FileText className="h-6 w-6 text-white" />
+                          </div>
+                          <div>
+                            <p className="text-sm" style={{ color: "#014357" }}>
+                              {vendorResponseFile.name}
+                            </p>
+                            <p className="text-xs text-gray-600">
+                              {(vendorResponseFile.size / 1024 / 1024).toFixed(
+                                2,
+                              )}{" "}
+                              MB
+                            </p>
+                          </div>
+                        </div>
+
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setVendorResponseFile(null)}
+                          className="hover:bg-white/50"
+                          disabled={loading}
+                        >
+                          <X className="h-4 w-4" style={{ color: "#FFA500" }} />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </ScrollArea>
+              </ScrollArea>
             )}
 
             <DialogFooter>
