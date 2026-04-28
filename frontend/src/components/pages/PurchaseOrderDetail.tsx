@@ -2429,21 +2429,18 @@ export function PurchaseOrderDetail({
       <div className="space-y-6">
         <StatusFlowHistory status={status} statusHistory={statusHistory} />
 
-        {status !== "PO Submitted" && !hasRejectedReEta && (
-          <StatusRelatedInformation
-            status={status}
-            poDetail={poDetail}
-            latestApprovedReEtaDate={latestApprovedReEtaDate}
-            onDownloadAwbFile={handleDownloadAwbBase64File}
-            currentEtaForReschedule={currentEtaForReschedule}
-            etaDays={etaDays}
-          />
-        )}
+        <StatusRelatedInformation
+          status={status}
+          poDetail={poDetail}
+          latestApprovedReEtaDate={latestApprovedReEtaDate}
+          onDownloadAwbFile={handleDownloadAwbBase64File}
+          currentEtaForReschedule={currentEtaForReschedule}
+          etaDays={etaDays}
+        />
 
-        {user.role === "vendor" && (
+        {user.role === "vendor" && !hasRejectedReEta && (
           <>
             {status === "PO Submitted" &&
-              !hasRejectedReEta &&
               (() => {
                 const currentEta = parseServerDate(currentEtaForReschedule);
                 const etaExceededDays =
@@ -2678,7 +2675,6 @@ export function PurchaseOrderDetail({
               })()}
 
             {status === "Work in Progress" &&
-              !hasRejectedReEta &&
               (() => {
                 // const previousEta =
                 //   parseServerDate(poDetail?.CurrentEta ?? poDetail?.ETA) ??

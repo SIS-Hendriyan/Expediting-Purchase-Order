@@ -3178,7 +3178,10 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           <Separator className="my-3" />
 
                           {(Object.keys(visibleColumns) as ColumnKey[])
-                            .filter((k) => !["purchasingDocument"].includes(k))
+                            .filter(
+                              (k) =>
+                                !["purchasingDocument", "item"].includes(k),
+                            ) // 👈 add "item" here
                             .map((k) => (
                               <div
                                 key={k}
