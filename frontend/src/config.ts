@@ -19,8 +19,11 @@ export const API = {
   ACCESSVENDOR: (id: number | string) =>
     `${CONFIG.apiBaseUrl}/api/vendor/${id}/access`, // POST
   IMPORT_PO: () => `${CONFIG.apiBaseUrl}/api/purchase-order/import`,
-  DETAILPO: (poid: number | string) =>
-    `${CONFIG.apiBaseUrl}/api/purchase-order/${poid}/detail`,
+  DETAILPO: (poid: number | string, type?: string) => {
+    const url = new URL(`${CONFIG.apiBaseUrl}/api/purchase-order/${poid}/detail`);
+    if (type) url.searchParams.set("type", type);
+    return url.toString();
+  },
   MASTERPO: () => `${CONFIG.apiBaseUrl}/api/purchase-order/master`,
   // Re-ETA
   REETA_LIST: () => `${CONFIG.apiBaseUrl}/api/re-eta/requests`,
