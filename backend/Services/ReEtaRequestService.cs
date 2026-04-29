@@ -143,7 +143,7 @@ namespace EXPOAPI.Services
             string? evidenceFileName,
             string? evidenceContentType,
             long? evidenceSize,
-            string? evidenceBase64,
+            byte[]? evidenceBytes,
             string createdBy,
             CancellationToken ct = default)
         {
@@ -152,14 +152,14 @@ namespace EXPOAPI.Services
             var dp = new DynamicParameters();
             dp.Add("ID_PO_Item", idPoItem);
             dp.Add("CurrentETA", currentEta?.Date);
-            dp.Add("ProposedETADays", proposedEtaDays); // ✅ match SP
+            dp.Add("ProposedETADays", proposedEtaDays);
             dp.Add("Reason", reason);
             dp.Add("DelayReasonID", delayReasonId);
 
             dp.Add("EvidenceFileName", evidenceFileName);
             dp.Add("EvidenceContentType", evidenceContentType);
             dp.Add("EvidenceSize", evidenceSize);
-            dp.Add("EvidenceBase64", evidenceBase64);
+            dp.Add("EvidenceBase64", evidenceBytes != null ? Convert.ToBase64String(evidenceBytes) : null);
 
             dp.Add("CreatedBy", createdBy);
 
@@ -184,7 +184,7 @@ namespace EXPOAPI.Services
             string? fileName,
             string? contentType,
             long? fileSize,
-            string? base64,
+            byte[]? attachmentBytes,
             string by,
             CancellationToken ct = default)
         {
@@ -196,7 +196,7 @@ namespace EXPOAPI.Services
             dp.Add("FileName", fileName);
             dp.Add("ContentType", contentType);
             dp.Add("FileSize", fileSize);
-            dp.Add("Base64", base64);
+            dp.Add("Base64", attachmentBytes != null ? Convert.ToBase64String(attachmentBytes) : null);
             dp.Add("By", by);
 
             try
@@ -220,7 +220,7 @@ namespace EXPOAPI.Services
             string fileName,
             string? contentType,
             long? fileSize,
-            string base64,
+            byte[] attachmentBytes,
             string by,
             CancellationToken ct = default)
         {
@@ -232,7 +232,7 @@ namespace EXPOAPI.Services
             dp.Add("FileName", fileName);
             dp.Add("ContentType", contentType);
             dp.Add("FileSize", fileSize);
-            dp.Add("Base64", base64);
+            dp.Add("Base64", Convert.ToBase64String(attachmentBytes));
             dp.Add("By", by);
 
             try
@@ -255,7 +255,7 @@ namespace EXPOAPI.Services
             string fileName,
             string? contentType,
             long? fileSize,
-            string base64,
+            byte[] responseBytes,
             string by,
             CancellationToken ct = default)
         {
@@ -266,7 +266,7 @@ namespace EXPOAPI.Services
             dp.Add("FileName", fileName);
             dp.Add("ContentType", contentType);
             dp.Add("FileSize", fileSize);
-            dp.Add("Base64", base64);
+            dp.Add("Base64", Convert.ToBase64String(responseBytes));
             dp.Add("By", by);
 
             try

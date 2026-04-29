@@ -12,6 +12,8 @@ import {
   FileText,
   Info,
   Package,
+  Upload,
+  X,
   PackageCheck,
   Truck,
 } from "lucide-react";
@@ -354,6 +356,20 @@ const isDateBeforeToday = (value?: string | null): boolean => {
   if (!date) return false;
   return startOfDay(date).getTime() < todayStart().getTime();
 };
+
+function isPdfOrImageFile(file: File): boolean {
+  return (
+    file.type === "application/pdf" ||
+    file.type === "image/png" ||
+    file.type === "image/jpeg" ||
+    file.type === "image/jpg" ||
+    file.type === "image/webp"
+  );
+}
+
+function isValidFileSize(file: File, maxMb = 100): boolean {
+  return file.size <= maxMb * 1024 * 1024;
+}
 
 const mapFlowStatus = (backendStatus?: string | null): FlowStatus | null => {
   const s = trim(backendStatus);
@@ -1257,7 +1273,8 @@ function StatusRelatedInformation({
       return;
     }
 
-    const mime = trim(poDetail?.AWBDocContentType) || "application/octet-stream";
+    const mime =
+      trim(poDetail?.AWBDocContentType) || "application/octet-stream";
     const byteCharacters = atob(base64);
     const byteNumbers = new Array(byteCharacters.length);
     for (let i = 0; i < byteCharacters.length; i++) {
@@ -1592,6 +1609,7 @@ export function PurchaseOrderDetail({
   const [newEtd, setNewEtd] = useState<Date | undefined>(undefined);
   const [newLeadtimeDays, setNewLeadtimeDays] = useState("");
   const [rescheduleReason, setRescheduleReason] = useState("");
+  const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [selectedDelayReasonId, setSelectedDelayReasonId] = useState<
     string | null
   >(null);
@@ -2001,6 +2019,7 @@ export function PurchaseOrderDetail({
     setNewEtd(undefined);
     setNewLeadtimeDays("");
     setRescheduleReason("");
+    setEvidenceFile(null);
     setSelectedDelayReasonId(null);
   }, []);
 
@@ -2138,6 +2157,25 @@ export function PurchaseOrderDetail({
     [],
   );
 
+  const handleEvidenceFileUpload = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      if (!isPdfOrImageFile(file)) {
+        return toast.error("Only PDF or Image files are allowed");
+      }
+
+      if (!isValidFileSize(file, 1)) {
+        return toast.error("File size must not exceed 1MB");
+      }
+
+      setEvidenceFile(file);
+      toast.success("Evidence file uploaded successfully");
+    },
+    [],
+  );
+
   const openConfirmationModal = useCallback((action: PendingSubmitAction) => {
     setPendingSubmitAction(action);
     setConfirmationChecked(false);
@@ -2165,9 +2203,7 @@ export function PurchaseOrderDetail({
         } catch {
           body = undefined;
         }
-        throw new Error(
-          body?.message || body?.Message || `HTTP ${res.status}`,
-        );
+        throw new Error(body?.message || body?.Message || `HTTP ${res.status}`);
       }
 
       let data: any;
@@ -2332,15 +2368,51 @@ export function PurchaseOrderDetail({
 
       setSubmittingReschedule(true);
 
-      await submitReEtaCreate({
-        CurrentEta: format(newEtd, "yyyy-MM-dd"),
-        IdPoItem: idPoItem,
-        ProposedETADays: proposedEtaDays,
-        Reason: rescheduleReason.trim(),
-        DelayReasonId: selectedDelayReasonId
-          ? Number(selectedDelayReasonId)
-          : null,
+      const formData = new FormData();
+      formData.append("IdPoItem", String(idPoItem));
+      formData.append(
+        "PoNumber",
+        String(trim(poDetail?.["Purchasing Document"]) ?? ""),
+      );
+      formData.append("PoItemNo", String(trim(poDetail?.Item) ?? ""));
+      formData.append("VendorName", String(trim(poDetail?.VendorName) ?? ""));
+      formData.append("CurrentEta", format(newEtd, "yyyy-MM-dd"));
+      formData.append("ProposedEtaDays", String(proposedEtaDays));
+      formData.append("Reason", rescheduleReason.trim());
+      if (selectedDelayReasonId) {
+        formData.append("DelayReasonId", selectedDelayReasonId);
+      }
+      if (evidenceFile) {
+        formData.append("EvidenceFile", evidenceFile);
+      }
+
+      const token = getAuthToken();
+      const res = await fetchWithAuth(API.REETA_CREATE(), {
+        method: "POST",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: formData,
       });
+
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try {
+          const text = await res.text();
+          const parsed = (() => {
+            try {
+              return JSON.parse(text);
+            } catch {
+              return null;
+            }
+          })();
+          msg =
+            parsed?.message || parsed?.Message || parsed?.error || text || msg;
+        } catch {
+          // ignore
+        }
+        throw new Error(msg);
+      }
 
       toast.success("Reschedule request submitted successfully.");
       handleCloseRescheduleDialog();
@@ -2369,7 +2441,8 @@ export function PurchaseOrderDetail({
     newEtaDateForReschedule,
     rescheduleReason,
     selectedDelayReasonId,
-    submitReEtaCreate,
+    evidenceFile,
+    poDetail,
     handleCloseRescheduleDialog,
     fetchDetail,
   ]);
@@ -3528,6 +3601,78 @@ export function PurchaseOrderDetail({
                 className="mt-1"
                 rows={4}
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Re-Eta Request Evidence (Upload & Review)</Label>
+              {!evidenceFile ? (
+                <label
+                  className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-6 transition-colors hover:bg-gray-50"
+                  style={{ borderColor: "#9CA3AF" }}
+                >
+                  <div
+                    className="flex mt-4 h-10 w-15 items-center justify-center rounded-full"
+                    style={{ backgroundColor: "rgba(156, 163, 175, 0.15)" }}
+                  >
+                    <Upload className="h-5 w-10" style={{ color: "#6B7280" }} />
+                  </div>
+                  <p className="text-sm" style={{ color: "#014357" }}>
+                    Click to upload PDF / Image Document
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    Maximum file size: 1MB
+                  </p>
+                  <input
+                    type="file"
+                    accept=".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp"
+                    onChange={handleEvidenceFileUpload}
+                    disabled={submittingReschedule}
+                    className="hidden"
+                  />
+                </label>
+              ) : (
+                <div className="flex w-full items-center gap-3 rounded-lg border border-gray-200 px-3 py-2">
+                  <FileText
+                    className="h-4 w-4 flex-shrink-0"
+                    style={{ color: "#014357" }}
+                  />
+                  <div className="flex-1 text-left">
+                    <p className="text-xs text-gray-500">Evidence File</p>
+                    <p className="mb-1 text-sm">{evidenceFile.name}</p>
+                    <p className="text-xs text-gray-400">
+                      {(evidenceFile.size / 1024).toFixed(1)} KB
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2 text-xs"
+                      onClick={() => {
+                        const blobUrl = URL.createObjectURL(evidenceFile);
+                        window.open(blobUrl, "_blank", "noopener,noreferrer");
+                        setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+                      }}
+                      disabled={submittingReschedule}
+                    >
+                      <Eye className="mr-1 h-3 w-3" />
+                      Review
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2 text-xs text-red-600 hover:text-red-700"
+                      onClick={() => setEvidenceFile(null)}
+                      disabled={submittingReschedule}
+                    >
+                      <X className="mr-1 h-3 w-3" />
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
