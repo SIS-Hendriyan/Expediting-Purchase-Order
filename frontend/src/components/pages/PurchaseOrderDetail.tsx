@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Clock,
   Download,
+  Eye,
   FileText,
   Info,
   Package,
@@ -106,6 +107,9 @@ type NormalizedReEta = {
   rejectionFile?: ReEtaFile | null;
   confirmationFile?: ReEtaFile | null;
   waitingFile?: ReEtaFile | null;
+  feedbackDocFile?: ReEtaFile | null;
+  evidenceDocFile?: ReEtaFile | null;
+  vendorRespDocFile?: ReEtaFile | null;
 };
 
 type PoDetail = {
@@ -153,6 +157,12 @@ type PoDetail = {
   AWBFileName?: string | null;
   AWBContentType?: string | null;
   AWBBase64Data?: string | null;
+
+  AWBDocFileName?: string | null;
+  AWBDocContentType?: string | null;
+  AWBDocBase64?: string | null;
+  AWBDocFileSize?: string | number | null;
+
   FinalActualDeliveryDate?: string | null;
 };
 
@@ -196,6 +206,13 @@ type FileActionCardProps = {
   file: ReEtaFile;
   label: string;
   iconColor?: string;
+  onDownload: (file: ReEtaFile) => void;
+};
+
+type ReEtaDocFileCardProps = {
+  file: ReEtaFile;
+  label: string;
+  onView: (file: ReEtaFile) => void;
   onDownload: (file: ReEtaFile) => void;
 };
 
@@ -616,6 +633,34 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
       r?.FeedbackSize,
       "Waiting File",
     ) || (status !== "Approved" && status !== "Rejected" ? feedbackFile : null);
+
+  const feedbackDocFile =
+    pickBase64File(
+      r?.FeedbackDocFileName,
+      r?.FeedbackDocBase64,
+      r?.FeedbackDocContentType,
+      r?.FeedbackDocFileSize,
+      "Feedback Document",
+    ) || null;
+
+  const evidenceDocFile =
+    pickBase64File(
+      r?.EvidenceDocFileName,
+      r?.EvidenceDocBase64,
+      r?.EvidenceDocContentType,
+      r?.EvidenceDocFileSize,
+      "Evidence Document",
+    ) || null;
+
+  const vendorRespDocFile =
+    pickBase64File(
+      r?.VendorRespDocFileName,
+      r?.VendorRespDocBase64,
+      r?.VendorRespDocContentType,
+      r?.VendorRespDocFileSize,
+      "Vendor Response Document",
+    ) || null;
+
   return {
     id,
     requestDate,
@@ -633,6 +678,9 @@ const normalizeReEtaRequest = (r: any, idx: number): NormalizedReEta => {
     rejectionFile,
     confirmationFile,
     waitingFile,
+    feedbackDocFile,
+    evidenceDocFile,
+    vendorRespDocFile,
   };
 };
 
@@ -1139,6 +1187,24 @@ function StatusRelatedInformation({
   const awbFileName = trim(poDetail?.AWBFileName) || "AWB Document";
   const hasAwbFile = !!trim(poDetail?.AWBBase64Data);
 
+  const awbDocFileName = trim(poDetail?.AWBDocFileName) || "AWB Document";
+  const hasAwbDocFile = !!trim(poDetail?.AWBDocBase64);
+  const awbDocFile: ReEtaFile | null = hasAwbDocFile
+    ? {
+        name: awbDocFileName,
+        uploadedBy: null,
+        uploadedDate: null,
+        url: null,
+        contentType: trim(poDetail?.AWBDocContentType) || null,
+        base64Data: trim(poDetail?.AWBDocBase64) || null,
+        size:
+          poDetail?.AWBDocFileSize === null ||
+          poDetail?.AWBDocFileSize === undefined
+            ? null
+            : Number(poDetail.AWBDocFileSize),
+      }
+    : null;
+
   const onDeliveryQuantity = toNumberOrZero(
     poDetail?.["Qty Order"] ?? poDetail?.QtyOrder,
   );
@@ -1183,6 +1249,46 @@ function StatusRelatedInformation({
       toast.error("Failed to open file in a new tab.");
     }
   }, [poDetail]);
+
+  const handleViewAwbDocFile = useCallback(() => {
+    const base64 = trim(poDetail?.AWBDocBase64);
+    if (!base64) {
+      toast.error("AWB Document not found.");
+      return;
+    }
+
+    const mime = trim(poDetail?.AWBDocContentType) || "application/octet-stream";
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], { type: mime });
+    const blobUrl = URL.createObjectURL(blob);
+
+    try {
+      window.open(blobUrl, "_blank");
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    } catch {
+      URL.revokeObjectURL(blobUrl);
+      toast.error("Failed to open file in a new tab.");
+    }
+  }, [poDetail]);
+
+  const handleDownloadAwbDocFile = useCallback(() => {
+    const base64 = trim(poDetail?.AWBDocBase64);
+    if (!base64) {
+      toast.error("AWB Document not found.");
+      return;
+    }
+
+    downloadBase64File(
+      base64,
+      awbDocFileName,
+      trim(poDetail?.AWBDocContentType) || "application/octet-stream",
+    );
+  }, [poDetail, awbDocFileName]);
 
   return (
     <Card className="rounded-xl border border-gray-200 p-6 shadow-sm">
@@ -1282,6 +1388,15 @@ function StatusRelatedInformation({
               </Label>
               <p className="text-[18px] text-black">{onDeliveryLeadtimeText}</p>
             </div>
+
+            {status === "On Delivery" && awbDocFile && (
+              <ReEtaDocFileCard
+                file={awbDocFile}
+                label="AWB Document"
+                onView={handleViewAwbDocFile}
+                onDownload={handleDownloadAwbDocFile}
+              />
+            )}
 
             <div>
               <Label className="block text-sm text-gray-500">ETA</Label>
@@ -1391,6 +1506,54 @@ function FileActionCard({
         />
       </div>
     </Button>
+  );
+}
+
+function ReEtaDocFileCard({
+  file,
+  label,
+  onView,
+  onDownload,
+}: ReEtaDocFileCardProps) {
+  return (
+    <div className="flex w-full items-center gap-3 rounded-lg border border-gray-200 px-3 py-2">
+      <FileText
+        className="h-4 w-4 flex-shrink-0"
+        style={{ color: "#014357" }}
+      />
+      <div className="flex-1 text-left">
+        <p className="text-xs text-gray-500">{label}</p>
+        <p className="mb-1 text-sm">{file.name}</p>
+        {file.uploadedBy && (
+          <p className="text-xs text-gray-500">
+            Uploaded by {file.uploadedBy || "-"}
+            {file.uploadedDate ? ` on ${formatDate(file.uploadedDate)}` : ""}
+          </p>
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 px-2 text-xs"
+          onClick={() => onView(file)}
+          type="button"
+        >
+          <Eye className="mr-1 h-3 w-3" />
+          View
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 px-2 text-xs"
+          onClick={() => onDownload(file)}
+          type="button"
+        >
+          <Download className="mr-1 h-3 w-3" />
+          Download
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -2301,6 +2464,29 @@ export function PurchaseOrderDetail({
     toast.error("File not found.");
   }, []);
 
+  const handleViewFile = useCallback((file: ReEtaFile) => {
+    if (file.url) {
+      window.open(file.url, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    if (file.base64Data) {
+      const mime = file.contentType || "application/octet-stream";
+      const byteCharacters = atob(file.base64Data);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: mime });
+      const blobUrl = URL.createObjectURL(blob);
+      window.open(blobUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    toast.error("File not found.");
+  }, []);
+
   const handleDownloadAwbBase64File = useCallback(() => {
     const base64 = trim(poDetail?.AWBBase64Data);
     if (!base64) {
@@ -3125,6 +3311,37 @@ export function PurchaseOrderDetail({
                       </span>
                     </p>
                   </div>
+
+                  {(request.feedbackDocFile ||
+                    request.evidenceDocFile ||
+                    request.vendorRespDocFile) && (
+                    <div className="mb-3 space-y-2 border-t border-gray-200 pt-3">
+                      {request.feedbackDocFile && (
+                        <ReEtaDocFileCard
+                          file={request.feedbackDocFile}
+                          label="Feedback Document"
+                          onView={handleViewFile}
+                          onDownload={handleDownloadFile}
+                        />
+                      )}
+                      {request.evidenceDocFile && (
+                        <ReEtaDocFileCard
+                          file={request.evidenceDocFile}
+                          label="Evidence Document"
+                          onView={handleViewFile}
+                          onDownload={handleDownloadFile}
+                        />
+                      )}
+                      {request.vendorRespDocFile && (
+                        <ReEtaDocFileCard
+                          file={request.vendorRespDocFile}
+                          label="Vendor Response Document"
+                          onView={handleViewFile}
+                          onDownload={handleDownloadFile}
+                        />
+                      )}
+                    </div>
+                  )}
 
                   {request.evidenceFile && (
                     <div className="mb-3 border-t border-gray-200 pt-3">
