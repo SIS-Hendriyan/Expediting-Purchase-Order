@@ -31,15 +31,15 @@ namespace EXPOAPI.Services
             string? vendorCode,
             string? vendorName,
             DateTime? currentEta,
-            int? proposedEtaDays,            // ✅ INT days
+            int? proposedEtaDays,
             string reason,
             int? delayReasonId,
 
-            // evidence doc (base64)
+            // evidence doc (byte[])
             string? evidenceFileName,
             string? evidenceContentType,
             long? evidenceSize,
-            string? evidenceBase64,
+            byte[]? evidenceBytes,
 
             string createdBy,
             CancellationToken ct = default);
@@ -50,7 +50,7 @@ namespace EXPOAPI.Services
             string? fileName,
             string? contentType,
             long? fileSize,
-            string? base64,                  // optional
+            byte[]? attachmentBytes,
             string by,
             CancellationToken ct = default);
 
@@ -60,7 +60,7 @@ namespace EXPOAPI.Services
             string fileName,
             string? contentType,
             long? fileSize,
-            string base64,                   // required
+            byte[] attachmentBytes,
             string by,
             CancellationToken ct = default);
 
@@ -69,7 +69,7 @@ namespace EXPOAPI.Services
             string fileName,
             string? contentType,
             long? fileSize,
-            string base64,                   // required
+            byte[] responseBytes,
             string by,
             CancellationToken ct = default);
 

@@ -136,6 +136,12 @@ type ReEtaRow = {
   // delay reason
   DelayReasonTitle?: string;
   DelayReasonDescription?: string;
+
+  // evidence file
+  EvidenceBase64?: string;
+  EvidenceContentType?: string;
+  EvidenceFileName?: string;
+  EvidenceSize?: number;
 };
 
 type SummaryRow = {
@@ -234,6 +240,16 @@ function safeNumber(value: unknown, fallback = 0): number {
 
 function isPdfFile(file: File): boolean {
   return file.type === "application/pdf";
+}
+
+function isPdfOrImageFile(file: File): boolean {
+  return (
+    file.type === "application/pdf" ||
+    file.type === "image/png" ||
+    file.type === "image/jpeg" ||
+    file.type === "image/jpg" ||
+    file.type === "image/webp"
+  );
 }
 
 function isValidFileSize(file: File, maxMb = 100): boolean {
@@ -784,6 +800,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
   const [newEtd, setNewEtd] = useState<Date | undefined>(todayStart());
   const [newLeadtimeDays, setNewLeadtimeDays] = useState("");
   const [rescheduleReason, setRescheduleReason] = useState("");
+  const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [selectedDelayReasonId, setSelectedDelayReasonId] = useState("");
   const [delayReasons, setDelayReasons] = useState<
     { id: number; title: string; describe: string }[]
@@ -904,6 +921,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
     setNewEtd(todayStart());
     setNewLeadtimeDays("");
     setRescheduleReason("");
+    setEvidenceFile(null);
     setSelectedDelayReasonId("");
     setPendingReEtaAlert(null);
     setPoItemDetail(null);
@@ -1088,33 +1106,61 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
     }
 
     const proposedEtaDays = newLeadtime;
-
     const currentEtaForReschedule = formatYMD(newEtd);
 
-    const payload = {
-      idPoItem: selectedPoItem.ID,
-      poNumber: selectedPoItem["Purchasing Document"],
-      poItemNo: selectedPoItem.Item,
-      vendorName: selectedPoItem["Name of Supplier"],
-      currentEta: currentEtaForReschedule || null,
-      proposedEtaDays,
-      reason: rescheduleReason.trim(),
-      delayReasonId: selectedDelayReasonId
-        ? parseInt(selectedDelayReasonId, 10)
-        : null,
-      evidenceFileName: null,
-      evidenceContentType: null,
-      evidenceSize: null,
-      evidenceBase64: null,
-    };
+    const formData = new FormData();
+    formData.append("IdPoItem", String(selectedPoItem.ID ?? ""));
+    formData.append(
+      "PoNumber",
+      String(selectedPoItem["Purchasing Document"] ?? ""),
+    );
+    formData.append("PoItemNo", String(selectedPoItem.Item ?? ""));
+    formData.append(
+      "VendorName",
+      String(selectedPoItem["Name of Supplier"] ?? ""),
+    );
+    if (currentEtaForReschedule) {
+      formData.append("CurrentEta", currentEtaForReschedule);
+    }
+    formData.append("ProposedEtaDays", String(proposedEtaDays));
+    formData.append("Reason", rescheduleReason.trim());
+    if (selectedDelayReasonId) {
+      formData.append("DelayReasonId", selectedDelayReasonId);
+    }
+    if (evidenceFile) {
+      formData.append("EvidenceFile", evidenceFile);
+    }
 
     try {
       setLoading(true);
 
-      await apiFetch<any>(API.REETA_CREATE(), {
+      const token = getAuthToken();
+      const res = await fetchWithAuth(API.REETA_CREATE(), {
         method: "POST",
-        body: JSON.stringify(payload),
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: formData,
       });
+
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try {
+          const text = await res.text();
+          const parsed = (() => {
+            try {
+              return JSON.parse(text);
+            } catch {
+              return null;
+            }
+          })();
+          msg =
+            parsed?.message || parsed?.Message || parsed?.error || text || msg;
+        } catch {
+          // ignore
+        }
+        throw new Error(msg);
+      }
 
       toast.success("Reschedule request submitted successfully");
       setConfirmationModalOpen(false);
@@ -1226,6 +1272,22 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
 
     setUploadedFile(file);
     toast.success("File uploaded successfully");
+  };
+
+  const handleEvidenceFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!isPdfOrImageFile(file)) {
+      return toast.error("Only PDF or Image files are allowed");
+    }
+
+    if (!isValidFileSize(file, 1)) {
+      return toast.error("File size must not exceed 1MB");
+    }
+
+    setEvidenceFile(file);
+    toast.success("Evidence file uploaded successfully");
   };
 
   const handleSubmitAction = async () => {
@@ -2073,6 +2135,84 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                 />
               </div>
 
+              <div className="space-y-2">
+                <Label>Re-Eta Request Evidence (Upload & Review)</Label>
+                {!evidenceFile ? (
+                  <label
+                    className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-6 transition-colors hover:bg-gray-50"
+                    style={{ borderColor: "#9CA3AF" }}
+                  >
+                    <div
+                      className="flex h-10 w-10 items-center justify-center rounded-full"
+                      style={{ backgroundColor: "rgba(156, 163, 175, 0.15)" }}
+                    >
+                      <Upload
+                        className="h-5 w-5"
+                        style={{ color: "#6B7280" }}
+                      />
+                    </div>
+                    <p className="text-sm" style={{ color: "#014357" }}>
+                      Click to upload PDF / Image Document
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      Maximum file size: 1MB
+                    </p>
+                    <input
+                      type="file"
+                      accept=".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp"
+                      onChange={handleEvidenceFileUpload}
+                      disabled={loading}
+                      className="hidden"
+                    />
+                  </label>
+                ) : (
+                  <div className="flex w-full items-center gap-3 rounded-lg border border-gray-200 px-3 py-2">
+                    <FileText
+                      className="h-4 w-4 flex-shrink-0"
+                      style={{ color: "#014357" }}
+                    />
+                    <div className="flex-1 text-left">
+                      <p className="text-xs text-gray-500">Evidence File</p>
+                      <p className="mb-1 text-sm">{evidenceFile.name}</p>
+                      <p className="text-xs text-gray-400">
+                        {(evidenceFile.size / 1024).toFixed(1)} KB
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-2 text-xs"
+                        onClick={() => {
+                          const blobUrl = URL.createObjectURL(evidenceFile);
+                          window.open(blobUrl, "_blank", "noopener,noreferrer");
+                          setTimeout(
+                            () => URL.revokeObjectURL(blobUrl),
+                            60_000,
+                          );
+                        }}
+                        disabled={loading}
+                      >
+                        <Eye className="mr-1 h-3 w-3" />
+                        Review
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-2 text-xs text-red-600 hover:text-red-700"
+                        onClick={() => setEvidenceFile(null)}
+                        disabled={loading}
+                      >
+                        <X className="mr-1 h-3 w-3" />
+                        Remove
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {pendingReEtaAlert && (
                 <div
                   className="flex items-start gap-3 rounded-lg p-3"
@@ -2592,7 +2732,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                                 className="mb-1 text-sm"
                                 style={{ color: "#014357" }}
                               >
-                                Click to upload PDF document
+                                Click to upload PDF / Image Document
                               </p>
                               <p className="text-xs text-gray-500">
                                 Maximum file size: 100MB
@@ -2966,6 +3106,138 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                       </p>
                     </div>
                   </div>
+
+                  {/* Vendor Re ETA Request Evidence */}
+                  {detailsDialog.request.EvidenceBase64 && (
+                    <div>
+                      <Label className="mb-3 mt-3 block">
+                        Vendor Re ETA Request Evidence
+                      </Label>
+
+                      <div
+                        className="flex items-center justify-between rounded-lg border-2 p-4"
+                        style={{
+                          backgroundColor: "#F9FAFB",
+                          borderColor: "#E5E7EB",
+                        }}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="rounded p-2"
+                            style={{ backgroundColor: "#9CA3AF" }}
+                          >
+                            <FileText className="h-6 w-6 text-white" />
+                          </div>
+
+                          <div>
+                            <p className="text-sm" style={{ color: "#014357" }}>
+                              {detailsDialog.request.EvidenceFileName ||
+                                "Evidence Document"}
+                            </p>
+                            <p className="text-xs text-gray-600">
+                              {detailsDialog.request.EvidenceContentType?.includes(
+                                "pdf",
+                              )
+                                ? "PDF Document"
+                                : "Image Document"}
+                              {detailsDialog.request.EvidenceSize
+                                ? ` • ${(detailsDialog.request.EvidenceSize / 1024).toFixed(1)} KB`
+                                : ""}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              const base64 =
+                                detailsDialog.request?.EvidenceBase64;
+                              if (!base64) return;
+                              const mime =
+                                detailsDialog.request?.EvidenceContentType ||
+                                "application/octet-stream";
+                              const byteCharacters = atob(base64);
+                              const byteNumbers = new Array(
+                                byteCharacters.length,
+                              );
+                              for (let i = 0; i < byteCharacters.length; i++) {
+                                byteNumbers[i] = byteCharacters.charCodeAt(i);
+                              }
+                              const byteArray = new Uint8Array(byteNumbers);
+                              const blob = new Blob([byteArray], {
+                                type: mime,
+                              });
+                              const blobUrl = URL.createObjectURL(blob);
+                              window.open(
+                                blobUrl,
+                                "_blank",
+                                "noopener,noreferrer",
+                              );
+                              setTimeout(
+                                () => URL.revokeObjectURL(blobUrl),
+                                60_000,
+                              );
+                            }}
+                            style={{
+                              borderColor: "#9CA3AF",
+                              color: "#374151",
+                            }}
+                            className="hover:bg-gray-50"
+                            disabled={loading}
+                          >
+                            <Eye className="mr-2 h-4 w-4" />
+                            View
+                          </Button>
+
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              const base64 =
+                                detailsDialog.request?.EvidenceBase64;
+                              if (!base64) return;
+                              const mime =
+                                detailsDialog.request?.EvidenceContentType ||
+                                "application/octet-stream";
+                              const byteCharacters = atob(base64);
+                              const byteNumbers = new Array(
+                                byteCharacters.length,
+                              );
+                              for (let i = 0; i < byteCharacters.length; i++) {
+                                byteNumbers[i] = byteCharacters.charCodeAt(i);
+                              }
+                              const byteArray = new Uint8Array(byteNumbers);
+                              const blob = new Blob([byteArray], {
+                                type: mime,
+                              });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement("a");
+                              a.href = url;
+                              a.download =
+                                detailsDialog.request?.EvidenceFileName ||
+                                "evidence_document";
+                              a.click();
+                              setTimeout(
+                                () => URL.revokeObjectURL(url),
+                                60_000,
+                              );
+                            }}
+                            style={{
+                              borderColor: "#9CA3AF",
+                              color: "#374151",
+                            }}
+                            className="hover:bg-gray-50"
+                            disabled={loading}
+                          >
+                            <Download className="mr-2 h-4 w-4" />
+                            Download
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {detailsDialog.request["Reschedule Status"] !== "PENDING" && (
@@ -3549,7 +3821,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                             className="mb-1 text-sm"
                             style={{ color: "#014357" }}
                           >
-                            Click to upload PDF document
+                            Click to upload PDF / Image Document
                           </p>
                           <p className="text-xs text-gray-500">
                             Maximum file size: 100MB

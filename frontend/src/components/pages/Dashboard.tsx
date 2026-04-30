@@ -1233,10 +1233,9 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                 >
                   <AlertTriangle className="h-6 w-6 text-red-600" />
                 </div>
-                <div className="flex items-center gap-1 text-red-500 text-xs">
+                {/*<div className="flex items-center gap-1 text-red-500 text-xs">
                   <TrendingUp className="h-3.5 w-3.5" />
-                  8%
-                </div>
+                </div>*/}
               </div>
 
               <div className="text-gray-600 text-sm mb-0.5">Overdue Orders</div>

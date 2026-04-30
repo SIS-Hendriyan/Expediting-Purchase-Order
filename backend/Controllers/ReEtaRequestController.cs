@@ -1,4 +1,6 @@
 using System;
+using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using EXPOAPI.Models;
@@ -16,6 +18,24 @@ namespace EXPOAPI.Controllers
     {
         private readonly IReEtaRequestService _reEta;
         private readonly IReEtaRequestLogService _log;
+
+        private static readonly HashSet<string> AllowedContentTypes = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "application/pdf",
+            "image/png",
+            "image/jpeg",
+            "image/jpg"
+        };
+
+        private static readonly HashSet<string> AllowedExtensions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ".pdf",
+            ".png",
+            ".jpg",
+            ".jpeg"
+        };
+
+        private const long MaxFileSize = 1_048_576; // 1 MB
 
         public ReEtaRequestController(IReEtaRequestService reEta, IReEtaRequestLogService log)
         {
@@ -110,48 +130,66 @@ namespace EXPOAPI.Controllers
 
         // =========================================================
         // POST /api/re-eta/requests
-        // vendor create request (JSON base64)
+        // vendor create request (multipart form-data)
         // =========================================================
         [HttpPost("requests")]
+        [Consumes("multipart/form-data")]
+        [RequestSizeLimit(MaxFileSize)]
         [ProducesResponseType(StatusCodes.Status201Created)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> Create([FromBody] ReEtaCreateRequestDto dto, CancellationToken ct = default)
+        public async Task<IActionResult> Create(
+            [FromForm] ReEtaCreateMultipartRequest request,
+            CancellationToken ct = default)
         {
-            if (dto == null)
+            if (request == null)
                 return BadRequest(ApiResponse.Fail("request body cannot be null", 400, null));
 
-            if (string.IsNullOrWhiteSpace(dto.IdPoItem))
+            if (string.IsNullOrWhiteSpace(request.IdPoItem))
                 return BadRequest(ApiResponse.Fail("IdPoItem is required", 400, null));
 
-            if (dto.ProposedEtaDays == null || dto.ProposedEtaDays < 0)
+            if (request.ProposedEtaDays == null || request.ProposedEtaDays < 0)
                 return BadRequest(ApiResponse.Fail("ProposedEtaDays must be >= 0", 400, null));
 
-            if (string.IsNullOrWhiteSpace(dto.Reason))
+            if (string.IsNullOrWhiteSpace(request.Reason))
                 return BadRequest(ApiResponse.Fail("Reason is required", 400, null));
 
-            // optional: if evidenceBase64 present, ensure filename
-            if (!string.IsNullOrWhiteSpace(dto.EvidenceBase64) && string.IsNullOrWhiteSpace(dto.EvidenceFileName))
-                dto.EvidenceFileName = "evidence.pdf";
+            // Validate and read optional evidence file
+            byte[]? evidenceBytes = null;
+            string? evidenceFileName = null;
+            string? evidenceContentType = null;
+            long? evidenceSize = null;
+
+            if (request.EvidenceFile != null && request.EvidenceFile.Length > 0)
+            {
+                var validation = ValidateFile(request.EvidenceFile, required: false);
+                if (validation != null)
+                    return BadRequest(ApiResponse.Fail(validation, 400, null));
+
+                evidenceBytes = await ReadFileBytesAsync(request.EvidenceFile, ct);
+                evidenceFileName = request.EvidenceFile.FileName;
+                evidenceContentType = request.EvidenceFile.ContentType;
+                evidenceSize = request.EvidenceFile.Length;
+            }
 
             try
             {
                 var createdBy = User?.FindFirst("nrp")?.Value ?? "SYSTEM";
 
                 var result = await _reEta.CreateAsync(
-                    dto.IdPoItem,
-                    dto.PoNumber,
-                    dto.PoItemNo,
-                    dto.VendorCode,
-                    dto.VendorName,
-                    dto.CurrentEta,
-                    dto.ProposedEtaDays,
-                    dto.Reason,
-                    dto.DelayReasonId,
-                    dto.EvidenceFileName,
-                    dto.EvidenceContentType,
-                    dto.EvidenceSize,
-                    dto.EvidenceBase64,
+                    request.IdPoItem,
+                    request.PoNumber,
+                    request.PoItemNo,
+                    request.VendorCode,
+                    request.VendorName,
+                    request.CurrentEta,
+                    request.ProposedEtaDays,
+                    request.Reason,
+                    request.DelayReasonId,
+                    evidenceFileName,
+                    evidenceContentType,
+                    evidenceSize,
+                    evidenceBytes,
                     createdBy,
                     ct
                 );
@@ -171,22 +209,42 @@ namespace EXPOAPI.Controllers
         // admin approve (attachment optional)
         // =========================================================
         [HttpPost("requests/{id}/approve")]
+        [Consumes("multipart/form-data")]
+        [RequestSizeLimit(MaxFileSize)]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> Approve([FromRoute] string id, [FromBody] ReEtaDecisionRequestDto dto, CancellationToken ct = default)
+        public async Task<IActionResult> Approve(
+            [FromRoute] string id,
+            [FromForm] ReEtaApproveMultipartRequest request,
+            CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(id))
                 return BadRequest(ApiResponse.Fail("invalid id", 400, null));
 
-            if (dto == null)
+            if (request == null)
                 return BadRequest(ApiResponse.Fail("request body cannot be null", 400, null));
 
-            if (string.IsNullOrWhiteSpace(dto.Feedback))
+            if (string.IsNullOrWhiteSpace(request.Feedback))
                 return BadRequest(ApiResponse.Fail("Feedback is required", 400, null));
 
-            if (!string.IsNullOrWhiteSpace(dto.Base64) && string.IsNullOrWhiteSpace(dto.FileName))
-                dto.FileName = "feedback.pdf";
+            // Validate and read optional attachment file
+            byte[]? attachmentBytes = null;
+            string? fileName = null;
+            string? contentType = null;
+            long? fileSize = null;
+
+            if (request.AttachmentFile != null && request.AttachmentFile.Length > 0)
+            {
+                var validation = ValidateFile(request.AttachmentFile, required: false);
+                if (validation != null)
+                    return BadRequest(ApiResponse.Fail(validation, 400, null));
+
+                attachmentBytes = await ReadFileBytesAsync(request.AttachmentFile, ct);
+                fileName = request.AttachmentFile.FileName;
+                contentType = request.AttachmentFile.ContentType;
+                fileSize = request.AttachmentFile.Length;
+            }
 
             try
             {
@@ -194,11 +252,11 @@ namespace EXPOAPI.Controllers
 
                 var result = await _reEta.ApproveAsync(
                     id,
-                    dto.Feedback,
-                    dto.FileName,
-                    dto.ContentType,
-                    dto.FileSize,
-                    dto.Base64,
+                    request.Feedback,
+                    fileName,
+                    contentType,
+                    fileSize,
+                    attachmentBytes,
                     by,
                     ct
                 );
@@ -217,25 +275,36 @@ namespace EXPOAPI.Controllers
         // admin reject (attachment REQUIRED)
         // =========================================================
         [HttpPost("requests/{id}/reject")]
+        [Consumes("multipart/form-data")]
+        [RequestSizeLimit(MaxFileSize)]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> Reject([FromRoute] string id, [FromBody] ReEtaDecisionRequestDto dto, CancellationToken ct = default)
+        public async Task<IActionResult> Reject(
+            [FromRoute] string id,
+            [FromForm] ReEtaRejectMultipartRequest request,
+            CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(id))
                 return BadRequest(ApiResponse.Fail("invalid id", 400, null));
 
-            if (dto == null)
+            if (request == null)
                 return BadRequest(ApiResponse.Fail("request body cannot be null", 400, null));
 
-            if (string.IsNullOrWhiteSpace(dto.Feedback))
+            if (string.IsNullOrWhiteSpace(request.Feedback))
                 return BadRequest(ApiResponse.Fail("Feedback is required", 400, null));
 
-            if (string.IsNullOrWhiteSpace(dto.Base64))
-                return BadRequest(ApiResponse.Fail("Attachment (Base64) is required for reject", 400, null));
+            if (request.AttachmentFile == null || request.AttachmentFile.Length == 0)
+                return BadRequest(ApiResponse.Fail("Attachment file is required for reject", 400, null));
 
-            if (string.IsNullOrWhiteSpace(dto.FileName))
-                dto.FileName = "record_of_event.pdf";
+            var validation = ValidateFile(request.AttachmentFile, required: true);
+            if (validation != null)
+                return BadRequest(ApiResponse.Fail(validation, 400, null));
+
+            var attachmentBytes = await ReadFileBytesAsync(request.AttachmentFile, ct);
+            var fileName = request.AttachmentFile.FileName;
+            var contentType = request.AttachmentFile.ContentType;
+            var fileSize = request.AttachmentFile.Length;
 
             try
             {
@@ -243,11 +312,11 @@ namespace EXPOAPI.Controllers
 
                 var result = await _reEta.RejectAsync(
                     id,
-                    dto.Feedback,
-                    dto.FileName!,
-                    dto.ContentType,
-                    dto.FileSize,
-                    dto.Base64!,
+                    request.Feedback,
+                    fileName,
+                    contentType,
+                    fileSize,
+                    attachmentBytes,
                     by,
                     ct
                 );
@@ -266,22 +335,33 @@ namespace EXPOAPI.Controllers
         // vendor upload response (attachment required)
         // =========================================================
         [HttpPost("requests/{id}/vendor-response")]
+        [Consumes("multipart/form-data")]
+        [RequestSizeLimit(MaxFileSize)]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> VendorResponse([FromRoute] string id, [FromBody] ReEtaVendorResponseDto dto, CancellationToken ct = default)
+        public async Task<IActionResult> VendorResponse(
+            [FromRoute] string id,
+            [FromForm] ReEtaVendorResponseMultipartRequest request,
+            CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(id))
                 return BadRequest(ApiResponse.Fail("invalid id", 400, null));
 
-            if (dto == null)
+            if (request == null)
                 return BadRequest(ApiResponse.Fail("request body cannot be null", 400, null));
 
-            if (string.IsNullOrWhiteSpace(dto.Base64))
-                return BadRequest(ApiResponse.Fail("Base64 is required", 400, null));
+            if (request.ResponseFile == null || request.ResponseFile.Length == 0)
+                return BadRequest(ApiResponse.Fail("Response file is required", 400, null));
 
-            if (string.IsNullOrWhiteSpace(dto.FileName))
-                dto.FileName = "vendor_response.pdf";
+            var validation = ValidateFile(request.ResponseFile, required: true);
+            if (validation != null)
+                return BadRequest(ApiResponse.Fail(validation, 400, null));
+
+            var responseBytes = await ReadFileBytesAsync(request.ResponseFile, ct);
+            var fileName = request.ResponseFile.FileName;
+            var contentType = request.ResponseFile.ContentType;
+            var fileSize = request.ResponseFile.Length;
 
             try
             {
@@ -289,10 +369,10 @@ namespace EXPOAPI.Controllers
 
                 var result = await _reEta.UploadVendorResponseAsync(
                     id,
-                    dto.FileName,
-                    dto.ContentType,
-                    dto.FileSize,
-                    dto.Base64,
+                    fileName,
+                    contentType,
+                    fileSize,
+                    responseBytes,
                     by,
                     ct
                 );
@@ -328,6 +408,41 @@ namespace EXPOAPI.Controllers
                 return StatusCode(StatusCodes.Status500InternalServerError,
                     ApiResponse.Fail($"failed to fetch document: {ex.Message}", 500, null));
             }
+        }
+
+        // =========================================================
+        // File validation & reading helpers
+        // =========================================================
+
+        private static string? ValidateFile(IFormFile file, bool required)
+        {
+            if (file == null || file.Length == 0)
+            {
+                if (required)
+                    return "File is required.";
+                return null;
+            }
+
+            if (file.Length > MaxFileSize)
+                return $"File size exceeds the maximum allowed size of {MaxFileSize / 1024 / 1024} MB.";
+
+            var contentType = file.ContentType?.Trim() ?? string.Empty;
+            var extension = Path.GetExtension(file.FileName ?? string.Empty);
+
+            if (!AllowedContentTypes.Contains(contentType))
+                return $"Content type '{contentType}' is not allowed. Only PDF and image files (PNG, JPG, JPEG) are permitted.";
+
+            if (!AllowedExtensions.Contains(extension))
+                return $"File extension '{extension}' is not allowed. Only .pdf, .png, .jpg, and .jpeg files are permitted.";
+
+            return null;
+        }
+
+        private static async Task<byte[]> ReadFileBytesAsync(IFormFile file, CancellationToken ct)
+        {
+            using var ms = new MemoryStream();
+            await file.CopyToAsync(ms, ct);
+            return ms.ToArray();
         }
     }
 }
