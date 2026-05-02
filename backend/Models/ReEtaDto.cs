@@ -15,7 +15,7 @@ namespace EXPOAPI.Models
         public string? PoItemNo { get; set; }
         public string? VendorCode { get; set; }
         public string? VendorName { get; set; }
-        public DateTime? CurrentEta { get; set; }
+        public DateTime? NewETD { get; set; }
 
         public int? ProposedEtaDays { get; set; }
         public string Reason { get; set; } = "";

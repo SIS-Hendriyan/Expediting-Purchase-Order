@@ -30,7 +30,7 @@ namespace EXPOAPI.Services
             string? poItemNo,
             string? vendorCode,
             string? vendorName,
-            DateTime? currentEta,
+            DateTime? newETD,
             int? proposedEtaDays,
             string reason,
             int? delayReasonId,

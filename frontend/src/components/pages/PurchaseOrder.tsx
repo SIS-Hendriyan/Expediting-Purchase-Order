@@ -131,6 +131,7 @@ export interface PurchaseOrderItem {
   grCreatedDate: string | null;
   remarks: string | null;
   reEtaDate: string | null;
+  reETACount?: number | null;
   status: string;
   attention?: AttentionRaw;
   isScheduled?: boolean | null;
@@ -187,7 +188,7 @@ type ColumnKey =
   | "changedOn"
   | "grCreatedDate"
   | "remarks"
-  | "reEtaDate"
+  | "reETACount"
   | "attention";
 
 type ColumnVis = Record<ColumnKey, boolean>;
@@ -428,6 +429,12 @@ function unwrapPOPayload(json: AnyObj): {
       x?.proposedETA ??
       x?.ProposedETA ??
       null,
+    reETACount:
+      x?.reETACount ??
+      x?.ReETACount ??
+      x?.re_eta_count ??
+      x?.ReEtaCount ??
+      null,
   })) as PurchaseOrderItem[];
 
   return { summary, pagination, items: normalizedItems };
@@ -625,7 +632,6 @@ const vendorColumns: ColumnVis = {
   changedOn: true,
   grCreatedDate: true,
   remarks: true,
-  reEtaDate: true,
   attention: true,
 };
 
@@ -651,7 +657,7 @@ const internalColumns: ColumnVis = {
   changedOn: false,
   grCreatedDate: false,
   remarks: false,
-  reEtaDate: true,
+  reETACount: true,
   attention: true,
 };
 
@@ -681,7 +687,7 @@ const columnLabel = (k: ColumnKey, role: User["role"]) => {
     changedOn: role === "vendor" ? "Last Updated" : "Changed On",
     grCreatedDate: "GR Created Date",
     remarks: "Remarks",
-    reEtaDate: "Re-ETA Date",
+    reETACount: "Re-ETA Count",
     attention: "Attention",
   };
   return map[k];
@@ -1493,6 +1499,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
             x?.proposedETA ??
             x?.ProposedETA ??
             null,
+          reETACount:
+            x?.reETACount ??
+            x?.ReETACount ??
+            x?.re_eta_count ??
+            x?.ReEtaCount ??
+            null,
         })) as PurchaseOrderItem[];
 
         const metaRaw = (lvl2?.meta ?? lvl2?.Meta ?? null) as AnyObj;
@@ -1814,8 +1826,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       normalizeAttention(order.attention),
     );
     setOrderToUpdate(order);
-    const isDelay = normalizeAttention(order.attention) === 2;
-    setUpdateScheduleStatus(isDelay ? "no" : "");
+    setUpdateScheduleStatus(order.attention === 2 ? "no" : "yes");
     setIsUpdateDialogOpen(true);
   }, []);
 
@@ -1951,7 +1962,8 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         "VendorName",
         String(trim(rescheduleTargetOrder?.["Name of Supplier"]) ?? ""),
       );
-      formData.append("CurrentEta", format(newEtd, "yyyy-MM-dd"));
+
+      formData.append("NewETD", format(newEtd, "yyyy-MM-dd"));
       formData.append("ProposedEtaDays", String(proposedEtaDays));
       formData.append("Reason", rescheduleReason.trim());
       if (selectedDelayReasonId) {
@@ -2086,7 +2098,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         return;
       }
 
-      setSubmittingUpdate(true);
+      setSubmittingUpdate(orderToUpdate.attention === 2 ? false : true);
 
       await submitPoStatusUpdate({
         IDPOItem: idPoItem,
@@ -2111,6 +2123,11 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         searchQuery,
       );
       await fetchMasterFilters();
+      await fetchNeedingUpdate(
+        needingUpdatePage,
+        needingUpdatePageSize,
+        searchQuery,
+      );
     } catch (err: any) {
       if (err?.message !== "Session expired") {
         console.error("[PO] submit delivery update failed", err);
@@ -2127,10 +2144,14 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     fetchCardSummary,
     fetchPurchaseOrders,
     fetchMasterFilters,
+    fetchNeedingUpdate,
     activeTab,
     currentAttentionParam,
     currentPage,
     itemsPerPage,
+    needingUpdatePage,
+    needingUpdatePageSize,
+    searchQuery,
   ]);
 
   const handleConfirmedSubmit = useCallback(() => {
@@ -2504,7 +2525,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         "changedOn",
         "grCreatedDate",
         "remarks",
-        "reEtaDate",
+        "reETACount",
         "attention",
       ];
 
@@ -2631,8 +2652,8 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       mk("remarks", (o) => (
         <span className="max-w-xs truncate block">{o.remarks || "-"}</span>
       )),
-      mk("reEtaDate", (o) => (
-        <span className="text-sm text-gray-600">{o.reEtaDate || "-"}</span>
+      mk("reETACount", (o) => (
+        <span className="text-right block">{o.reETACount ?? "-"}</span>
       )),
       mk("attention", (o) => attentionBadge(o.attention)),
     ];
@@ -3026,6 +3047,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Purchasing Document</TableHead>
+                      <TableHead>Item</TableHead>
                       <TableHead>Short Text</TableHead>
                       <TableHead>ETA Date</TableHead>
                       <TableHead>Days Until ETA</TableHead>
@@ -3053,6 +3075,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                           <TableCell className="font-medium">
                             {o.purchasingDocument}
                           </TableCell>
+                          <TableCell>{o.item}</TableCell>
                           <TableCell>{o.shortText}</TableCell>
                           <TableCell>{effectiveEtaDateStr || "-"}</TableCell>
                           <TableCell>
@@ -3632,7 +3655,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         </div>
 
                         <div className="space-y-4">
-                          <Label>Delivery Confirmation</Label>
+                          <Label>Delivery Confirmation </Label>
 
                           <div className="space-y-3">
                             <label
@@ -3766,13 +3789,14 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                     >
                       Cancel
                     </Button>
-                    <Button
+                      <Button
                       style={{ backgroundColor: "#014357" }}
                       className="text-white hover:opacity-90"
                       onClick={() => openConfirmationModal("update")}
                       disabled={
                         submittingUpdate ||
                         !updateScheduleStatus ||
+                        updateScheduleStatus === "no" ||
                         normalizeAttention(orderToUpdate.attention) === 2 ||
                         orderToUpdate.hasPendingReETA === true
                       }
@@ -3940,53 +3964,35 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                       />
                     </label>
                   ) : (
-                    <div className="flex w-full items-center gap-3 rounded-lg border border-gray-200 px-3 py-2">
-                      <FileText
-                        className="h-4 w-4 flex-shrink-0"
-                        style={{ color: "#014357" }}
-                      />
+                    <div
+                      className="flex w-full items-center gap-3 rounded-lg border px-3 py-2"
+                      style={{
+                        backgroundColor: "#F4F6F4",
+                        borderColor: "#C5D5C5",
+                      }}
+                    >
+                      <div
+                        className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded"
+                        style={{ backgroundColor: "#9CA3AF" }}
+                      >
+                        <FileText className="h-4 w-4 text-white" />
+                      </div>
                       <div className="flex-1 text-left">
-                        <p className="text-xs text-gray-500">Evidence File</p>
-                        <p className="mb-1 text-sm">{evidenceFile.name}</p>
-                        <p className="text-xs text-gray-400">
+                        <p className="text-sm" style={{ color: "#014357" }}>
+                          {evidenceFile.name}
+                        </p>
+                        <p className="text-xs text-gray-500">
                           {(evidenceFile.size / 1024).toFixed(1)} KB
                         </p>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 px-2 text-xs"
-                          onClick={() => {
-                            const blobUrl = URL.createObjectURL(evidenceFile);
-                            window.open(
-                              blobUrl,
-                              "_blank",
-                              "noopener,noreferrer",
-                            );
-                            setTimeout(
-                              () => URL.revokeObjectURL(blobUrl),
-                              60_000,
-                            );
-                          }}
-                          disabled={submittingReschedule}
-                        >
-                          <Eye className="mr-1 h-3 w-3" />
-                          Review
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 px-2 text-xs text-red-600 hover:text-red-700"
-                          onClick={() => setEvidenceFile(null)}
-                          disabled={submittingReschedule}
-                        >
-                          <X className="mr-1 h-3 w-3" />
-                          Remove
-                        </Button>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setEvidenceFile(null)}
+                        disabled={submittingReschedule}
+                        className="flex h-6 w-6 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-600 disabled:opacity-50"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
                     </div>
                   )}
                 </div>
