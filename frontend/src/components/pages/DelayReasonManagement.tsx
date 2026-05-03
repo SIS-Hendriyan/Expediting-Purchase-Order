@@ -579,9 +579,7 @@ export function DelayReasonManagement() {
               <TableRow className="h-10">
                 <TableHead className="px-4 py-3">Title</TableHead>
                 <TableHead className="px-4 py-3">Description</TableHead>
-                <TableHead className="px-4 py-3">Created By</TableHead>
-                <TableHead className="px-4 py-3">Created At</TableHead>
-                <TableHead className="px-4 py-3 text-right">Actions</TableHead>
+                <TableHead className="px-4 py-3 ">Actions</TableHead>
               </TableRow>
             </TableHeader>
 
@@ -617,12 +615,6 @@ export function DelayReasonManagement() {
                     {/* Title */}
                     <TableCell className="px-4 py-2 align-middle font-medium">
                       <div className="flex items-center gap-2">
-                        <Badge
-                          className="text-white text-xs px-2 py-0.5 shrink-0"
-                          style={{ backgroundColor: "#014357" }}
-                        >
-                          #{reason.ID}
-                        </Badge>
                         <span>{reason.TITLE}</span>
                       </div>
                     </TableCell>
@@ -639,16 +631,6 @@ export function DelayReasonManagement() {
                       ) : (
                         <span className="text-gray-400 italic text-xs">—</span>
                       )}
-                    </TableCell>
-
-                    {/* Created By */}
-                    <TableCell className="px-4 py-2 align-middle text-gray-600">
-                      {reason.CREATED_BY || "—"}
-                    </TableCell>
-
-                    {/* Created At */}
-                    <TableCell className="px-4 py-2 align-middle text-gray-600">
-                      {formatDate(reason.CREATED_AT)}
                     </TableCell>
 
                     {/* Actions */}

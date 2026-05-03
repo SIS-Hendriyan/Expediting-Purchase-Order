@@ -131,23 +131,16 @@ const parseErrorResponse = async (res: Response): Promise<string> => {
   }
 };
 
-const DEPARTMENTS = [
-  "Procurement",
-  "Finance",
-  "Operations",
-  "Logistics",
-  "HR",
-  "IT",
-  "Legal",
-];
-const JOBSITES = [
-  "ADMO Mining",
-  "ADMO Hauling",
-  "SERA",
-  "MACO Mining",
-  "MACO Hauling",
-  "JAHO",
-];
+interface EmployeeRow {
+  NRP: string;
+  Department: string;
+}
+
+interface JobsiteOption {
+  ID: number;
+  Code: string;
+  Name: string;
+}
 
 export function InternalUserManagement() {
   // ====== list & filter state ======
@@ -156,6 +149,12 @@ export function InternalUserManagement() {
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [users, setUsers] = useState<InternalUser[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+
+  // ====== department dropdown data ======
+  const [departmentOptions, setDepartmentOptions] = useState<string[]>([]);
+
+  // ====== jobsite dropdown data ======
+  const [jobsiteOptions, setJobsiteOptions] = useState<JobsiteOption[]>([]);
 
   // ====== summary state ======
   const [summary, setSummary] = useState<UserSummary | null>(null);
@@ -181,7 +180,6 @@ export function InternalUserManagement() {
   const [newUserJobsite, setNewUserJobsite] = useState("");
   const [newUserName, setNewUserName] = useState("");
   const [newUserEmail, setNewUserEmail] = useState("");
-  const [newUserPassword, setNewUserPassword] = useState("");
 
   const isVerified = Boolean(verifiedUser);
 
@@ -244,8 +242,45 @@ export function InternalUserManagement() {
     }
   };
 
+  const fetchJobsiteOptions = async () => {
+    try {
+      const res = await fetchWithAuth(API.JOBSITE_LIST(), {
+        headers: buildAuthHeaders(),
+      });
+      if (!res.ok) return;
+      const json = await res.json();
+      const raw = json.Data ?? json.data ?? json;
+      const list: JobsiteOption[] = Array.isArray(raw)
+        ? raw
+        : (raw.Items ?? raw.items ?? []);
+      setJobsiteOptions(list);
+    } catch {
+      // silent – dropdown will remain empty
+    }
+  };
+
+  const fetchDepartmentOptions = async () => {
+    try {
+      const res = await fetchWithAuth(API.EMPLOYEE_LIST(), {
+        headers: buildAuthHeaders(),
+      });
+      if (!res.ok) return;
+      const json = await res.json();
+      const raw = json.Data ?? json.data ?? json;
+      const list: EmployeeRow[] = Array.isArray(raw) ? raw : [];
+      const uniqueDepts = Array.from(
+        new Set(list.map((e) => e.Department).filter(Boolean)),
+      ).sort();
+      setDepartmentOptions(uniqueDepts);
+    } catch {
+      // silent – dropdown will remain empty
+    }
+  };
+
   useEffect(() => {
     void fetchUsers();
+    void fetchJobsiteOptions();
+    void fetchDepartmentOptions();
   }, []);
 
   // =============== helpers ===============
@@ -440,11 +475,6 @@ export function InternalUserManagement() {
       return;
     }
 
-    if (!newUserPassword) {
-      toast.error("Password is required for all roles.");
-      return;
-    }
-
     try {
       const payload = {
         NRP: nrp,
@@ -455,7 +485,7 @@ export function InternalUserManagement() {
         Department: newUserDepartment,
         Jobsite: newUserJobsite,
         IsActive: false,
-        Password: newUserPassword,
+        Password: "",
       };
 
       const res = await fetchWithAuth(API.CREATEUSER(), {
@@ -490,7 +520,6 @@ export function InternalUserManagement() {
     setNewUserJobsite("");
     setNewUserName("");
     setNewUserEmail("");
-    setNewUserPassword("");
   };
 
   const handleAddDialogChange = (open: boolean) => {
@@ -576,7 +605,7 @@ export function InternalUserManagement() {
               <DialogDescription>
                 Masukkan NRP lalu klik Verify. Nama &amp; Email akan terisi
                 otomatis dan terkunci. Setelah verifikasi, pilih Role,
-                Department, Jobsite, lalu isi Password.
+                Department, dan Jobsite.
               </DialogDescription>
             </DialogHeader>
 
@@ -653,7 +682,6 @@ export function InternalUserManagement() {
                   value={newUserRole}
                   onValueChange={(val) => {
                     setNewUserRole(val);
-                    setNewUserPassword("");
                   }}
                   disabled={!isVerified}
                 >
@@ -668,22 +696,7 @@ export function InternalUserManagement() {
                 </Select>
               </div>
 
-              {newUserRole && (
-                <div>
-                  <Label className="mb-2">Password</Label>
-                  <Input
-                    type="password"
-                    value={newUserPassword}
-                    onChange={(e) => setNewUserPassword(e.target.value)}
-                    placeholder="Type password"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Password is required for all roles.
-                  </p>
-                </div>
-              )}
-
-              <div>
+<div>
                 <Label className="mb-2">Department</Label>
                 <Select
                   value={newUserDepartment}
@@ -694,7 +707,7 @@ export function InternalUserManagement() {
                     <SelectValue placeholder="Select department" />
                   </SelectTrigger>
                   <SelectContent>
-                    {DEPARTMENTS.map((d) => (
+                    {departmentOptions.map((d) => (
                       <SelectItem key={d} value={d}>
                         {d}
                       </SelectItem>
@@ -714,9 +727,9 @@ export function InternalUserManagement() {
                     <SelectValue placeholder="Select jobsite" />
                   </SelectTrigger>
                   <SelectContent>
-                    {JOBSITES.map((j) => (
-                      <SelectItem key={j} value={j}>
-                        {j}
+                    {jobsiteOptions.map((j) => (
+                      <SelectItem key={j.ID} value={j.Name}>
+                        {j.Name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -874,7 +887,7 @@ export function InternalUserManagement() {
                   <SelectValue placeholder="Select department" />
                 </SelectTrigger>
                 <SelectContent>
-                  {DEPARTMENTS.map((d) => (
+                  {departmentOptions.map((d) => (
                     <SelectItem key={d} value={d}>
                       {d}
                     </SelectItem>
@@ -890,9 +903,9 @@ export function InternalUserManagement() {
                   <SelectValue placeholder="Select jobsite" />
                 </SelectTrigger>
                 <SelectContent>
-                  {JOBSITES.map((j) => (
-                    <SelectItem key={j} value={j}>
-                      {j}
+                  {jobsiteOptions.map((j) => (
+                    <SelectItem key={j.ID} value={j.Name}>
+                      {j.Name}
                     </SelectItem>
                   ))}
                 </SelectContent>

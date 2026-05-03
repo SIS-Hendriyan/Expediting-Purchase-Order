@@ -16,6 +16,7 @@ namespace EXPOAPI.Models
         public string? VendorCode { get; set; }
         public string? VendorName { get; set; }
         public DateTime? NewETD { get; set; }
+        public DateTime? CurrentETA { get; set; }
 
         public int? ProposedEtaDays { get; set; }
         public string Reason { get; set; } = "";

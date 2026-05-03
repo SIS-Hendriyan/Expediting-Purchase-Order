@@ -9,7 +9,9 @@ import {
 import { VendorManagement } from "./components/pages/VendorManagement";
 import { InternalUserManagement } from "./components/pages/InternalUserManagement";
 import { DelayReasonManagement } from "./components/pages/DelayReasonManagement";
+import { JobsiteManagement } from "./components/pages/JobsiteManagement";
 import { PurchaseOrder } from "./components/pages/PurchaseOrder";
+import { PurchaseOrderDetail } from "./components/pages/PurchaseOrderDetail";
 import { RescheduleETA } from "./components/pages/RescheduleETA";
 import { Dashboard } from "./components/pages/Dashboard";
 import Login, { type User } from "./components/pages/Login";
@@ -56,7 +58,9 @@ type Page =
   | "vendor-management"
   | "internal-user-management"
   | "delay-reason"
+  | "jobsite"
   | "purchase-order"
+  | "purchase-order-detail"
   | "reschedule-eta"
   | "dashboard"
   | "otp";
@@ -80,6 +84,8 @@ export default function App() {
     if (path.startsWith("/internal-user-management"))
       return "internal-user-management";
     if (path.startsWith("/delay-reason")) return "delay-reason";
+    if (path.startsWith("/jobsite")) return "jobsite";
+    if (path.startsWith("/purchase-order-detail")) return "purchase-order-detail";
     if (path.startsWith("/purchase-order")) return "purchase-order";
     if (path.startsWith("/reschedule-eta")) return "reschedule-eta";
     if (path.startsWith("/otp")) return "otp";
@@ -223,6 +229,8 @@ export default function App() {
         return <InternalUserManagement />;
       case "delay-reason":
         return <DelayReasonManagement />;
+      case "jobsite":
+        return <JobsiteManagement />;
       case "purchase-order":
         return (
           <PurchaseOrder
@@ -230,6 +238,8 @@ export default function App() {
             onPageChange={(page) => navigate(`/${page}`)}
           />
         );
+      case "purchase-order-detail":
+        return <PurchaseOrderDetail user={currentUser} />;
       case "reschedule-eta":
         return <RescheduleETA user={currentUser} />;
       case "dashboard":
@@ -339,7 +349,7 @@ export default function App() {
               )}
             </Tooltip>
 
-            {currentUser.role === "admin" && (
+                {currentUser.role !== "vendor" && (
               <div>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -354,12 +364,14 @@ export default function App() {
                       className={`w-full flex items-center ${
                         sidebarCollapsed ? "justify-center" : "justify-between"
                       } gap-3 px-4 py-3 rounded-lg transition-colors ${
-                        currentPage === "delay-reason"
+                        currentPage === "delay-reason" ||
+                        currentPage === "jobsite"
                           ? "text-white"
                           : "text-gray-700 hover:bg-gray-100"
                       }`}
                       style={
-                        currentPage === "delay-reason"
+                        currentPage === "delay-reason" ||
+                        currentPage === "jobsite"
                           ? { backgroundColor: "#014357" }
                           : {}
                       }
@@ -406,6 +418,21 @@ export default function App() {
                       }
                     >
                       Delay Reason
+                    </button>
+                    <button
+                      onClick={() => navigate("/jobsite")}
+                      className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-colors ${
+                        currentPage === "jobsite"
+                          ? "text-white"
+                          : "text-gray-600 hover:bg-gray-100"
+                      }`}
+                      style={
+                        currentPage === "jobsite"
+                          ? { backgroundColor: "#008383" }
+                          : {}
+                      }
+                    >
+                      Jobsite
                     </button>
                   </div>
                 )}

@@ -1015,11 +1015,9 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
   const currentEtaDisplay = useMemo(() => {
     if (!selectedPoItem) return null;
     return (
-      poItemDetail?.["Delivery date"] ??
-      poItemDetail?.DeliveryDate ??
-      selectedPoItem.ReEtaDate ??
-      selectedPoItem.ETD ??
-      null
+      // poItemDetail?.["Delivery date"] ??
+      // poItemDetail?.DeliveryDate ??
+      selectedPoItem.ReEtaDate ?? selectedPoItem.ETD ?? null
     );
   }, [selectedPoItem, poItemDetail]);
 
@@ -1106,7 +1104,8 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
     }
 
     const proposedEtaDays = newLeadtime;
-    const currentEtaForReschedule = formatYMD(newEtd);
+    const newEtdFormatted = formatYMD(newEtd);
+    const currentEtaDate = parseDateOnly(currentEtaDisplay);
 
     const formData = new FormData();
     formData.append("IdPoItem", String(selectedPoItem.ID ?? ""));
@@ -1119,8 +1118,11 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
       "VendorName",
       String(selectedPoItem["Name of Supplier"] ?? ""),
     );
-    if (currentEtaForReschedule) {
-      formData.append("NewETD", currentEtaForReschedule);
+    if (currentEtaDate) {
+      formData.append("CurrentETA", formatYMD(currentEtaDate));
+    }
+    if (newEtdFormatted) {
+      formData.append("NewETD", newEtdFormatted);
     }
     formData.append("ProposedEtaDays", String(proposedEtaDays));
     formData.append("Reason", rescheduleReason.trim());
@@ -3263,7 +3265,8 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                         </p>
                       </div>
 
-                      {detailsDialog.request["Feedback Doc ID"]
+                      {user.role !== "vendor" &&
+                        detailsDialog.request["Feedback Doc ID"]
                         ? (() => {
                             const status =
                               detailsDialog.request["Reschedule Status"];
@@ -3707,7 +3710,8 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                     </div>
                   </div>
 
-                  {vendorResponseDialog.request["Feedback Doc ID"] && (
+                  {user.role !== "vendor" &&
+                    vendorResponseDialog.request["Feedback Doc ID"] && (
                     <div>
                       <Label className="mb-2 block">
                         Admin&apos;s Record of Event

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { format } from "date-fns";
 import {
   AlertCircle,
@@ -54,8 +55,6 @@ import type { User } from "./Login";
 // ===================== Types =====================
 interface PurchaseOrderDetailProps {
   user: User;
-  orderId: string;
-  onBack: () => void;
   onRefreshPurchaseOrders?: () => Promise<void> | void;
 }
 
@@ -145,6 +144,7 @@ type PoDetail = {
   ["GR Created Date"]?: string | null;
 
   CurrentETD?: string | null;
+  CurrentReETA?: string | null;
   CurrentETADays?: string | number | null;
   CurrentEta?: string | null;
 
@@ -1577,10 +1577,18 @@ function ReEtaDocFileCard({
 // ===================== Component =====================
 export function PurchaseOrderDetail({
   user,
-  orderId,
-  onBack,
   onRefreshPurchaseOrders,
 }: PurchaseOrderDetailProps) {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const orderId = searchParams.get("purchase_order");
+
+  useEffect(() => {
+    if (!orderId) {
+      navigate("/purchase-order");
+    }
+  }, [orderId, navigate]);
+
   const [statusFlowRows, setStatusFlowRows] = useState<ApiStatusFlowRow[]>([]);
   const [reEtaRequestsRaw, setReEtaRequestsRaw] = useState<any[]>([]);
   const [poDetail, setPoDetail] = useState<PoDetail | null>(null);
@@ -1769,6 +1777,11 @@ export function PurchaseOrderDetail({
     if (status === "PO Submitted") {
       return safeDateOnly(poDeliveryDateValue);
     }
+    if (status === "Work in Progress") {
+      return safeDateOnly(
+        poDetail?.CurrentReETA ?? poDetail?.CurrentEta ?? poDetail?.ETA,
+      );
+    }
     return safeDateOnly(poDetail?.CurrentEta ?? poDetail?.ETA);
   }, [status, poDeliveryDateValue, poDetail]);
 
@@ -1919,7 +1932,9 @@ export function PurchaseOrderDetail({
   }, [calculatedLeadtimeDeliveryDate, deliveryDate]);
 
   const onDeliveryEtaDifference = useMemo(() => {
-    const previousEta = parseServerDate(poDetail?.CurrentEta ?? poDetail?.ETA);
+    const previousEta = parseServerDate(
+      poDetail?.CurrentReETA ?? poDetail?.CurrentEta ?? poDetail?.ETA,
+    );
     if (!calculatedLeadtimeDeliveryDate || !previousEta) return null;
     return diffDaysDateOnly(calculatedLeadtimeDeliveryDate, previousEta);
   }, [calculatedLeadtimeDeliveryDate, poDetail]);
@@ -1999,7 +2014,11 @@ export function PurchaseOrderDetail({
 
   const handleOpenRescheduleDialog = useCallback(async () => {
     setRescheduleDialogOpen(true);
-    setNewEtd(actualDeliveryDate ?? todayStart());
+    setNewEtd(
+      status === "On Delivery"
+        ? (parseServerDate(poDetail?.ActualDeliveryDate) ?? todayStart())
+        : (actualDeliveryDate ?? todayStart()),
+    );
     setNewLeadtimeDays(
       status === "PO Submitted" ? etaDays || "" : leadtimeDelivery || "",
     );
@@ -2012,6 +2031,7 @@ export function PurchaseOrderDetail({
     leadtimeDelivery,
     status,
     fetchDelayReasons,
+    poDetail,
   ]);
 
   const handleCloseRescheduleDialog = useCallback(() => {
@@ -2375,6 +2395,10 @@ export function PurchaseOrderDetail({
       );
       formData.append("PoItemNo", String(trim(poDetail?.Item) ?? ""));
       formData.append("VendorName", String(trim(poDetail?.VendorName) ?? ""));
+      formData.append(
+        "CurrentETA",
+        format(currentEtaForReschedule, "yyyy-MM-dd"),
+      );
       formData.append("NewETD", format(newEtd, "yyyy-MM-dd"));
       formData.append("ProposedEtaDays", String(proposedEtaDays));
       formData.append("Reason", rescheduleReason.trim());
@@ -2614,9 +2638,9 @@ export function PurchaseOrderDetail({
     try {
       await onRefreshPurchaseOrders?.();
     } finally {
-      onBack();
+      navigate("/purchase-order");
     }
-  }, [onBack, onRefreshPurchaseOrders]);
+  }, [navigate, onRefreshPurchaseOrders]);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
@@ -2943,7 +2967,7 @@ export function PurchaseOrderDetail({
                 //   ? format(previousEta, "MMM dd, yyyy")
                 //   : "-";
                 const previousEta =
-                  parseServerDate(poDetail?.CurrentEta ?? poDetail?.ETA) ??
+                  parseServerDate(poDetail?.CurrentReETA ?? poDetail?.ETA) ??
                   null;
 
                 const previousEtaLabel = previousEta
@@ -2984,7 +3008,7 @@ export function PurchaseOrderDetail({
 
                       <div>
                         <Label className="mb-1 block text-xs uppercase tracking-wide text-gray-400">
-                          ETA (from previous step)
+                          Current ETA
                         </Label>
                         <p style={{ color: "#014357" }}>{previousEtaLabel}</p>
                       </div>
@@ -3388,7 +3412,7 @@ export function PurchaseOrderDetail({
                     request.evidenceDocFile ||
                     request.vendorRespDocFile) && (
                     <div className="mb-3 space-y-2 border-t border-gray-200 pt-3">
-                      {request.feedbackDocFile && (
+                      {request.feedbackDocFile && user.role !== "vendor" && (
                         <ReEtaDocFileCard
                           file={request.feedbackDocFile}
                           label="Feedback Document"
@@ -3505,30 +3529,46 @@ export function PurchaseOrderDetail({
                 <Label>
                   New ETD <span className="text-red-500">*</span>
                 </Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className="mt-1 w-full justify-start text-left"
-                      type="button"
-                    >
-                      <Calendar className="mr-2 h-4 w-4" />
-                      {newEtd ? (
-                        format(newEtd, "PPP")
-                      ) : (
-                        <span>Select new ETD</span>
-                      )}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
-                    <CalendarComponent
-                      mode="single"
-                      selected={newEtd}
-                      onSelect={setNewEtd}
-                      initialFocus
-                    />
-                  </PopoverContent>
-                </Popover>
+                {status === "On Delivery" ? (
+                  <Button
+                    variant="outline"
+                    className="mt-1 w-full justify-start text-left"
+                    type="button"
+                    disabled
+                  >
+                    <Calendar className="mr-2 h-4 w-4" />
+                    {newEtd ? (
+                      format(newEtd, "PPP")
+                    ) : (
+                      <span>Select new ETD</span>
+                    )}
+                  </Button>
+                ) : (
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className="mt-1 w-full justify-start text-left"
+                        type="button"
+                      >
+                        <Calendar className="mr-2 h-4 w-4" />
+                        {newEtd ? (
+                          format(newEtd, "PPP")
+                        ) : (
+                          <span>Select new ETD</span>
+                        )}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0">
+                      <CalendarComponent
+                        mode="single"
+                        selected={newEtd}
+                        onSelect={setNewEtd}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                )}
               </div>
 
               <div>

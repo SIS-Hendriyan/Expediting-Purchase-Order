@@ -183,6 +183,7 @@ namespace EXPOAPI.Controllers
                     request.VendorCode,
                     request.VendorName,
                     request.NewETD,
+                    request.CurrentETA,
                     request.ProposedEtaDays,
                     request.Reason,
                     request.DelayReasonId,

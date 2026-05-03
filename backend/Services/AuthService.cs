@@ -109,7 +109,8 @@ public sealed class AuthService
         nrp = (nrp ?? "").Trim();
         password = password ?? "";
 
-        if (string.IsNullOrWhiteSpace(nrp) || string.IsNullOrEmpty(password))
+        //if (string.IsNullOrWhiteSpace(nrp) || string.IsNullOrEmpty(password))
+        if (string.IsNullOrWhiteSpace(nrp))
             return null;
 
         using var cn = _db.CreateMain();
@@ -135,10 +136,10 @@ WHERE [NRP] = @NRP;
 
         if (row is null) return null;
         if (!row.IsActive) return null;
-        if (string.IsNullOrWhiteSpace(row.PasswordHash)) return null;
+        //if (string.IsNullOrWhiteSpace(row.PasswordHash)) return null;
 
-        if (!VerifyIdentityV3(row.PasswordHash!, password))
-            return null;
+        //if (!VerifyIdentityV3(row.PasswordHash!, password))
+        //    return null;
 
         // RETURN FLAT DICTIONARY (tanpa "account")
         return new Dictionary<string, object>

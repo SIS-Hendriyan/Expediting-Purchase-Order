@@ -5,6 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";
 
 import { Card } from "../ui/card";
@@ -82,7 +83,6 @@ import {
 } from "../ui/pagination";
 
 import type { User } from "./Login";
-import { PurchaseOrderDetail } from "./PurchaseOrderDetail";
 import { API } from "../../config";
 
 import {
@@ -946,7 +946,7 @@ function UploadFileField({
 
 // ================== Component ==================
 export function PurchaseOrder({ user }: PurchaseOrderProps) {
-  const [selectedOrderId, setSelectedOrderId] = useState<OrderKey | null>(null);
+  const navigate = useNavigate();
 
   const [activeTab, setActiveTab] = useState<StatusTab>("all");
   const [specialFilter, setSpecialFilter] = useState<AttentionFilter>(() =>
@@ -1963,6 +1963,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         String(trim(rescheduleTargetOrder?.["Name of Supplier"]) ?? ""),
       );
 
+      formData.append("CurrentETA", format(currentEtaForReschedule, "yyyy-MM-dd"));
       formData.append("NewETD", format(newEtd, "yyyy-MM-dd"));
       formData.append("ProposedEtaDays", String(proposedEtaDays));
       formData.append("Reason", rescheduleReason.trim());
@@ -2711,7 +2712,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         variant="outline"
                         size="sm"
                         onClick={() => {
-                          setSelectedOrderId(key);
+                          navigate(`/purchase-order-detail?purchase_order=${key}`);
                         }}
                         style={{ borderColor: "#014357", color: "#014357" }}
                         className="hover:bg-gray-50 min-w-[80px]"
@@ -2828,16 +2829,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 h-full overflow-x-hidden">
-      {selectedOrderId !== null ? (
-        <PurchaseOrderDetail
-          user={user}
-          orderId={String(selectedOrderId)}
-          onBack={() => setSelectedOrderId(null)}
-          onRefreshPurchaseOrders={refreshPurchaseOrdersList}
-        />
-      ) : (
-        <>
-          <div className="mb-6 sm:mb-8">
+      <div className="mb-6 sm:mb-8">
             <h1 className="mb-2" style={{ color: "#014357" }}>
               Purchase Orders
             </h1>
@@ -4232,8 +4224,6 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
               </DialogFooter>
             </DialogContent>
           </Dialog>
-        </>
-      )}
     </div>
   );
 }

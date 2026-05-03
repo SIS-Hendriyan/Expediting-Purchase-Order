@@ -82,4 +82,11 @@
         public int TotalPurchaser { get; set; }
         public int TotalUser { get; set; }
     }
+
+
+    public class AuthenticationUserSSO
+    {
+        public string username { set; get; }
+        public string password { set; get; }
+    }
 }
