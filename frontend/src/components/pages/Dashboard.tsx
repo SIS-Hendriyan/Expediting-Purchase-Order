@@ -3,6 +3,8 @@ import * as XLSX from "xlsx";
 import { Card } from "../ui/card";
 import {
   getAccessToken,
+  getAuthSession,
+  isInternalSession,
   redirectToLoginExpired,
 } from "../../utils/authSession";
 import {
@@ -353,6 +355,12 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
 
   const isVendorRole = user.role === "vendor";
 
+  const sessionPlant = useMemo(() => {
+    if (user.role !== "user") return "";
+    const s = getAuthSession();
+    return isInternalSession(s) ? s.plant : "";
+  }, [user.role]);
+
   const scorecardDataLength = isVendorRole
     ? evaluationItems.length
     : vendorAggregates.length;
@@ -398,11 +406,16 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
   ) => {
     const params = new URLSearchParams();
 
+    if (user.role === "user") {
+      params.append("plant", sessionPlant);
+    }
     if (useDefault) return params;
 
     if (startDate) params.append("start_date", formatLocalDateParam(startDate));
     if (endDate) params.append("end_date", formatLocalDateParam(endDate));
-    if (plant) params.append("plant", plant);
+    if (plant) {
+      params.append("plant", plant);
+    }
     if (group && group !== "All") params.append(groupParamName, group);
 
     if (cleanVendorCompany) {
@@ -578,7 +591,14 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
         isVendor && cleanVendorCompany ? cleanVendorCompany : undefined;
 
       const url = API.DASHBOARD_VENDOR_EVALUATION(role, vendorNameParam);
-      const res = await fetchWithAuth(url, { headers: buildAuthHeaders() });
+      const separator = url.includes("?") ? "&" : "?";
+      const urlWithPlant =
+        user.role === "user" && sessionPlant
+          ? `${url}${separator}plant=${encodeURIComponent(sessionPlant)}`
+          : url;
+      const res = await fetchWithAuth(urlWithPlant, {
+        headers: buildAuthHeaders(),
+      });
       const data = await getJsonData<{ vendors?: any[]; items?: any[] }>(res);
 
       const rawItems = Array.isArray(data.items) ? data.items : [];
@@ -618,7 +638,11 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
     if (!cleanVendorCompany) return;
 
     try {
-      const url = API.DASHBOARD_VENDOR_PERFORMANCE(cleanVendorCompany);
+      let url = API.DASHBOARD_VENDOR_PERFORMANCE(cleanVendorCompany);
+      if (user.role === "user" && sessionPlant) {
+        const separator = url.includes("?") ? "&" : "?";
+        url = `${url}${separator}plant=${encodeURIComponent(sessionPlant)}`;
+      }
       const res = await fetchWithAuth(url, { headers: buildAuthHeaders() });
       const data = await getJsonData<{
         OTD_Percentage?: number;
@@ -920,39 +944,41 @@ export function Dashboard({ user, onPageChange }: DashboardProps) {
                   </Popover>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="plant" className="text-sm text-white">
-                    {user.role === "vendor" ? "Jobsite" : "Plant"}
-                  </Label>
-                  <Select value={plant} onValueChange={setPlant}>
-                    <SelectTrigger
-                      id="plant"
-                      className="w-full bg-white hover:bg-gray-50"
-                      style={{ borderColor: "rgba(255, 255, 255, 0.3)" }}
-                    >
-                      <SelectValue
-                        placeholder={
-                          user.role === "vendor"
-                            ? "Select jobsite"
-                            : "Select plant"
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {plantOptions.length === 0 ? (
-                        <SelectItem value="__empty_plant" disabled>
-                          No plant available
-                        </SelectItem>
-                      ) : (
-                        plantOptions.map((p) => (
-                          <SelectItem key={p} value={p}>
-                            {p}
+                {user.role !== "user" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="plant" className="text-sm text-white">
+                      {user.role === "vendor" ? "Jobsite" : "Plant"}
+                    </Label>
+                    <Select value={plant} onValueChange={setPlant}>
+                      <SelectTrigger
+                        id="plant"
+                        className="w-full bg-white hover:bg-gray-50"
+                        style={{ borderColor: "rgba(255, 255, 255, 0.3)" }}
+                      >
+                        <SelectValue
+                          placeholder={
+                            user.role === "vendor"
+                              ? "Select jobsite"
+                              : "Select plant"
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {plantOptions.length === 0 ? (
+                          <SelectItem value="__empty_plant" disabled>
+                            No plant available
                           </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
+                        ) : (
+                          plantOptions.map((p) => (
+                            <SelectItem key={p} value={p}>
+                              {p}
+                            </SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
 
                 {user.role !== "vendor" && (
                   <div className="space-y-2">

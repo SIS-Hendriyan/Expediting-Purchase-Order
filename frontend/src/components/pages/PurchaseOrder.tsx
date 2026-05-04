@@ -89,6 +89,7 @@ import {
   getAuthSession,
   getAccessToken,
   isVendorSession,
+  isInternalSession,
   redirectToLoginExpired,
 } from "../../utils/authSession";
 
@@ -958,22 +959,30 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
 
-  const [appliedFilters, setAppliedFilters] = useState<AppliedAdvancedFilters>({
-    status: "",
-    storageLocation: "",
-    plant: "",
-    purchasingGroup: "",
-    supplier: "",
-    purchasingDocType: "",
+  const [appliedFilters, setAppliedFilters] = useState<AppliedAdvancedFilters>(() => {
+    const s = getAuthSession();
+    const plant = user.role === "user" && isInternalSession(s) ? s.plant : "";
+    return {
+      status: "",
+      storageLocation: "",
+      plant,
+      purchasingGroup: "",
+      supplier: "",
+      purchasingDocType: "",
+    };
   });
 
-  const [draftFilters, setDraftFilters] = useState<AppliedAdvancedFilters>({
-    status: "",
-    storageLocation: "",
-    plant: "",
-    purchasingGroup: "",
-    supplier: "",
-    purchasingDocType: "",
+  const [draftFilters, setDraftFilters] = useState<AppliedAdvancedFilters>(() => {
+    const s = getAuthSession();
+    const plant = user.role === "user" && isInternalSession(s) ? s.plant : "";
+    return {
+      status: "",
+      storageLocation: "",
+      plant,
+      purchasingGroup: "",
+      supplier: "",
+      purchasingDocType: "",
+    };
   });
 
   const [orders, setOrders] = useState<PurchaseOrderItem[]>([]);
@@ -1061,6 +1070,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
   const vendorName = useMemo(() => {
     const s = getAuthSession();
     return isVendorSession(s) ? s.vendorName : "";
+  }, [user.role]);
+
+  const sessionPlant = useMemo(() => {
+    if (user.role !== "user") return "";
+    const s = getAuthSession();
+    return isInternalSession(s) ? s.plant : "";
   }, [user.role]);
 
   const toggleColumn = useCallback((column: ColumnKey) => {
@@ -1229,7 +1244,9 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         url.searchParams.set("vendorName", filters.supplier);
       }
 
-      if (filters.plant && filters.plant !== "all") {
+      if (user.role === "user" && sessionPlant) {
+        url.searchParams.set("plant", sessionPlant);
+      } else if (filters.plant && filters.plant !== "all") {
         url.searchParams.set("plant", filters.plant);
       }
 
@@ -1254,7 +1271,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
 
       return url;
     },
-    [user.role, vendorName],
+    [user.role, vendorName, sessionPlant],
   );
 
   const buildCardsUrl = useCallback(() => {
@@ -1264,8 +1281,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
       url.searchParams.set("vendorName", vendorName);
     }
 
+    if (user.role === "user" && sessionPlant) {
+      url.searchParams.set("plant", sessionPlant);
+    }
+
     return url;
-  }, [user.role, vendorName]);
+  }, [user.role, vendorName, sessionPlant]);
 
   const buildMasterUrl = useCallback(() => {
     const url = new URL(API.MASTERPO());
@@ -1771,7 +1792,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         (appliedFilters.status && appliedFilters.status !== "all") ||
         (appliedFilters.storageLocation &&
           appliedFilters.storageLocation !== "all") ||
-        (appliedFilters.plant && appliedFilters.plant !== "all") ||
+        (user.role !== "user" && appliedFilters.plant && appliedFilters.plant !== "all") ||
         (appliedFilters.purchasingGroup &&
           appliedFilters.purchasingGroup !== "all") ||
         (user.role !== "vendor" &&
@@ -1789,7 +1810,7 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
         appliedFilters.status && appliedFilters.status !== "all",
         appliedFilters.storageLocation &&
           appliedFilters.storageLocation !== "all",
-        appliedFilters.plant && appliedFilters.plant !== "all",
+        user.role !== "user" && appliedFilters.plant && appliedFilters.plant !== "all",
         appliedFilters.purchasingGroup &&
           appliedFilters.purchasingGroup !== "all",
         user.role !== "vendor" &&
@@ -2175,12 +2196,12 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
     setDraftFilters({
       status: "",
       storageLocation: "",
-      plant: "",
+      plant: user.role === "user" ? sessionPlant : "",
       purchasingGroup: "",
       supplier: "",
       purchasingDocType: "",
     });
-  }, []);
+  }, [user.role, sessionPlant]);
 
   const handleApplyFilters = useCallback(() => {
     setAppliedFilters(draftFilters);
@@ -3380,26 +3401,28 @@ export function PurchaseOrder({ user }: PurchaseOrderProps) {
                         </Select>
                       </div>
 
-                      <div className="grid gap-2">
-                        <Label>Plant</Label>
-                        <Select
-                          value={draftFilters.plant}
-                          onValueChange={(v) =>
-                            setDraftFilters((prev) => ({ ...prev, plant: v }))
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="All plants" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {filterOptions.plant.map((opt) => (
-                              <SelectItem key={opt} value={opt}>
-                                {opt === "all" ? "All" : opt}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                      {user.role !== "user" && (
+                        <div className="grid gap-2">
+                          <Label>Plant</Label>
+                          <Select
+                            value={draftFilters.plant}
+                            onValueChange={(v) =>
+                              setDraftFilters((prev) => ({ ...prev, plant: v }))
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="All plants" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {filterOptions.plant.map((opt) => (
+                                <SelectItem key={opt} value={opt}>
+                                  {opt === "all" ? "All" : opt}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
 
                       <div className="grid gap-2">
                         <Label>Purchasing Group</Label>

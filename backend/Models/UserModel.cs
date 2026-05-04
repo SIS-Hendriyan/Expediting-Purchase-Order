@@ -38,7 +38,7 @@
         public string? Role { get; set; }
         public string? Department { get; set; }
         public string? Jobsite { get; set; }
-        public string? PasswordHash { get; set; }
+        public string? Plant { get; set; }
         public bool IsActive { get; set; }
     }
 
