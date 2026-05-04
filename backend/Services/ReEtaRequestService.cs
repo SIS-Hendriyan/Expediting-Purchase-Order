@@ -136,7 +136,8 @@ namespace EXPOAPI.Services
             string? poItemNo,
             string? vendorCode,
             string? vendorName,
-            DateTime? currentEta,
+            DateTime? newETD,
+            DateTime? CurrentETA,
             int? proposedEtaDays,
             string reason,
             int? delayReasonId,
@@ -151,7 +152,8 @@ namespace EXPOAPI.Services
 
             var dp = new DynamicParameters();
             dp.Add("ID_PO_Item", idPoItem);
-            dp.Add("CurrentETA", currentEta?.Date);
+            dp.Add("ETD", newETD?.Date);
+            dp.Add("CurrentETA", CurrentETA?.Date);
             dp.Add("ProposedETADays", proposedEtaDays);
             dp.Add("Reason", reason);
             dp.Add("DelayReasonID", delayReasonId);

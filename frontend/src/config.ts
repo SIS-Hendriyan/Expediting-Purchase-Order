@@ -93,4 +93,15 @@ export const API = {
     `${CONFIG.apiBaseUrl}/api/delayreasons/${id}`,
   DELAY_REASONS_DELETE: (id: number | string) =>
     `${CONFIG.apiBaseUrl}/api/delayreasons/${id}`,
+
+  // Employees
+  EMPLOYEE_LIST: () => `${CONFIG.apiBaseUrl}/api/employees`,
+
+  // Jobsites
+  JOBSITE_LIST: () => `${CONFIG.apiBaseUrl}/api/jobsites`,
+  JOBSITE_CREATE: () => `${CONFIG.apiBaseUrl}/api/jobsites`,
+  JOBSITE_UPDATE: (id: number | string) =>
+    `${CONFIG.apiBaseUrl}/api/jobsites/${id}`,
+  JOBSITE_DELETE: (id: number | string) =>
+    `${CONFIG.apiBaseUrl}/api/jobsites/${id}`,
 };

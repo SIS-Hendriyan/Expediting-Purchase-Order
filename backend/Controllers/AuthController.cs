@@ -14,12 +14,14 @@ namespace EXPOAPI.Controllers;
 public sealed class AuthController : ControllerBase
 {
     private readonly AuthService _auth;
+    private readonly ISsoAuthService _ssoAuth;
     private readonly IVendorOtpEmailSender _otpEmail;
     private readonly IConfiguration _config;
 
-    public AuthController(AuthService auth, IVendorOtpEmailSender otpEmail, IConfiguration config)
+    public AuthController(AuthService auth, ISsoAuthService ssoAuthService, IVendorOtpEmailSender otpEmail, IConfiguration config)
     {
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
+        _ssoAuth = ssoAuthService ?? throw new ArgumentNullException(nameof(ssoAuthService));
         _otpEmail = otpEmail ?? throw new ArgumentNullException(nameof(otpEmail));
         _config = config ?? throw new ArgumentNullException(nameof(config));
     }
@@ -99,9 +101,18 @@ public sealed class AuthController : ControllerBase
 
         // ========= INTERNAL FLOW =========
         Dictionary<string, object>? resDict;
+        bool responseSSO = false;
         try
         {
-            resDict = await _auth.AuthenticateInternalAsync(userName, password, ct);
+            responseSSO = await _ssoAuth.LoginAsync(userName, password,ct);
+            if(responseSSO)
+            {
+                resDict = await _auth.AuthenticateInternalAsync(userName, password, ct);
+            }
+            else
+            {
+                resDict = null;
+            }
         }
         catch (OperationCanceledException)
         {

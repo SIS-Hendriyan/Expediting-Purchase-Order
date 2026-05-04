@@ -1015,11 +1015,9 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
   const currentEtaDisplay = useMemo(() => {
     if (!selectedPoItem) return null;
     return (
-      poItemDetail?.["Delivery date"] ??
-      poItemDetail?.DeliveryDate ??
-      selectedPoItem.ReEtaDate ??
-      selectedPoItem.ETD ??
-      null
+      // poItemDetail?.["Delivery date"] ??
+      // poItemDetail?.DeliveryDate ??
+      selectedPoItem.ReEtaDate ?? selectedPoItem.ETD ?? null
     );
   }, [selectedPoItem, poItemDetail]);
 
@@ -1106,7 +1104,8 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
     }
 
     const proposedEtaDays = newLeadtime;
-    const currentEtaForReschedule = formatYMD(newEtd);
+    const newEtdFormatted = formatYMD(newEtd);
+    const currentEtaDate = parseDateOnly(currentEtaDisplay);
 
     const formData = new FormData();
     formData.append("IdPoItem", String(selectedPoItem.ID ?? ""));
@@ -1119,8 +1118,11 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
       "VendorName",
       String(selectedPoItem["Name of Supplier"] ?? ""),
     );
-    if (currentEtaForReschedule) {
-      formData.append("CurrentEta", currentEtaForReschedule);
+    if (currentEtaDate) {
+      formData.append("CurrentETA", formatYMD(currentEtaDate));
+    }
+    if (newEtdFormatted) {
+      formData.append("NewETD", newEtdFormatted);
     }
     formData.append("ProposedEtaDays", String(proposedEtaDays));
     formData.append("Reason", rescheduleReason.trim());
@@ -1262,12 +1264,12 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!isPdfFile(file)) {
-      return toast.error("Only PDF files are allowed");
+    if (!isPdfOrImageFile(file)) {
+      return toast.error("Only PDF or Image files are allowed");
     }
 
-    if (!isValidFileSize(file)) {
-      return toast.error("File size must not exceed 100MB");
+    if (!isValidFileSize(file, 1)) {
+      return toast.error("File size must not exceed 1MB");
     }
 
     setUploadedFile(file);
@@ -1305,41 +1307,49 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
     try {
       setLoading(true);
 
-      let base64: string | null = null;
-      let fileName: string | null = null;
-      let contentType: string | null = null;
-      let fileSize: number | null = null;
-
+      const formData = new FormData();
+      formData.append("Feedback", remark.trim());
       if (uploadedFile) {
-        base64 = await fileToBase64(uploadedFile);
-        fileName = uploadedFile.name;
-        contentType = uploadedFile.type;
-        fileSize = uploadedFile.size;
+        formData.append("AttachmentFile", uploadedFile);
       }
 
-      const payload = {
-        feedback: remark,
-        fileName,
-        contentType,
-        fileSize,
-        base64,
-      };
+      const token = getAuthToken();
+      const endpoint =
+        actionDialog.type === "approve"
+          ? API.REETA_APPROVE(req.ID)
+          : API.REETA_REJECT(req.ID);
+      const res = await fetchWithAuth(endpoint, {
+        method: "POST",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: formData,
+      });
 
-      if (actionDialog.type === "approve") {
-        await apiFetch<any>(API.REETA_APPROVE(req.ID), {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-
-        toast.success("Request approved successfully");
-      } else {
-        await apiFetch<any>(API.REETA_REJECT(req.ID), {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-
-        toast.success("Request rejected successfully");
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try {
+          const text = await res.text();
+          const parsed = (() => {
+            try {
+              return JSON.parse(text);
+            } catch {
+              return null;
+            }
+          })();
+          msg =
+            parsed?.message || parsed?.Message || parsed?.error || text || msg;
+        } catch {
+          // ignore
+        }
+        throw new Error(msg);
       }
+
+      toast.success(
+        actionDialog.type === "approve"
+          ? "Request approved successfully"
+          : "Request rejected successfully",
+      );
 
       handleCloseActionDialog();
       await fetchList();
@@ -1437,12 +1447,12 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!isPdfFile(file)) {
-      return toast.error("Only PDF files are allowed");
+    if (!isPdfOrImageFile(file)) {
+      return toast.error("Only PDF or Image files are allowed");
     }
 
-    if (!isValidFileSize(file)) {
-      return toast.error("File size must not exceed 100MB");
+    if (!isValidFileSize(file, 1)) {
+      return toast.error("File size must not exceed 1MB");
     }
 
     setVendorResponseFile(file);
@@ -1460,18 +1470,36 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
     try {
       setLoading(true);
 
-      const base64 = await fileToBase64(vendorResponseFile);
-      const payload = {
-        fileName: vendorResponseFile.name || "vendor_response.pdf",
-        contentType: vendorResponseFile.type,
-        fileSize: vendorResponseFile.size,
-        base64,
-      };
+      const formData = new FormData();
+      formData.append("ResponseFile", vendorResponseFile);
 
-      await apiFetch<any>(API.REETA_VENDOR_RESPONSE(req.ID), {
+      const token = getAuthToken();
+      const res = await fetchWithAuth(API.REETA_VENDOR_RESPONSE(req.ID), {
         method: "POST",
-        body: JSON.stringify(payload),
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: formData,
       });
+
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try {
+          const text = await res.text();
+          const parsed = (() => {
+            try {
+              return JSON.parse(text);
+            } catch {
+              return null;
+            }
+          })();
+          msg =
+            parsed?.message || parsed?.Message || parsed?.error || text || msg;
+        } catch {
+          // ignore
+        }
+        throw new Error(msg);
+      }
 
       toast.success("Supporting document uploaded successfully");
       handleCloseVendorResponseDialog();
@@ -2166,49 +2194,35 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                     />
                   </label>
                 ) : (
-                  <div className="flex w-full items-center gap-3 rounded-lg border border-gray-200 px-3 py-2">
-                    <FileText
-                      className="h-4 w-4 flex-shrink-0"
-                      style={{ color: "#014357" }}
-                    />
+                  <div
+                    className="flex w-full items-center gap-3 rounded-lg border px-3 py-2"
+                    style={{
+                      backgroundColor: "#F4F6F4",
+                      borderColor: "#C5D5C5",
+                    }}
+                  >
+                    <div
+                      className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded"
+                      style={{ backgroundColor: "#9CA3AF" }}
+                    >
+                      <FileText className="h-4 w-4 text-white" />
+                    </div>
                     <div className="flex-1 text-left">
-                      <p className="text-xs text-gray-500">Evidence File</p>
-                      <p className="mb-1 text-sm">{evidenceFile.name}</p>
-                      <p className="text-xs text-gray-400">
+                      <p className="text-sm" style={{ color: "#014357" }}>
+                        {evidenceFile.name}
+                      </p>
+                      <p className="text-xs text-gray-500">
                         {(evidenceFile.size / 1024).toFixed(1)} KB
                       </p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 px-2 text-xs"
-                        onClick={() => {
-                          const blobUrl = URL.createObjectURL(evidenceFile);
-                          window.open(blobUrl, "_blank", "noopener,noreferrer");
-                          setTimeout(
-                            () => URL.revokeObjectURL(blobUrl),
-                            60_000,
-                          );
-                        }}
-                        disabled={loading}
-                      >
-                        <Eye className="mr-1 h-3 w-3" />
-                        Review
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 px-2 text-xs text-red-600 hover:text-red-700"
-                        onClick={() => setEvidenceFile(null)}
-                        disabled={loading}
-                      >
-                        <X className="mr-1 h-3 w-3" />
-                        Remove
-                      </Button>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setEvidenceFile(null)}
+                      disabled={loading}
+                      className="flex h-6 w-6 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-600 disabled:opacity-50"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
                   </div>
                 )}
               </div>
@@ -2681,7 +2695,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
 
                       <div>
                         <Label className="mb-2 block">
-                          Record of Event (PDF)
+                          Record of Event (PDF / Image)
                           {actionDialog.type === "reject" && (
                             <span className="ml-1 text-red-500">*</span>
                           )}
@@ -2693,8 +2707,8 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                         </Label>
                         <p className="mb-3 text-xs text-gray-500">
                           {actionDialog.type === "reject"
-                            ? "Supporting documentation for rejection (PDF format, max 100MB)"
-                            : "Optional supporting documentation (PDF format, max 100MB)"}
+                            ? "Supporting documentation for rejection (PDF / Image, max 1MB)"
+                            : "Optional supporting documentation (PDF / Image, max 1MB)"}
                         </p>
 
                         {!uploadedFile ? (
@@ -2735,13 +2749,13 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                                 Click to upload PDF / Image Document
                               </p>
                               <p className="text-xs text-gray-500">
-                                Maximum file size: 100MB
+                                Maximum file size: 1MB
                               </p>
                             </div>
 
                             <input
                               type="file"
-                              accept="application/pdf"
+                              accept=".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp"
                               className="hidden"
                               onChange={handleFileUpload}
                               disabled={loading}
@@ -2781,8 +2795,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                                   {uploadedFile.name}
                                 </p>
                                 <p className="text-xs text-gray-600">
-                                  {(uploadedFile.size / 1024 / 1024).toFixed(2)}{" "}
-                                  MB
+                                  {(uploadedFile.size / 1024).toFixed(1)} KB
                                 </p>
                               </div>
                             </div>
@@ -3169,49 +3182,6 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                               const blob = new Blob([byteArray], {
                                 type: mime,
                               });
-                              const blobUrl = URL.createObjectURL(blob);
-                              window.open(
-                                blobUrl,
-                                "_blank",
-                                "noopener,noreferrer",
-                              );
-                              setTimeout(
-                                () => URL.revokeObjectURL(blobUrl),
-                                60_000,
-                              );
-                            }}
-                            style={{
-                              borderColor: "#9CA3AF",
-                              color: "#374151",
-                            }}
-                            className="hover:bg-gray-50"
-                            disabled={loading}
-                          >
-                            <Eye className="mr-2 h-4 w-4" />
-                            View
-                          </Button>
-
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              const base64 =
-                                detailsDialog.request?.EvidenceBase64;
-                              if (!base64) return;
-                              const mime =
-                                detailsDialog.request?.EvidenceContentType ||
-                                "application/octet-stream";
-                              const byteCharacters = atob(base64);
-                              const byteNumbers = new Array(
-                                byteCharacters.length,
-                              );
-                              for (let i = 0; i < byteCharacters.length; i++) {
-                                byteNumbers[i] = byteCharacters.charCodeAt(i);
-                              }
-                              const byteArray = new Uint8Array(byteNumbers);
-                              const blob = new Blob([byteArray], {
-                                type: mime,
-                              });
                               const url = URL.createObjectURL(blob);
                               const a = document.createElement("a");
                               a.href = url;
@@ -3295,7 +3265,8 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                         </p>
                       </div>
 
-                      {detailsDialog.request["Feedback Doc ID"]
+                      {user.role !== "vendor" &&
+                        detailsDialog.request["Feedback Doc ID"]
                         ? (() => {
                             const status =
                               detailsDialog.request["Reschedule Status"];
@@ -3739,7 +3710,8 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                     </div>
                   </div>
 
-                  {vendorResponseDialog.request["Feedback Doc ID"] && (
+                  {user.role !== "vendor" &&
+                    vendorResponseDialog.request["Feedback Doc ID"] && (
                     <div>
                       <Label className="mb-2 block">
                         Admin&apos;s Record of Event
@@ -3792,11 +3764,12 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
 
                   <div>
                     <Label className="mb-2 block">
-                      Your Supporting Document (PDF){" "}
+                      Your Supporting Document (PDF / Image){" "}
                       <span className="text-red-500">*</span>
                     </Label>
                     <p className="mb-3 text-xs text-gray-500">
-                      Upload your response document in PDF format (max 100MB)
+                      Upload your response document in PDF / Image format (max
+                      1MB)
                     </p>
 
                     {!vendorResponseFile ? (
@@ -3824,13 +3797,13 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                             Click to upload PDF / Image Document
                           </p>
                           <p className="text-xs text-gray-500">
-                            Maximum file size: 100MB
+                            Maximum file size: 1MB
                           </p>
                         </div>
 
                         <input
                           type="file"
-                          accept="application/pdf"
+                          accept=".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp"
                           className="hidden"
                           onChange={handleVendorResponseFileUpload}
                           disabled={loading}
@@ -3856,10 +3829,7 @@ export function RescheduleETA({ user }: RescheduleETAProps) {
                               {vendorResponseFile.name}
                             </p>
                             <p className="text-xs text-gray-600">
-                              {(vendorResponseFile.size / 1024 / 1024).toFixed(
-                                2,
-                              )}{" "}
-                              MB
+                              {(vendorResponseFile.size / 1024).toFixed(1)} KB
                             </p>
                           </div>
                         </div>

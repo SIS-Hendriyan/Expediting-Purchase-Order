@@ -11,7 +11,7 @@ namespace EXPOAPI.Services
 {
     public interface ISsoAuthService
     {
-        Task<SsoLoginResult> LoginAsync(string username, string password, CancellationToken ct = default);
+        Task<bool> LoginAsync(string username, string password, CancellationToken ct = default);
         Task<SsoUserDto?> GetUserAsync(string username, CancellationToken ct = default);
     }
 
@@ -39,14 +39,15 @@ namespace EXPOAPI.Services
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public async Task<SsoLoginResult> LoginAsync(string username, string password, CancellationToken ct = default)
+        public async Task<bool> LoginAsync(string username, string password, CancellationToken ct = default)
         {
             username = (username ?? "").Trim();
             password = password ?? "";
 
             if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
             {
-                return new SsoLoginResult { Status = false, Message = "Username dan password wajib diisi" };
+                //return new SsoLoginResult { Status = false, Message = "Username dan password wajib diisi" };
+                return false;
             }
 
             var creds = BuildCredentials();
@@ -60,24 +61,20 @@ namespace EXPOAPI.Services
 
                 if (!ok)
                 {
-                    return new SsoLoginResult { Status = false, Message = "Username and/or Password is incorrect" };
+                    return false;
                 }
 
                 // 2) Get user info
                 var info = await client.GetUserInfoAsync(creds, username);
                 var dto = MapToDto(info?.GetUserInfoResult);
 
-                return new SsoLoginResult
-                {
-                    Status = true,
-                    Message = "Login Success",
-                    User = dto
-                };
+                return true;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "SSO login failed for username={Username}", username);
-                return new SsoLoginResult { Status = false, Message = "Failed login" };
+                //return new SsoLoginResult { Status = false, Message = "Failed login" };
+                return false;
             }
             finally
             {
