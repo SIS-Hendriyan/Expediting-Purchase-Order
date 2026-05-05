@@ -142,6 +142,7 @@ public sealed class AuthController : ControllerBase
             ["role"] = GetObjString(resDict, "role"),
             ["department"] = GetObjString(resDict, "department"),
             ["jobsite"] = GetObjString(resDict, "jobsite"),
+            ["plant"] = GetObjString(resDict, "plant"),
         };
 
         var accessToken = CreateJwt(identity, claims, isRefresh: false);

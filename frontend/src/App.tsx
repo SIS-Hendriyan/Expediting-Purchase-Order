@@ -85,7 +85,8 @@ export default function App() {
       return "internal-user-management";
     if (path.startsWith("/delay-reason")) return "delay-reason";
     if (path.startsWith("/jobsite")) return "jobsite";
-    if (path.startsWith("/purchase-order-detail")) return "purchase-order-detail";
+    if (path.startsWith("/purchase-order-detail"))
+      return "purchase-order-detail";
     if (path.startsWith("/purchase-order")) return "purchase-order";
     if (path.startsWith("/reschedule-eta")) return "reschedule-eta";
     if (path.startsWith("/otp")) return "otp";
@@ -142,7 +143,6 @@ export default function App() {
   useEffect(() => {
     try {
       const session = getAuthSession();
-      console.log("[restoreSession] raw session:", session);
 
       if (!session) {
         setIsRestoring(false);
@@ -178,6 +178,7 @@ export default function App() {
           company: session.jobsite || undefined,
           type: "INTERNAL",
         };
+        console.log("[restoreSession] raw session:", session);
 
         setCurrentUser(restoredUser);
         setVendorOtpPending(false);
@@ -349,7 +350,7 @@ export default function App() {
               )}
             </Tooltip>
 
-                {currentUser.role !== "vendor" && (
+            {currentUser.role !== "vendor" && (
               <div>
                 <Tooltip>
                   <TooltipTrigger asChild>

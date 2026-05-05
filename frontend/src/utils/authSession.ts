@@ -1,10 +1,10 @@
 // src/utils/authSession.ts
 
 // ---- Types ----
-export type SessionKind = 'VENDOR' | 'INTERNAL';
+export type SessionKind = "VENDOR" | "INTERNAL";
 
 export interface VendorSessionData {
-  kind: 'VENDOR';
+  kind: "VENDOR";
   email: string;
   completeName: string;
   accessToken: string;
@@ -14,7 +14,7 @@ export interface VendorSessionData {
 }
 
 export interface InternalSessionData {
-  kind: 'INTERNAL';
+  kind: "INTERNAL";
   email: string;
   name: string;
   nrp: string;
@@ -22,6 +22,7 @@ export interface InternalSessionData {
   role: string;
   department: string;
   jobsite: string;
+  plant: string;
   accessToken: string;
   refreshToken?: string;
 }
@@ -29,11 +30,11 @@ export interface InternalSessionData {
 export type AuthSession = VendorSessionData | InternalSessionData;
 
 // ---- Storage key ----
-const KEY = 'authSession';
+const KEY = "authSession";
 
 function safeSessionStorage(): Storage | null {
   try {
-    if (typeof window === 'undefined') return null;
+    if (typeof window === "undefined") return null;
     return window.sessionStorage;
   } catch {
     return null;
@@ -42,7 +43,7 @@ function safeSessionStorage(): Storage | null {
 
 function safeLocalStorage(): Storage | null {
   try {
-    if (typeof window === 'undefined') return null;
+    if (typeof window === "undefined") return null;
     return window.localStorage;
   } catch {
     return null;
@@ -56,7 +57,7 @@ export function saveAuthSession(session: AuthSession): void {
   try {
     ss.setItem(KEY, JSON.stringify(session));
   } catch (e) {
-    console.error('saveAuthSession failed:', e);
+    console.error("saveAuthSession failed:", e);
   }
 }
 
@@ -67,12 +68,12 @@ export function getAuthSession(): AuthSession | null {
     const raw = ss.getItem(KEY);
     if (!raw) return migrateFromLegacy();
     const parsed = JSON.parse(raw);
-    if (parsed && (parsed.kind === 'VENDOR' || parsed.kind === 'INTERNAL')) {
+    if (parsed && (parsed.kind === "VENDOR" || parsed.kind === "INTERNAL")) {
       return parsed as AuthSession;
     }
     return null;
   } catch (e) {
-    console.error('getAuthSession failed:', e);
+    console.error("getAuthSession failed:", e);
     return null;
   }
 }
@@ -83,7 +84,7 @@ export function clearAuthSession(): void {
   try {
     ss.removeItem(KEY);
   } catch (e) {
-    console.error('clearAuthSession failed:', e);
+    console.error("clearAuthSession failed:", e);
   }
 }
 
@@ -98,14 +99,18 @@ export function isAuthenticated(): boolean {
   return Boolean(s && s.accessToken);
 }
 
-export function isVendorSession(s?: AuthSession | null): s is VendorSessionData {
+export function isVendorSession(
+  s?: AuthSession | null,
+): s is VendorSessionData {
   const x = s ?? getAuthSession();
-  return Boolean(x && x.kind === 'VENDOR');
+  return Boolean(x && x.kind === "VENDOR");
 }
 
-export function isInternalSession(s?: AuthSession | null): s is InternalSessionData {
+export function isInternalSession(
+  s?: AuthSession | null,
+): s is InternalSessionData {
   const x = s ?? getAuthSession();
-  return Boolean(x && x.kind === 'INTERNAL');
+  return Boolean(x && x.kind === "INTERNAL");
 }
 
 /**
@@ -113,13 +118,13 @@ export function isInternalSession(s?: AuthSession | null): s is InternalSessionD
  * Catatan: cookie HttpOnly TIDAK bisa dihapus dari frontend.
  */
 export function clearBrowserCookies(): void {
-  if (typeof document === 'undefined') return;
+  if (typeof document === "undefined") return;
 
   try {
-    const cookies = document.cookie ? document.cookie.split(';') : [];
+    const cookies = document.cookie ? document.cookie.split(";") : [];
 
     for (const cookie of cookies) {
-      const eqPos = cookie.indexOf('=');
+      const eqPos = cookie.indexOf("=");
       const rawName = eqPos > -1 ? cookie.slice(0, eqPos) : cookie;
       const name = rawName.trim();
 
@@ -134,12 +139,12 @@ export function clearBrowserCookies(): void {
       document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Strict`;
 
       // kalau app pakai secure cookie di https
-      if (window.location.protocol === 'https:') {
+      if (window.location.protocol === "https:") {
         document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; Secure; SameSite=None`;
       }
     }
   } catch (e) {
-    console.error('clearBrowserCookies failed:', e);
+    console.error("clearBrowserCookies failed:", e);
   }
 }
 
@@ -153,20 +158,20 @@ export function clearAllAuthData(): void {
     const ss = safeSessionStorage();
     const ls = safeLocalStorage();
 
-    ss?.removeItem('vendorSession');
-    ss?.removeItem('internalSession');
-    ss?.removeItem('accessToken');
-    ss?.removeItem('refreshToken');
+    ss?.removeItem("vendorSession");
+    ss?.removeItem("internalSession");
+    ss?.removeItem("accessToken");
+    ss?.removeItem("refreshToken");
 
-    ls?.removeItem('vendorSession');
-    ls?.removeItem('internalSession');
-    ls?.removeItem('accessToken');
-    ls?.removeItem('refreshToken');
+    ls?.removeItem("vendorSession");
+    ls?.removeItem("internalSession");
+    ls?.removeItem("accessToken");
+    ls?.removeItem("refreshToken");
     ls?.removeItem(KEY);
 
     clearBrowserCookies();
   } catch (e) {
-    console.error('clearAllAuthData failed:', e);
+    console.error("clearAllAuthData failed:", e);
   }
 }
 
@@ -174,11 +179,11 @@ export function clearAllAuthData(): void {
  * Redirect ke login dengan error expired
  */
 export function redirectToLoginExpired(): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === "undefined") return;
 
   clearAllAuthData();
 
-  const loginUrl = `/login?err=${encodeURIComponent('Expired')}`;
+  const loginUrl = `/login?err=${encodeURIComponent("Expired")}`;
   window.location.replace(loginUrl);
 }
 
@@ -187,48 +192,48 @@ function migrateFromLegacy(): AuthSession | null {
   const ss = safeSessionStorage();
   if (!ss) return null;
   try {
-    const legacyVendor = ss.getItem('vendorSession');
+    const legacyVendor = ss.getItem("vendorSession");
     if (legacyVendor) {
       const v = JSON.parse(legacyVendor);
       if (v && (v.email || v.accessToken)) {
         const migrated: VendorSessionData = {
-          kind: 'VENDOR',
-          email: v.email ?? '',
-          completeName: v.completeName ?? '',
-          accessToken: v.accessToken ?? '',
-          id: v.vendorId ?? v.id ?? '',
-          vendorName: v.vendorName ?? '',
-          vendorCode: v.vendorCode ?? '',
+          kind: "VENDOR",
+          email: v.email ?? "",
+          completeName: v.completeName ?? "",
+          accessToken: v.accessToken ?? "",
+          id: v.vendorId ?? v.id ?? "",
+          vendorName: v.vendorName ?? "",
+          vendorCode: v.vendorCode ?? "",
         };
         saveAuthSession(migrated);
-        ss.removeItem('vendorSession');
+        ss.removeItem("vendorSession");
         return migrated;
       }
     }
 
-    const legacyInternal = ss.getItem('internalSession');
+    const legacyInternal = ss.getItem("internalSession");
     if (legacyInternal) {
       const i = JSON.parse(legacyInternal);
       if (i && (i.email || i.accessToken)) {
         const migrated: InternalSessionData = {
-          kind: 'INTERNAL',
-          email: i.email ?? '',
-          name: i.name ?? '',
-          nrp: i.nrp ?? '',
-          id: i.id ?? '',
-          role: i.role ?? '',
-          department: i.department ?? '',
-          jobsite: i.jobsite ?? '',
-          accessToken: i.accessToken ?? '',
-          refreshToken: i.refreshToken ?? '',
+          kind: "INTERNAL",
+          email: i.email ?? "",
+          name: i.name ?? "",
+          nrp: i.nrp ?? "",
+          id: i.id ?? "",
+          role: i.role ?? "",
+          department: i.department ?? "",
+          jobsite: i.jobsite ?? "",
+          accessToken: i.accessToken ?? "",
+          refreshToken: i.refreshToken ?? "",
         };
         saveAuthSession(migrated);
-        ss.removeItem('internalSession');
+        ss.removeItem("internalSession");
         return migrated;
       }
     }
   } catch (e) {
-    console.error('migrateFromLegacy failed:', e);
+    console.error("migrateFromLegacy failed:", e);
   }
   return null;
 }

@@ -91,10 +91,12 @@ namespace EXPOAPI.Services
 
         Task<Dictionary<string, object?>> GetVendorPerformanceOverviewAsync(
             string vendorName,
+            string plant,
             CancellationToken ct = default);
 
         Task<Dictionary<string, object?>> GetVendorEvaluationSummaryAsync(
             string role,
+            string plant,
             string? vendorName = null,
             CancellationToken ct = default);
     }

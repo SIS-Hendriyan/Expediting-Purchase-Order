@@ -1,16 +1,21 @@
-import { useState, useEffect } from 'react';
-import { Button } from '../ui/button';
-import { Input } from '../ui/input';
-import { Label } from '../ui/label';
-import { Eye, EyeOff, AlertCircle, Info } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
-import logoImage from 'figma:asset/5634ad8959216fdb7980de73de586bfe04c49599.png';
-import deliveryIllustration from 'figma:asset/2689e05f947e86ca8dbff7cd656a0f1867d6d570.png';
+import { useState, useEffect } from "react";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
+import { Eye, EyeOff, AlertCircle, Info } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../ui/tooltip";
+import logoImage from "figma:asset/5634ad8959216fdb7980de73de586bfe04c49599.png";
+import deliveryIllustration from "figma:asset/2689e05f947e86ca8dbff7cd656a0f1867d6d570.png";
 
-import { API } from '../../config';
-import { saveAuthSession } from '../../utils/authSession';
+import { API } from "../../config";
+import { saveAuthSession } from "../../utils/authSession";
 
-export type UserRole = 'admin' | 'vendor' | 'user';
+export type UserRole = "admin" | "vendor" | "user";
 
 export interface User {
   email: string;
@@ -26,14 +31,14 @@ interface LoginProps {
 }
 
 export default function Login({ onLogin }: LoginProps) {
-  const [identifier, setIdentifier] = useState('');
-  const [password, setPassword] = useState('');
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
 
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [sessionExpiredMessage, setSessionExpiredMessage] = useState('');
+  const [error, setError] = useState("");
+  const [sessionExpiredMessage, setSessionExpiredMessage] = useState("");
 
   const [resendTimer, setResendTimer] = useState(0);
 
@@ -45,17 +50,17 @@ export default function Login({ onLogin }: LoginProps) {
   }, [resendTimer]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === "undefined") return;
 
     const params = new URLSearchParams(window.location.search);
-    const err = params.get('err');
+    const err = params.get("err");
 
-    if (err === 'Expired') {
+    if (err === "Expired") {
       setSessionExpiredMessage(
-        'Your session has expired or is no longer authorized. Please sign in again to continue.'
+        "Your session has expired or is no longer authorized. Please sign in again to continue.",
       );
     } else {
-      setSessionExpiredMessage('');
+      setSessionExpiredMessage("");
     }
   }, []);
 
@@ -64,19 +69,19 @@ export default function Login({ onLogin }: LoginProps) {
     if (isLoading) return;
 
     setIsLoading(true);
-    setError('');
-    setSessionExpiredMessage('');
+    setError("");
+    setSessionExpiredMessage("");
 
     const rawId = identifier.trim();
-    const isEmail = rawId.includes('@');
+    const isEmail = rawId.includes("@");
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15_000);
 
     try {
       const res = await fetch(API.LOGIN(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userName: rawId, password }),
         signal: controller.signal,
       });
@@ -91,17 +96,21 @@ export default function Login({ onLogin }: LoginProps) {
         throw new Error(msg);
       }
 
-      if (!json || typeof json !== 'object') {
-        throw new Error('Invalid server response');
+      if (!json || typeof json !== "object") {
+        throw new Error("Invalid server response");
       }
 
       if (json.ResponseCode === 200) {
-        if (isEmail && typeof json.Data === 'string' && json.Data === 'VENDOR') {
+        if (
+          isEmail &&
+          typeof json.Data === "string" &&
+          json.Data === "VENDOR"
+        ) {
           onLogin({
             email: rawId,
-            name: '',
-            role: 'vendor',
-            type: 'VENDOR',
+            name: "",
+            role: "vendor",
+            type: "VENDOR",
           });
           return;
         }
@@ -111,57 +120,65 @@ export default function Login({ onLogin }: LoginProps) {
           const token = json.Data.token;
 
           saveAuthSession({
-            kind: 'INTERNAL',
+            kind: "INTERNAL",
             email: internal.email ?? rawId,
-            name: internal.name ?? '',
-            nrp: internal.nrp ?? '',
-            id: internal.id ?? '',
-            role: internal.role ?? '',
-            department: internal.department ?? '',
-            jobsite: internal.jobsite ?? '',
-            accessToken: token.access ?? '',
-            refreshToken: token.refresh ?? '',
+            name: internal.name ?? "",
+            nrp: internal.nrp ?? "",
+            id: internal.id ?? "",
+            role: internal.role ?? "",
+            department: internal.department ?? "",
+            jobsite: internal.jobsite ?? "",
+            plant: internal.plant ?? "",
+            accessToken: token.access ?? "",
+            refreshToken: token.refresh ?? "",
           });
 
           if (rememberMe && token.access) {
             try {
-              localStorage.setItem('accessToken', token.access);
+              localStorage.setItem("accessToken", token.access);
             } catch {}
           }
 
           const mappedRole: UserRole =
-            String(internal.role || '').toLowerCase() === 'admin' ? 'admin' : 'user';
+            String(internal.role || "").toLowerCase() === "admin"
+              ? "admin"
+              : "user";
 
           onLogin({
             email: internal.email || rawId,
-            name: internal.name || '',
+            name: internal.name || "",
             role: mappedRole,
             company: internal.jobsite || undefined,
-            type: 'INTERNAL',
+            type: "INTERNAL",
           });
           return;
         }
 
         onLogin({
           email: rawId,
-          name: '',
-          role: 'user',
-          type: isEmail ? 'VENDOR' : 'INTERNAL',
+          name: "",
+          role: "user",
+          type: isEmail ? "VENDOR" : "INTERNAL",
         });
         return;
       }
 
       if (json.ResponseCode === 403) {
-        throw new Error(json.Message || 'You currently dont have access to EXPO. Please contact the administrator to request access.');
+        throw new Error(
+          json.Message ||
+            "You currently dont have access to EXPO. Please contact the administrator to request access.",
+        );
       }
 
-      throw new Error(json.Message || 'Login gagal. Periksa kembali kredensial Anda.');
+      throw new Error(
+        json.Message || "Login gagal. Periksa kembali kredensial Anda.",
+      );
     } catch (err: any) {
-      if (err?.name === 'AbortError') {
-        setError('Request timeout. Coba lagi sebentar lagi.');
+      if (err?.name === "AbortError") {
+        setError("Request timeout. Coba lagi sebentar lagi.");
       } else {
         console.error(err);
-        setError(err?.message || 'Terjadi kesalahan saat login.');
+        setError(err?.message || "Terjadi kesalahan saat login.");
       }
     } finally {
       clearTimeout(timeout);
@@ -174,20 +191,20 @@ export default function Login({ onLogin }: LoginProps) {
       className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden"
       style={{
         background:
-          'linear-gradient(135deg, #e8f1f3 0%, #f0f4f5 30%, #fef5ec 70%, #fdf0e5 100%)',
+          "linear-gradient(135deg, #e8f1f3 0%, #f0f4f5 30%, #fef5ec 70%, #fdf0e5 100%)",
       }}
     >
       <div
         className="absolute top-0 left-0 w-72 h-72 rounded-full mix-blend-multiply filter blur-3xl opacity-15 animate-blob"
-        style={{ backgroundColor: '#014357' }}
+        style={{ backgroundColor: "#014357" }}
       />
       <div
         className="absolute top-0 right-0 w-72 h-72 rounded-full mix-blend-multiply filter blur-3xl opacity-15 animate-blob animation-delay-2000"
-        style={{ backgroundColor: '#ED832D' }}
+        style={{ backgroundColor: "#ED832D" }}
       />
       <div
         className="absolute bottom-0 left-1/2 w-72 h-72 rounded-full mix-blend-multiply filter blur-3xl opacity-15 animate-blob animation-delay-4000"
-        style={{ backgroundColor: '#008383' }}
+        style={{ backgroundColor: "#008383" }}
       />
 
       <div className="w-full max-w-6xl relative z-10">
@@ -195,7 +212,11 @@ export default function Login({ onLogin }: LoginProps) {
           <div className="flex flex-col lg:flex-row">
             <div className="lg:w-1/2 p-12 lg:p-16 flex flex-col items-center justify-center bg-gradient-to-br from-white to-blue-50/30">
               <div className="mb-8 lg:absolute lg:top-8 lg:left-8">
-                <img src={logoImage} alt="AlamTri Logo" className="h-16 object-contain" />
+                <img
+                  src={logoImage}
+                  alt="AlamTri Logo"
+                  className="h-16 object-contain"
+                />
               </div>
 
               <div className="w-full max-w-md mb-8">
@@ -207,11 +228,12 @@ export default function Login({ onLogin }: LoginProps) {
               </div>
 
               <div className="text-center max-w-md">
-                <h2 className="mb-3" style={{ color: '#014357' }}>
+                <h2 className="mb-3" style={{ color: "#014357" }}>
                   Streamline Your Procurement
                 </h2>
                 <p className="text-gray-600">
-                  Comprehensive vendor and purchase order management in one unified platform
+                  Comprehensive vendor and purchase order management in one
+                  unified platform
                 </p>
               </div>
             </div>
@@ -219,10 +241,12 @@ export default function Login({ onLogin }: LoginProps) {
             <div className="lg:w-1/2 p-8 lg:p-16 flex items-center justify-center">
               <div className="w-full max-w-md">
                 <div className="mb-10">
-                  <h1 className="mb-2" style={{ color: '#014357' }}>
+                  <h1 className="mb-2" style={{ color: "#014357" }}>
                     Welcome Back
                   </h1>
-                  <p className="text-gray-600">Access your procurement management workspace</p>
+                  <p className="text-gray-600">
+                    Access your procurement management workspace
+                  </p>
                 </div>
 
                 {error && (
@@ -257,9 +281,13 @@ export default function Login({ onLogin }: LoginProps) {
                             className="max-w-xs bg-[#1a1f2e] text-white p-3 rounded-lg shadow-xl border border-gray-700"
                           >
                             <p className="text-sm leading-relaxed">
-                              <span className="font-semibold">Vendor:</span> Use your email address
+                              <span className="font-semibold">Vendor:</span> Use
+                              your email address
                               <br />
-                              <span className="font-semibold">Internal Users:</span> Use your 8 digits NRP
+                              <span className="font-semibold">
+                                Internal Users:
+                              </span>{" "}
+                              Use your 8 digits NRP
                             </p>
                           </TooltipContent>
                         </Tooltip>
@@ -284,7 +312,7 @@ export default function Login({ onLogin }: LoginProps) {
                     <div className="relative">
                       <Input
                         id="password"
-                        type={showPassword ? 'text' : 'password'}
+                        type={showPassword ? "text" : "password"}
                         placeholder="Enter your password"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
@@ -321,7 +349,7 @@ export default function Login({ onLogin }: LoginProps) {
                     <button
                       type="button"
                       className="hover:underline transition-all"
-                      style={{ color: '#008383' }}
+                      style={{ color: "#008383" }}
                     >
                       Forgot password?
                     </button>
@@ -331,7 +359,10 @@ export default function Login({ onLogin }: LoginProps) {
                     type="submit"
                     className="w-full h-12 text-white shadow-lg hover:shadow-xl transition-all duration-300 rounded-xl"
                     disabled={isLoading}
-                    style={{ background: 'linear-gradient(135deg, #014357 0%, #008383 100%)' }}
+                    style={{
+                      background:
+                        "linear-gradient(135deg, #014357 0%, #008383 100%)",
+                    }}
                   >
                     {isLoading ? (
                       <span className="flex items-center gap-2">
@@ -339,18 +370,18 @@ export default function Login({ onLogin }: LoginProps) {
                         Signing in...
                       </span>
                     ) : (
-                      'Sign In'
+                      "Sign In"
                     )}
                   </Button>
                 </form>
 
                 <div className="mt-8 pt-6 border-t border-gray-200">
                   <p className="text-center text-sm text-gray-500">
-                    Need help?{' '}
+                    Need help?{" "}
                     <button
                       type="button"
                       className="hover:underline font-semibold transition-colors"
-                      style={{ color: '#014357' }}
+                      style={{ color: "#014357" }}
                     >
                       Contact Administrator
                     </button>

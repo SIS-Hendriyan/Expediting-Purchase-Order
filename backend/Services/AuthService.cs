@@ -116,19 +116,20 @@ public sealed class AuthService
         using var cn = _db.CreateMain();
 
         const string sql = @"
-SELECT TOP (1)
-    CAST([ID_User] AS nvarchar(50)) AS Id,
-    [NRP],
-    ISNULL([Email], '')      AS Email,
-    ISNULL([Nama], '')       AS Nama,
-    ISNULL([Role], '')       AS [Role],
-    ISNULL([Department], '') AS Department,
-    ISNULL([Jobsite], '')    AS Jobsite,
-    [Password]               AS PasswordHash,
-    [IsActive]               AS IsActive
-FROM [exp].[INT_USER_T]
-WHERE [NRP] = @NRP;
-";
+        SELECT TOP (1)
+            CAST([ID_User] AS nvarchar(50)) AS Id,
+            [user].[NRP],
+            ISNULL([user].[Email], '')      AS Email,
+            ISNULL([user].[Nama], '')       AS Nama,
+            ISNULL([user].[Role], '')       AS [Role],
+            ISNULL([user].[Department], '') AS Department,
+            ISNULL([user].[Jobsite], '')    AS Jobsite,
+            [user].[IsActive]               AS IsActive,
+            jobsite.Code                    AS Plant
+        FROM [exp].[INT_USER_T] AS [user]
+        LEFT JOIN [exp].JOBSITE_T jobsite ON jobsite.Name = [user].Jobsite
+        WHERE [user].[NRP] = @NRP AND [user].DeletedAt IS NULL;
+        ";
 
         var row = await cn.QuerySingleOrDefaultAsync<InternalUserRow>(
             new CommandDefinition(sql, new { NRP = nrp }, cancellationToken: ct)
@@ -150,7 +151,8 @@ WHERE [NRP] = @NRP;
             ["name"] = row.Nama ?? "",
             ["role"] = row.Role ?? "",
             ["department"] = row.Department ?? "",
-            ["jobsite"] = row.Jobsite ?? ""
+            ["jobsite"] = row.Jobsite ?? "",
+            ["plant"] = row.Plant ?? ""
         };
     }
 

@@ -238,6 +238,7 @@ namespace EXPOAPI.Controllers
         [HttpGet("vendor-performance")]
         public async Task<IActionResult> VendorPerformance(
             [FromQuery(Name = "vendorName")] string? vendorName,
+             [FromQuery(Name = "plant")] string? plant,
             CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(vendorName))
@@ -245,7 +246,7 @@ namespace EXPOAPI.Controllers
 
             try
             {
-                var data = await _po.GetVendorPerformanceOverviewAsync(vendorName, ct);
+                var data = await _po.GetVendorPerformanceOverviewAsync(vendorName, plant, ct);
                 return OkResponse("Vendor performance overview retrieved", data);
             }
             catch
@@ -258,6 +259,7 @@ namespace EXPOAPI.Controllers
         public async Task<IActionResult> VendorEvaluation(
             [FromQuery] string? role,
             [FromQuery(Name = "vendorName")] string? vendorName,
+            [FromQuery(Name = "plant")] string? plant,
             CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(role))
@@ -265,7 +267,7 @@ namespace EXPOAPI.Controllers
 
             try
             {
-                var data = await _po.GetVendorEvaluationSummaryAsync(role, vendorName, ct);
+                var data = await _po.GetVendorEvaluationSummaryAsync(role, vendorName,plant, ct);
                 return OkResponse("Vendor evaluation summary retrieved", data);
             }
             catch

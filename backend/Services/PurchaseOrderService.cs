@@ -811,6 +811,7 @@ namespace EXPOAPI.Services
 
         public async Task<Dictionary<string, object?>> GetVendorPerformanceOverviewAsync(
             string vendorName,
+            string plant,
             CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(vendorName))
@@ -820,6 +821,11 @@ namespace EXPOAPI.Services
 
             var dp = new DynamicParameters();
             dp.Add("VendorName", vendorName.Trim());
+            if (!string.IsNullOrWhiteSpace(plant))
+            {
+                dp.Add("plant", plant.Trim());
+
+            }
 
             try
             {
@@ -841,6 +847,7 @@ namespace EXPOAPI.Services
 
         public async Task<Dictionary<string, object?>> GetVendorEvaluationSummaryAsync(
             string role,
+            string plant,
             string? vendorName = null,
             CancellationToken ct = default)
         {
@@ -850,6 +857,13 @@ namespace EXPOAPI.Services
             dp.Add("Role", role?.Trim() ?? "");
             if (!string.IsNullOrWhiteSpace(vendorName))
                 dp.Add("VendorName", vendorName.Trim());
+
+
+            if (!string.IsNullOrWhiteSpace(plant))
+            {
+                dp.Add("plant", plant.Trim());
+
+            }
 
             try
             {
